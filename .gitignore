@@ -1,0 +1,11 @@
+.env
+dump.py
+file_tree.txt
+.venv/
+__pycache__
+
+media/
+assets/
+data/
+mekanism/
+META-INF/

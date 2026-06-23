@@ -1,0 +1,16 @@
+python3 scripts/import_legacy_from_uuid_yaml.py \
+  --file /home/mironoouv/minecraft_server/plugins/Auth/players.yml \
+  --enable-legacy \        
+  --revoke-refresh-sessions
+
+
+//dry
+python scripts/import_legacy_from_uuid_yaml.py \
+  --file /home/mironoouv/import/players.yml \
+  --dry-run \
+  --enable-legacy \
+  --revoke-refresh-sessions
+
+//normal
+python scripts/import_legacy_from_uuid_yaml.py \
+  --file /home/mironoouv/import/players.yml
