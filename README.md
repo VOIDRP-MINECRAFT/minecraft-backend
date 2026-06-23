@@ -1,86 +1,137 @@
-# VoidRP Backend
+# ⚙️ VoidRP Backend
 
-FastAPI бэкенд для игрового проекта VoidRP — единая аккаунтная платформа, игровая статистика, донат-интеграция и API для лаунчера.
+> Центральный REST API сервера VoidRP — авторизация, нации, экономика, античит, донат.
 
-## Стек
+![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-latest-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white)
+![Alembic](https://img.shields.io/badge/Alembic-migrations-lightgrey)
+![License](https://img.shields.io/badge/license-proprietary-red)
 
-- **Python 3.12** · FastAPI · SQLAlchemy 2.0 · Alembic · Pydantic v2
-- **PostgreSQL** — основная БД
-- **Redis** — опционально (для будущего кэширования)
-- **Argon2** (pwdlib) — хэширование паролей
-- **JWT** — access token; opaque refresh token хранится в БД
+---
 
-## Быстрый старт
+## 🗺️ Место в экосистеме
+
+```
+  Лаунчер (Electron / JavaFX)
+        │ play-ticket auth (HTTPS)
+        ▼
+┌──────────────────────────────┐
+│   minecraft-backend  ◄───────┼── Сайт (Vue 3)  [JWT]
+│   FastAPI · PostgreSQL       │
+│   void-rp.ru / api/v1        │
+└───────────┬──────────────────┘
+            │ X-Game-Auth-Secret (HTTP)
+            ▼
+  Minecraft Server (Mohist 1.21.1)
+  └── gamesync-plugin · anticheat · cpm-companion
+```
+
+---
+
+## ✨ Возможности
+
+- **Авторизация** — регистрация, JWT access + opaque refresh токены, legacy Minecraft auth
+- **Play-ticket flow** — одноразовые тикеты для входа в игру (лаунчер → backend → сервер)
+- **Нации и альянсы** — создание, членство, казна, статистика, дипломатия, голосования
+- **Динамическая экономика** — рыночные цены предметов, история сделок
+- **Battle Pass** — сезонная система, Premium-статус, синхронизация с плагином
+- **Ежедневные квесты** — пул заданий, прогресс, интеграция с плагином
+- **Античит** — приём отчётов о нарушениях, снимков модов, детектов инъекций
+- **Admin Panel API** — управление игроками, вердикты по модам, действия
+- **Рефералы и донат** — интеграция с платёжной системой
+- **Медиа** — аватары, скины, статические файлы через `/media`
+
+---
+
+## 🔐 Три уровня авторизации
+
+| Слой | Заголовок | Используется |
+|---|---|---|
+| Пользователь | `Authorization: Bearer <JWT>` | Сайт, лаунчер |
+| Администратор | `X-Admin-Api-Secret` | Admin panel |
+| Игровой сервер | `X-Game-Auth-Secret` | Плагины, моды |
+
+---
+
+## 📋 Требования
+
+| Компонент | Версия |
+|---|---|
+| Python | 3.12+ |
+| PostgreSQL | 15+ |
+| Redis | опционально |
+
+---
+
+## 🚀 Быстрый старт
 
 ```bash
 cd minecraft_backend
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env           # заполни DATABASE_URL, JWT_SECRET_KEY и т.д.
-alembic upgrade head
+cp .env.example .env          # заполни DATABASE_URL, JWT_SECRET_KEY и др.
+
+alembic upgrade head          # применить все миграции
 uvicorn apps.api.app.main:app --reload
 ```
 
-Swagger UI: http://127.0.0.1:8000/docs
+**Swagger UI:** `http://127.0.0.1:8000/docs`
 
-## Структура
-
-```
-apps/api/app/
-├── api/routes/        # маршруты по доменам (auth, me, nations, battlepass, …)
-├── models/            # SQLAlchemy ORM модели
-├── schemas/           # Pydantic схемы запросов/ответов
-├── dependencies/      # FastAPI DI: auth.py, admin.py, server_auth.py
-├── repositories/      # слой доступа к данным
-├── services/          # бизнес-логика (battlepass, easydonate, rcon, …)
-├── core/              # security, user_messages, rcon_client
-└── config.py          # Settings (pydantic-settings, .env)
-```
-
-## Слои авторизации
-
-| Слой | Заголовок | Использование |
-|---|---|---|
-| Пользователь | `Authorization: Bearer <JWT>` | Все пользовательские маршруты |
-| Админ | `X-Admin-Api-Secret` | `/api/v1/admin/*` |
-| Игровой сервер | `X-Game-Auth-Secret` | `/api/v1/game-sync/*`, `/api/v1/nation-stats/*` |
-
-## Основные домены
-
-- **auth** — регистрация, логин, refresh, logout, верификация email, сброс пароля
-- **me / account** — профиль, смена пароля, привязка ника
-- **nations / alliances** — государства, альянсы, статистика, активность
-- **battlepass** — Premium подписки, прогресс, RCON-интеграция
-- **market** — внутриигровой рынок (EconomyMarketItem, транзакции)
-- **admin** — дашборд, донат-отчётность, управление игроками
-- **game-sync** — синхронизация данных от Paper-плагина
-
-## Команды
+### Полезные команды
 
 ```bash
-# Миграции
-alembic upgrade head
+# Создать новую миграцию после изменения модели
 alembic revision --autogenerate -m "описание"
 
 # Тесты
 pytest
-pytest tests/test_auth_flow.py::test_name
 
-# Линтер / форматирование
-ruff check .
-ruff format .
+# Lint / format
+ruff check . && ruff format .
 ```
 
-## Переменные окружения (ключевые)
+---
 
-| Переменная | Описание |
+## 🏗️ Структура
+
+```
+apps/api/app/
+├── main.py                  # точка входа, create_app()
+├── config.py                # Settings (pydantic-settings, .env)
+├── api/routes/              # маршруты по доменам
+│   ├── auth.py              # /auth/register, /auth/login, /auth/refresh
+│   ├── me.py                # /me/profile, /me/skin
+│   ├── nations.py           # /nations/*
+│   ├── alliances.py         # /alliances/*
+│   ├── market.py            # /market/items
+│   ├── battlepass.py        # /battlepass/*
+│   ├── daily_quests.py      # /daily-quests/*
+│   ├── game_sync_*.py       # /server/* (X-Game-Auth-Secret)
+│   └── admin_*.py           # /admin/* (X-Admin-Api-Secret)
+├── models/                  # SQLAlchemy 2.0 ORM модели
+├── schemas/                 # Pydantic v2 схемы запрос/ответ
+├── repositories/            # слой доступа к данным
+├── dependencies/            # FastAPI DI: auth.py, admin.py, server_auth.py
+└── core/
+    ├── security.py          # JWT, Argon2 хэширование
+    └── user_messages.py     # локализация ошибок EN → RU
+```
+
+---
+
+## 🔗 Связанные репозитории
+
+| Репо | Связь |
 |---|---|
-| `DATABASE_URL` | PostgreSQL DSN |
-| `JWT_SECRET_KEY` | секрет для подписи JWT |
-| `ADMIN_API_SECRET` | секрет для X-Admin-Api-Secret |
-| `GAME_AUTH_SHARED_SECRET` | секрет для X-Game-Auth-Secret |
-| `RCON_HOST / RCON_PORT / RCON_PASSWORD` | RCON к Minecraft серверу |
-| `EASYDONATE_SHOP_KEY` | ключ магазина EasyDonate |
-| `YANDEX_METRIKA_TOKEN / COUNTER_ID` | Яндекс.Метрика |
-| `EMAIL_BACKEND` | `logging` (дев) или `resend` (прод) |
-| `MINECRAFT_SERVER_HOST / PORT` | для опроса статуса через mcstatus |
+| [voidrp-site](https://github.com/VOIDRP-MINECRAFT/voidrp-site) | Сайт — основной потребитель API |
+| [voidrp-launcher-vue](https://github.com/VOIDRP-MINECRAFT/voidrp-launcher-vue) | Лаунчер — play-ticket auth |
+| [voidrp-gamesync-plugin](https://github.com/VOIDRP-MINECRAFT/voidrp-gamesync-plugin) | Плагин — синхронизация через X-Game-Auth-Secret |
+| [voidrp-anticheat](https://github.com/VOIDRP-MINECRAFT/voidrp-anticheat) | Античит мод — отправляет отчёты в `/anticheat/*` |
+
+---
+
+<div align="center">
+<a href="https://void-rp.ru">🌐 Сайт</a> ·
+<a href="https://github.com/VOIDRP-MINECRAFT">🏠 Организация</a>
+</div>
