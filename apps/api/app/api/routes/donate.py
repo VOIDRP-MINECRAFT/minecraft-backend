@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 from apps.api.app.config import get_settings
 from apps.api.app.dependencies.auth import get_current_user
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 from apps.api.app.services.easydonate_service import EasyDonateError, EasyDonateService
 
@@ -16,8 +18,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/donate", tags=["donate"])
 
 
-def get_donate_service() -> EasyDonateService:
-    return EasyDonateService(settings=get_settings())
+def get_donate_service(
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> EasyDonateService:
+    # Scope products/payment to the active server's EasyDonate shop so commands
+    # are delivered to that server; falls back to the global default when unset.
+    return EasyDonateService(settings=get_settings(), server_id=server.easydonate_server_id)
 
 
 class PaymentCreateRequest(BaseModel):

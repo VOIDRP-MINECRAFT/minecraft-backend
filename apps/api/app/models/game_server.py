@@ -78,6 +78,9 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # ── Features / integrations ───────────────────────────────────────────
     # Web map (Bluemap/Dynmap) URL for this server; empty hides/disables the map tab.
     map_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # EasyDonate server id this game server maps to. Products/commands for a
+    # purchase are delivered to this EasyDonate server. Null → use the global default.
+    easydonate_server_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Feature flags controlling which tabs/sections appear in launcher & site.
     features: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=default_features)
 

@@ -50,6 +50,7 @@ class GameServerAdmin(GameServerPublic):
     pack_base_url: str | None = None
     status_host: str | None = None
     status_port: int | None = None
+    easydonate_server_id: int | None = None
     game_auth_secret: str
 
     model_config = {"from_attributes": True}
@@ -86,6 +87,7 @@ class GameServerCreate(BaseModel):
 
     map_url: str | None = None
     features: dict[str, bool] | None = None
+    easydonate_server_id: int | None = None
 
     # If omitted, a strong secret is generated server-side.
     game_auth_secret: str | None = None
@@ -121,3 +123,4 @@ class GameServerUpdate(BaseModel):
 
     map_url: str | None = None
     features: dict[str, bool] | None = None
+    easydonate_server_id: int | None = None

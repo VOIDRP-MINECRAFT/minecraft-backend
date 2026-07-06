@@ -38,10 +38,12 @@ class EasyDonateError(Exception):
 
 
 class EasyDonateService:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, server_id: int | None = None) -> None:
         s = settings or get_settings()
         self._key = s.easydonate_shop_key
-        self._server_id = s.easydonate_server_id
+        # Per-server override (from game_servers.easydonate_server_id) falls back
+        # to the global default so single-server setups keep working.
+        self._server_id = server_id if server_id is not None else s.easydonate_server_id
         self._headers = {**_HEADERS, "Shop-Key": self._key}
 
     def _get(self, path: str, params: dict | None = None) -> dict:
