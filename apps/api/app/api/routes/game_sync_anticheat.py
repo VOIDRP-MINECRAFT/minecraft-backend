@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_auth import require_game_auth_secret
+from apps.api.app.dependencies.server_auth import require_game_auth_secret, require_game_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.anticheat import (
     AnticheatInjectionReport,
     AnticheatModSnapshot,
@@ -115,9 +116,11 @@ class ModSnapshotRequest(BaseModel):
 def ingest_violation(
     req: ViolationRequest,
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
 ) -> None:
     record = AnticheatViolation(
         id=str(uuid4()),
+        server_id=server.id,
         player_uuid=req.player_uuid,
         player_nick=req.player_nick,
         check_type=req.check_type,
@@ -135,10 +138,12 @@ def ingest_violation(
 def ingest_mod_snapshot(
     req: ModSnapshotRequest,
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
 ) -> None:
     suspicious = _find_suspicious(req.mods, session)
     record = AnticheatModSnapshot(
         id=str(uuid4()),
+        server_id=server.id,
         player_uuid=req.player_uuid,
         player_nick=req.player_nick,
         mods=json.dumps(req.mods),
@@ -161,9 +166,11 @@ class InjectionReportRequest(BaseModel):
 def ingest_injection_report(
     req: InjectionReportRequest,
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
 ) -> None:
     record = AnticheatInjectionReport(
         id=str(uuid4()),
+        server_id=server.id,
         player_uuid=req.player_uuid,
         player_nick=req.player_nick,
         java_agents=json.dumps(req.java_agents),
