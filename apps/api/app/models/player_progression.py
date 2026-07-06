@@ -5,7 +5,12 @@ from datetime import datetime
 from sqlalchemy import DateTime, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import (
+    Base,
+    ServerScopedMixin,
+    TimestampMixin,
+    UuidPrimaryKeyMixin,
+)
 
 PROGRESSION_TIERS = [
     "create_age",
@@ -28,10 +33,11 @@ TIER_LABELS: dict[str, str] = {
 }
 
 
-class PlayerProgression(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class PlayerProgression(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "player_progressions"
     __table_args__ = (
         UniqueConstraint(
+            "server_id",
             "minecraft_nickname_normalized",
             "tier_name",
             name="uq_player_progression_tier",

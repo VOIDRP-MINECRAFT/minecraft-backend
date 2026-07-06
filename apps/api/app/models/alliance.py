@@ -8,7 +8,7 @@ from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, 
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base
+from apps.api.app.models.base import Base, ServerScopedMixin
 
 
 class AllianceType(str, enum.Enum):
@@ -43,11 +43,14 @@ class AllianceVoteChoice(str, enum.Enum):
     veto = "veto"
 
 
-class Alliance(Base):
+class Alliance(ServerScopedMixin, Base):
     __tablename__ = "alliances"
+    __table_args__ = (
+        UniqueConstraint("server_id", "slug", name="uq_alliances_server_slug"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(80), nullable=False)
     tag: Mapped[str] = mapped_column(String(12), nullable=False)
     alliance_type: Mapped[str] = mapped_column(String(32), nullable=False, default=AllianceType.un.value)
@@ -73,7 +76,7 @@ class Alliance(Base):
     proposals: Mapped[list["AllianceProposal"]] = relationship("AllianceProposal", back_populates="alliance", cascade="all, delete-orphan")
 
 
-class AllianceMember(Base):
+class AllianceMember(ServerScopedMixin, Base):
     __tablename__ = "alliance_members"
     __table_args__ = (
         UniqueConstraint("alliance_id", "nation_id", name="uq_alliance_members_alliance_nation"),
@@ -89,7 +92,7 @@ class AllianceMember(Base):
     alliance: Mapped["Alliance"] = relationship("Alliance", back_populates="members")
 
 
-class AllianceProposal(Base):
+class AllianceProposal(ServerScopedMixin, Base):
     __tablename__ = "alliance_proposals"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -113,7 +116,7 @@ class AllianceProposal(Base):
     votes: Mapped[list["AllianceVote"]] = relationship("AllianceVote", back_populates="proposal", cascade="all, delete-orphan")
 
 
-class AllianceVote(Base):
+class AllianceVote(ServerScopedMixin, Base):
     __tablename__ = "alliance_votes"
     __table_args__ = (
         UniqueConstraint("proposal_id", "nation_id", name="uq_alliance_votes_proposal_nation"),

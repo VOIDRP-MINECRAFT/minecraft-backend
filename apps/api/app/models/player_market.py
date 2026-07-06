@@ -8,10 +8,10 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, 
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, TimestampMixin, UuidPrimaryKeyMixin
 
 
-class PlayerMarketSellOrder(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class PlayerMarketSellOrder(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "player_market_sell_orders"
 
     seller_player_name: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
@@ -34,7 +34,7 @@ class PlayerMarketSellOrder(UuidPrimaryKeyMixin, TimestampMixin, Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
-class PlayerMarketBuyOrder(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class PlayerMarketBuyOrder(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "player_market_buy_orders"
 
     buyer_player_name: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
@@ -58,7 +58,7 @@ class PlayerMarketBuyOrder(UuidPrimaryKeyMixin, TimestampMixin, Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
-class PlayerMarketTrade(UuidPrimaryKeyMixin, Base):
+class PlayerMarketTrade(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     __tablename__ = "player_market_trades"
 
     sell_order_id: Mapped[UUID | None] = mapped_column(
@@ -97,7 +97,7 @@ class PlayerMarketTrade(UuidPrimaryKeyMixin, Base):
     buy_order: Mapped["PlayerMarketBuyOrder"] = relationship("PlayerMarketBuyOrder")
 
 
-class PlayerMarketPendingDelivery(UuidPrimaryKeyMixin, Base):
+class PlayerMarketPendingDelivery(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     __tablename__ = "player_market_pending_deliveries"
 
     player_name: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
@@ -134,7 +134,7 @@ class PlayerMarketPendingDelivery(UuidPrimaryKeyMixin, Base):
     )
 
 
-class PlayerMarketWebAction(UuidPrimaryKeyMixin, Base):
+class PlayerMarketWebAction(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     """Pending actions created by the browser (WebGUI) that require Vault/inventory processing by the plugin."""
     __tablename__ = "player_market_web_actions"
 

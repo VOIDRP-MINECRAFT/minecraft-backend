@@ -7,13 +7,13 @@ from uuid import UUID
 from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, UuidPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from apps.api.app.models.user import User
 
 
-class ReferralRewardPeriod(UuidPrimaryKeyMixin, Base):
+class ReferralRewardPeriod(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     __tablename__ = "referral_reward_periods"
 
     user_id: Mapped[UUID] = mapped_column(

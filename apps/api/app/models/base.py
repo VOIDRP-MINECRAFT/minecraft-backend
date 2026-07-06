@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, MetaData, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import DateTime, ForeignKey, MetaData, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_label)s",
@@ -30,3 +30,19 @@ class TimestampMixin:
 
 class UuidPrimaryKeyMixin:
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+
+
+class ServerScopedMixin:
+    """Scopes a game-data table to a :class:`GameServer` via ``server_id``.
+
+    The account layer (users / player_accounts) stays global; game data
+    (nations, economy, stats, tickets ...) is partitioned per server.
+    """
+
+    @declared_attr
+    def server_id(cls) -> Mapped[UUID]:  # noqa: N805
+        return mapped_column(
+            ForeignKey("game_servers.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )

@@ -7,14 +7,14 @@ from uuid import UUID
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, TimestampMixin, UuidPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from apps.api.app.models.nation import Nation
     from apps.api.app.models.user import User
 
 
-class NationMemberStatSnapshot(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class NationMemberStatSnapshot(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "nation_member_stat_snapshots"
     __table_args__ = (
         UniqueConstraint(

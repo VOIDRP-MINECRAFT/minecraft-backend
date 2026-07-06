@@ -6,14 +6,14 @@ from uuid import UUID
 from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, TimestampMixin, UuidPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from apps.api.app.models.nation import Nation
     from apps.api.app.models.user import User
 
 
-class NationMember(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class NationMember(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "nation_members"
     __table_args__ = (
         UniqueConstraint("nation_id", "user_id", name="uq_nation_members_nation_user"),

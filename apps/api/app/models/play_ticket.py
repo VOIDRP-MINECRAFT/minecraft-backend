@@ -7,13 +7,13 @@ from uuid import UUID
 from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, UuidPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from apps.api.app.models.user import User
 
 
-class PlayTicket(UuidPrimaryKeyMixin, Base):
+class PlayTicket(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     __tablename__ = "play_tickets"
 
     user_id: Mapped[UUID] = mapped_column(

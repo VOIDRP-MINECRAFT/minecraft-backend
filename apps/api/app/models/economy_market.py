@@ -3,17 +3,25 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import (
+    Base,
+    ServerScopedMixin,
+    TimestampMixin,
+    UuidPrimaryKeyMixin,
+)
 
 
-class EconomyMarketItem(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class EconomyMarketItem(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "economy_market_items"
+    __table_args__ = (
+        UniqueConstraint("server_id", "material", name="uq_economy_market_items_server_material"),
+    )
 
-    material: Mapped[str] = mapped_column(String(192), nullable=False, unique=True, index=True)
+    material: Mapped[str] = mapped_column(String(192), nullable=False, index=True)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     group_key: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
 
@@ -30,7 +38,7 @@ class EconomyMarketItem(UuidPrimaryKeyMixin, TimestampMixin, Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
-class PriceHistorySnapshot(Base):
+class PriceHistorySnapshot(ServerScopedMixin, Base):
     __tablename__ = "price_history_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -44,7 +52,7 @@ class PriceHistorySnapshot(Base):
     )
 
 
-class EconomyShopTransaction(UuidPrimaryKeyMixin, Base):
+class EconomyShopTransaction(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     __tablename__ = "economy_shop_transactions"
 
     player_name: Mapped[str] = mapped_column(String(16), nullable=False)

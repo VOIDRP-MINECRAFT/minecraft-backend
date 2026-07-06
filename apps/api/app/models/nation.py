@@ -3,10 +3,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import (
+    Base,
+    ServerScopedMixin,
+    TimestampMixin,
+    UuidPrimaryKeyMixin,
+)
 
 if TYPE_CHECKING:
     from apps.api.app.models.nation_join_request import NationJoinRequest
@@ -14,10 +19,13 @@ if TYPE_CHECKING:
     from apps.api.app.models.user import User
 
 
-class Nation(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class Nation(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "nations"
+    __table_args__ = (
+        UniqueConstraint("server_id", "slug", name="uq_nations_server_slug"),
+    )
 
-    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(64), nullable=False)
     tag: Mapped[str] = mapped_column(String(8), nullable=False)
     short_description: Mapped[str | None] = mapped_column(String(140), nullable=True)

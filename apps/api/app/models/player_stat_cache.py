@@ -3,18 +3,30 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import (
+    Base,
+    ServerScopedMixin,
+    TimestampMixin,
+    UuidPrimaryKeyMixin,
+)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from apps.api.app.models.user import User
 
 
-class PlayerStatCache(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class PlayerStatCache(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "player_stat_cache"
+    __table_args__ = (
+        UniqueConstraint(
+            "server_id",
+            "minecraft_nickname_normalized",
+            name="uq_player_stat_cache_server_nick",
+        ),
+    )
 
     user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -23,7 +35,7 @@ class PlayerStatCache(UuidPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     minecraft_nickname: Mapped[str] = mapped_column(String(16), nullable=False)
-    minecraft_nickname_normalized: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    minecraft_nickname_normalized: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
 
     total_playtime_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     pvp_kills: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

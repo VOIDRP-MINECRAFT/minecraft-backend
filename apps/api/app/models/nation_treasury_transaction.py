@@ -8,7 +8,7 @@ from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, UuidPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from apps.api.app.models.alliance import Alliance
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from apps.api.app.models.user import User
 
 
-class NationTreasuryTransaction(UuidPrimaryKeyMixin, Base):
+class NationTreasuryTransaction(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     __tablename__ = "nation_treasury_transactions"
 
     transaction_type: Mapped[str] = mapped_column(String(32), nullable=False)

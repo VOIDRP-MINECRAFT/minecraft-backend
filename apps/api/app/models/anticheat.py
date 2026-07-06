@@ -3,10 +3,10 @@ from __future__ import annotations
 from sqlalchemy import Boolean, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, TimestampMixin, UuidPrimaryKeyMixin
 
 
-class AnticheatViolation(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class AnticheatViolation(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "anticheat_violations"
 
     player_uuid: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
@@ -23,7 +23,7 @@ class AnticheatViolation(UuidPrimaryKeyMixin, TimestampMixin, Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
-class AnticheatModSnapshot(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class AnticheatModSnapshot(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "anticheat_mod_snapshots"
 
     player_uuid: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
@@ -45,7 +45,7 @@ class ModVerdict(UuidPrimaryKeyMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class AnticheatInjectionReport(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class AnticheatInjectionReport(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     """Client-side injection detection report (agents, native libs)."""
     __tablename__ = "anticheat_injection_reports"
 

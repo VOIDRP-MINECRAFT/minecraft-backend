@@ -8,13 +8,13 @@ from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, fun
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, TimestampMixin, UuidPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from apps.api.app.models.nation import Nation
 
 
-class NationMarketListing(UuidPrimaryKeyMixin, TimestampMixin, Base):
+class NationMarketListing(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     __tablename__ = "nation_market_listings"
 
     nation_id: Mapped[UUID] = mapped_column(
@@ -51,7 +51,7 @@ class NationMarketListing(UuidPrimaryKeyMixin, TimestampMixin, Base):
     nation: Mapped["Nation"] = relationship("Nation")
 
 
-class NationMarketOrder(UuidPrimaryKeyMixin, Base):
+class NationMarketOrder(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     __tablename__ = "nation_market_orders"
 
     listing_id: Mapped[UUID] = mapped_column(

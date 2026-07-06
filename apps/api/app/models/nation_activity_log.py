@@ -7,14 +7,14 @@ from uuid import UUID
 from sqlalchemy import DateTime, ForeignKey, JSON, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apps.api.app.models.base import Base, UuidPrimaryKeyMixin
+from apps.api.app.models.base import Base, ServerScopedMixin, UuidPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from apps.api.app.models.nation import Nation
     from apps.api.app.models.user import User
 
 
-class NationActivityLog(UuidPrimaryKeyMixin, Base):
+class NationActivityLog(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     __tablename__ = "nation_activity_logs"
 
     nation_id: Mapped[UUID] = mapped_column(
