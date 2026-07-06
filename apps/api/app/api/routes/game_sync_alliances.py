@@ -132,6 +132,7 @@ def apply_to_alliance(
             raise HTTPException(status_code=400, detail="Заявка от этого государства уже на рассмотрении.")
 
     proposal = AllianceProposal(
+        server_id=service.server_id,
         alliance_id=alliance.id,
         proposer_nation_id=nation.id,
         proposal_type="add_member",

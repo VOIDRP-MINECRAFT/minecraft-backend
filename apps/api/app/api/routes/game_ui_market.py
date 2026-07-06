@@ -9,7 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.server_auth import require_game_server
+from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_market import PlayerMarketWebAction
 from apps.api.app.schemas.player_market import (
@@ -26,8 +29,11 @@ from apps.api.app.services.player_market_service import PlayerMarketService
 router = APIRouter(prefix="/game-ui/market", tags=["game-ui", "player-market"])
 
 
-def _service(db: Annotated[Session, Depends(get_db_session)]) -> PlayerMarketService:
-    return PlayerMarketService(db)
+def _service(
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> PlayerMarketService:
+    return PlayerMarketService(db, server.id)
 
 
 # ---------------------------------------------------------------------------
@@ -108,12 +114,14 @@ def create_pending_action(
     req: WebActionRequest,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ):
     allowed = {"buy", "sell", "cancel_buy", "cancel_sell", "pickup"}
     if req.action_type not in allowed:
         raise HTTPException(status_code=400, detail=f"Unknown action_type: {req.action_type}")
 
     action = PlayerMarketWebAction(
+        server_id=server.id,
         player_name=player.minecraft_nickname,
         action_type=req.action_type,
         payload_json=req.payload,
@@ -155,9 +163,12 @@ router_plugin = APIRouter(prefix="/game-sync/market-web-actions", tags=["game-sy
 def poll_pending_actions(
     player_name: str | None = None,
     db: Session = Depends(get_db_session),
-    _: None = Depends(require_game_auth_secret),
+    server: GameServer = Depends(require_game_server),
 ):
-    q = db.query(PlayerMarketWebAction).filter(PlayerMarketWebAction.status == "pending")
+    q = db.query(PlayerMarketWebAction).filter(
+        PlayerMarketWebAction.server_id == server.id,
+        PlayerMarketWebAction.status == "pending",
+    )
     if player_name:
         q = q.filter(PlayerMarketWebAction.player_name == player_name)
     actions = q.order_by(PlayerMarketWebAction.created_at).limit(50).all()

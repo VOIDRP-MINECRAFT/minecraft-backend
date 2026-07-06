@@ -205,12 +205,14 @@ class NationStatsService:
 
             cache_entry = self.session.execute(
                 select(PlayerStatCache).where(
-                    PlayerStatCache.minecraft_nickname_normalized == normalized
+                    PlayerStatCache.server_id == self.server_id,
+                    PlayerStatCache.minecraft_nickname_normalized == normalized,
                 )
             ).scalar_one_or_none()
 
             if cache_entry is None:
                 cache_entry = PlayerStatCache(
+                    server_id=self.server_id,
                     minecraft_nickname=item.minecraft_nickname.strip(),
                     minecraft_nickname_normalized=normalized,
                 )

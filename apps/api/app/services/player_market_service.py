@@ -73,8 +73,9 @@ class PlayerMarketConflictError(PlayerMarketError):
 
 
 class PlayerMarketService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
 
     # ── Create orders ──────────────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ class PlayerMarketService:
 
         active_count = self.session.scalar(
             select(func.count()).select_from(PlayerMarketSellOrder).where(
+                PlayerMarketSellOrder.server_id == self.server_id,
                 PlayerMarketSellOrder.seller_player_name == payload.seller_player_name,
                 PlayerMarketSellOrder.status.in_(ACTIVE_STATUSES),
             )
@@ -100,6 +102,7 @@ class PlayerMarketService:
 
         existing_volume = self.session.scalar(
             select(func.sum(PlayerMarketSellOrder.remaining_amount)).where(
+                PlayerMarketSellOrder.server_id == self.server_id,
                 PlayerMarketSellOrder.seller_player_name.ilike(payload.seller_player_name),
                 PlayerMarketSellOrder.item_key == item_key,
                 PlayerMarketSellOrder.status.in_(ACTIVE_STATUSES),
@@ -117,6 +120,7 @@ class PlayerMarketService:
             meta["is_premium"] = True
 
         order = PlayerMarketSellOrder(
+            server_id=self.server_id,
             seller_player_name=payload.seller_player_name,
             item_key=item_key,
             display_name=payload.display_name,
@@ -162,6 +166,7 @@ class PlayerMarketService:
 
         active_count = self.session.scalar(
             select(func.count()).select_from(PlayerMarketBuyOrder).where(
+                PlayerMarketBuyOrder.server_id == self.server_id,
                 PlayerMarketBuyOrder.buyer_player_name == payload.buyer_player_name,
                 PlayerMarketBuyOrder.status.in_(ACTIVE_STATUSES),
             )
@@ -173,6 +178,7 @@ class PlayerMarketService:
 
         existing_volume = self.session.scalar(
             select(func.sum(PlayerMarketBuyOrder.remaining_amount)).where(
+                PlayerMarketBuyOrder.server_id == self.server_id,
                 PlayerMarketBuyOrder.buyer_player_name.ilike(payload.buyer_player_name),
                 PlayerMarketBuyOrder.item_key == item_key,
                 PlayerMarketBuyOrder.status.in_(ACTIVE_STATUSES),
@@ -186,6 +192,7 @@ class PlayerMarketService:
         self._ensure_market_item(item_key, payload.display_name, float(unit_price))
 
         order = PlayerMarketBuyOrder(
+            server_id=self.server_id,
             buyer_player_name=payload.buyer_player_name,
             item_key=item_key,
             display_name=payload.display_name,
@@ -217,7 +224,10 @@ class PlayerMarketService:
     def cancel_sell_order(self, order_id: UUID, requester: str) -> PlayerMarketCancelSellOrderResponse:
         order = self.session.execute(
             select(PlayerMarketSellOrder)
-            .where(PlayerMarketSellOrder.id == order_id)
+            .where(
+                PlayerMarketSellOrder.id == order_id,
+                PlayerMarketSellOrder.server_id == self.server_id,
+            )
             .with_for_update()
         ).scalar_one_or_none()
 
@@ -255,7 +265,10 @@ class PlayerMarketService:
     def cancel_buy_order(self, order_id: UUID, requester: str) -> PlayerMarketCancelBuyOrderResponse:
         order = self.session.execute(
             select(PlayerMarketBuyOrder)
-            .where(PlayerMarketBuyOrder.id == order_id)
+            .where(
+                PlayerMarketBuyOrder.id == order_id,
+                PlayerMarketBuyOrder.server_id == self.server_id,
+            )
             .with_for_update()
         ).scalar_one_or_none()
 
@@ -294,7 +307,7 @@ class PlayerMarketService:
     def get_order_book(self, item_key: str, exclude_player: str | None = None) -> PlayerMarketOrderBookResponse:
         item_key = self._normalize_key(item_key)
 
-        params: dict = {"key": item_key}
+        params: dict = {"key": item_key, "sid": str(self.server_id)}
         player_filter_sell = ""
         player_filter_buy  = ""
         if exclude_player:
@@ -306,7 +319,7 @@ class PlayerMarketService:
             text(f"""
                 SELECT unit_price, SUM(remaining_amount) AS total_amount, COUNT(*) AS order_count
                 FROM player_market_sell_orders
-                WHERE item_key = :key AND status IN ('active', 'partially_filled') AND remaining_amount > 0{player_filter_sell}
+                WHERE server_id = :sid AND item_key = :key AND status IN ('active', 'partially_filled') AND remaining_amount > 0{player_filter_sell}
                 GROUP BY unit_price
                 ORDER BY unit_price ASC
                 LIMIT 20
@@ -318,7 +331,7 @@ class PlayerMarketService:
             text(f"""
                 SELECT unit_price, SUM(remaining_amount) AS total_amount, COUNT(*) AS order_count
                 FROM player_market_buy_orders
-                WHERE item_key = :key AND status IN ('active', 'partially_filled') AND remaining_amount > 0{player_filter_buy}
+                WHERE server_id = :sid AND item_key = :key AND status IN ('active', 'partially_filled') AND remaining_amount > 0{player_filter_buy}
                 GROUP BY unit_price
                 ORDER BY unit_price DESC
                 LIMIT 20
@@ -328,7 +341,10 @@ class PlayerMarketService:
 
         last_trade = self.session.execute(
             select(PlayerMarketTrade)
-            .where(PlayerMarketTrade.item_key == item_key)
+            .where(
+                PlayerMarketTrade.item_key == item_key,
+                PlayerMarketTrade.server_id == self.server_id,
+            )
             .order_by(PlayerMarketTrade.created_at.desc())
             .limit(1)
         ).scalar_one_or_none()
@@ -371,7 +387,7 @@ class PlayerMarketService:
                            SUM(remaining_amount) AS active_sell_qty,
                            COUNT(*)          AS active_sell_orders
                     FROM player_market_sell_orders
-                    WHERE status IN ('active', 'partially_filled') AND remaining_amount > 0
+                    WHERE server_id = :sid AND status IN ('active', 'partially_filled') AND remaining_amount > 0
                     GROUP BY item_key
                 ),
                 buy_agg AS (
@@ -380,15 +396,16 @@ class PlayerMarketService:
                            SUM(remaining_amount) AS active_buy_qty,
                            COUNT(*)          AS active_buy_orders
                     FROM player_market_buy_orders
-                    WHERE status IN ('active', 'partially_filled') AND remaining_amount > 0
+                    WHERE server_id = :sid AND status IN ('active', 'partially_filled') AND remaining_amount > 0
                     GROUP BY item_key
                 ),
                 trade_agg AS (
                     SELECT item_key,
                            SUM(CASE WHEN created_at > NOW() - INTERVAL '24 hours' THEN amount ELSE 0 END) AS vol_24h,
-                           MAX(unit_price) FILTER (WHERE created_at = (SELECT MAX(created_at) FROM player_market_trades t2 WHERE t2.item_key = player_market_trades.item_key)) AS last_price,
+                           MAX(unit_price) FILTER (WHERE created_at = (SELECT MAX(created_at) FROM player_market_trades t2 WHERE t2.item_key = player_market_trades.item_key AND t2.server_id = :sid)) AS last_price,
                            MAX(created_at) AS last_trade_at
                     FROM player_market_trades
+                    WHERE server_id = :sid
                     GROUP BY item_key
                 )
                 SELECT
@@ -406,7 +423,8 @@ class PlayerMarketService:
                 FULL OUTER JOIN trade_agg tr ON COALESCE(s.item_key, b.item_key) = tr.item_key
                 ORDER BY COALESCE(tr.vol_24h, 0) DESC, item_key ASC
                 LIMIT 500
-            """)
+            """),
+            {"sid": str(self.server_id)},
         ).fetchall()
 
         items = [
@@ -428,6 +446,7 @@ class PlayerMarketService:
     def list_sell_orders(self, item_key: str | None = None, limit: int = 100) -> list[PlayerMarketSellOrder]:
         stmt = (
             select(PlayerMarketSellOrder)
+            .where(PlayerMarketSellOrder.server_id == self.server_id)
             .where(PlayerMarketSellOrder.status.in_(ACTIVE_STATUSES))
             .where(PlayerMarketSellOrder.remaining_amount > 0)
         )
@@ -440,6 +459,7 @@ class PlayerMarketService:
     def list_buy_orders(self, item_key: str | None = None, limit: int = 100) -> list[PlayerMarketBuyOrder]:
         stmt = (
             select(PlayerMarketBuyOrder)
+            .where(PlayerMarketBuyOrder.server_id == self.server_id)
             .where(PlayerMarketBuyOrder.status.in_(ACTIVE_STATUSES))
             .where(PlayerMarketBuyOrder.remaining_amount > 0)
         )
@@ -450,7 +470,7 @@ class PlayerMarketService:
         return list(self.session.execute(stmt).scalars().all())
 
     def list_trades(self, item_key: str | None = None, limit: int = 50) -> PlayerMarketTradeListResponse:
-        stmt = select(PlayerMarketTrade)
+        stmt = select(PlayerMarketTrade).where(PlayerMarketTrade.server_id == self.server_id)
         if item_key:
             stmt = stmt.where(PlayerMarketTrade.item_key == self._normalize_key(item_key))
         stmt = stmt.order_by(PlayerMarketTrade.created_at.desc()).limit(min(max(limit, 1), 500))
@@ -464,7 +484,8 @@ class PlayerMarketService:
         self, player_name: str, include_inactive: bool = False, limit: int = 50
     ) -> list[PlayerMarketSellOrder]:
         stmt = select(PlayerMarketSellOrder).where(
-            PlayerMarketSellOrder.seller_player_name.ilike(player_name)
+            PlayerMarketSellOrder.server_id == self.server_id,
+            PlayerMarketSellOrder.seller_player_name.ilike(player_name),
         )
         if not include_inactive:
             stmt = stmt.where(PlayerMarketSellOrder.status.in_(ACTIVE_STATUSES))
@@ -475,7 +496,8 @@ class PlayerMarketService:
         self, player_name: str, include_inactive: bool = False, limit: int = 50
     ) -> list[PlayerMarketBuyOrder]:
         stmt = select(PlayerMarketBuyOrder).where(
-            PlayerMarketBuyOrder.buyer_player_name.ilike(player_name)
+            PlayerMarketBuyOrder.server_id == self.server_id,
+            PlayerMarketBuyOrder.buyer_player_name.ilike(player_name),
         )
         if not include_inactive:
             stmt = stmt.where(PlayerMarketBuyOrder.status.in_(ACTIVE_STATUSES))
@@ -485,6 +507,7 @@ class PlayerMarketService:
     def list_my_trades(self, player_name: str, limit: int = 50) -> PlayerMarketTradeListResponse:
         stmt = (
             select(PlayerMarketTrade)
+            .where(PlayerMarketTrade.server_id == self.server_id)
             .where(
                 (PlayerMarketTrade.seller_player_name.ilike(player_name))
                 | (PlayerMarketTrade.buyer_player_name.ilike(player_name))
@@ -503,6 +526,7 @@ class PlayerMarketService:
     def get_pending_deliveries(self, player_name: str) -> PlayerMarketPendingDeliveriesResponse:
         rows = self.session.execute(
             select(PlayerMarketPendingDelivery).where(
+                PlayerMarketPendingDelivery.server_id == self.server_id,
                 PlayerMarketPendingDelivery.player_name.ilike(player_name),
                 PlayerMarketPendingDelivery.delivered.is_(False),
             ).order_by(PlayerMarketPendingDelivery.created_at.asc()).limit(100)
@@ -517,6 +541,7 @@ class PlayerMarketService:
             return 0
         rows = self.session.execute(
             select(PlayerMarketPendingDelivery).where(
+                PlayerMarketPendingDelivery.server_id == self.server_id,
                 PlayerMarketPendingDelivery.id.in_(req.delivery_ids),
                 PlayerMarketPendingDelivery.player_name.ilike(player_name),
                 PlayerMarketPendingDelivery.delivered.is_(False),
@@ -536,6 +561,7 @@ class PlayerMarketService:
 
         expired_sells = self.session.execute(
             select(PlayerMarketSellOrder).where(
+                PlayerMarketSellOrder.server_id == self.server_id,
                 PlayerMarketSellOrder.expires_at <= now,
                 PlayerMarketSellOrder.status.in_(ACTIVE_STATUSES),
             ).with_for_update(skip_locked=True)
@@ -544,6 +570,7 @@ class PlayerMarketService:
         for order in expired_sells:
             if order.remaining_amount > 0:
                 self.session.add(PlayerMarketPendingDelivery(
+                    server_id=self.server_id,
                     player_name=order.seller_player_name,
                     delivery_type="expiry_refund",
                     sell_order_id=order.id,
@@ -557,6 +584,7 @@ class PlayerMarketService:
 
         expired_buys = self.session.execute(
             select(PlayerMarketBuyOrder).where(
+                PlayerMarketBuyOrder.server_id == self.server_id,
                 PlayerMarketBuyOrder.expires_at <= now,
                 PlayerMarketBuyOrder.status.in_(ACTIVE_STATUSES),
             ).with_for_update(skip_locked=True)
@@ -566,6 +594,7 @@ class PlayerMarketService:
             refund = self._money(Decimal(str(order.unit_price)) * Decimal(order.remaining_amount))
             if refund > 0:
                 self.session.add(PlayerMarketPendingDelivery(
+                    server_id=self.server_id,
                     player_name=order.buyer_player_name,
                     delivery_type="expiry_refund",
                     buy_order_id=order.id,
@@ -591,6 +620,7 @@ class PlayerMarketService:
 
         matching_buys = self.session.execute(
             select(PlayerMarketBuyOrder).where(
+                PlayerMarketBuyOrder.server_id == self.server_id,
                 PlayerMarketBuyOrder.item_key == sell_order.item_key,
                 PlayerMarketBuyOrder.unit_price >= sell_order.unit_price,
                 PlayerMarketBuyOrder.status.in_(ACTIVE_STATUSES),
@@ -641,6 +671,7 @@ class PlayerMarketService:
 
         matching_sells = self.session.execute(
             select(PlayerMarketSellOrder).where(
+                PlayerMarketSellOrder.server_id == self.server_id,
                 PlayerMarketSellOrder.item_key == buy_order.item_key,
                 PlayerMarketSellOrder.unit_price <= buy_order.unit_price,
                 PlayerMarketSellOrder.status.in_(ACTIVE_STATUSES),
@@ -716,6 +747,7 @@ class PlayerMarketService:
             funds_returned_to_buyer = Decimal("0")
 
         trade = PlayerMarketTrade(
+            server_id=self.server_id,
             sell_order_id=sell_order.id,
             buy_order_id=buy_order.id,
             seller_player_name=sell_order.seller_player_name,
@@ -764,6 +796,7 @@ class PlayerMarketService:
         # Skip if seller_is_active — plugin deposits immediately from immediate_fills.
         if not seller_is_active:
             self.session.add(PlayerMarketPendingDelivery(
+                server_id=self.server_id,
                 player_name=sell_order.seller_player_name,
                 delivery_type="sell_proceeds",
                 trade_id=trade.id,
@@ -776,6 +809,7 @@ class PlayerMarketService:
         # Skip if buyer_is_active — plugin gives item immediately from immediate_fills.
         if not buyer_is_active:
             self.session.add(PlayerMarketPendingDelivery(
+                server_id=self.server_id,
                 player_name=buy_order.buyer_player_name,
                 delivery_type="item_delivery",
                 trade_id=trade.id,
@@ -790,6 +824,7 @@ class PlayerMarketService:
         # Skip if buyer_is_active — plugin deposits immediately from immediate_fills.
         if not buyer_is_active and funds_returned_to_buyer > 0:
             self.session.add(PlayerMarketPendingDelivery(
+                server_id=self.server_id,
                 player_name=buy_order.buyer_player_name,
                 delivery_type="buy_refund",
                 trade_id=trade.id,
@@ -851,6 +886,7 @@ class PlayerMarketService:
                 return
 
             self.session.add(NationTreasuryTransaction(
+                server_id=self.server_id,
                 transaction_type="market_fee",
                 nation_id=seller_nation_id,
                 gross_amount=float(amount),
@@ -876,7 +912,10 @@ class PlayerMarketService:
         # economy_market_items uses UPPERCASE material keys
         material_upper = item_key.upper()
         item = self.session.execute(
-            select(EconomyMarketItem).where(EconomyMarketItem.material == material_upper)
+            select(EconomyMarketItem).where(
+                EconomyMarketItem.material == material_upper,
+                EconomyMarketItem.server_id == self.server_id,
+            )
         ).scalar_one_or_none()
 
         if item is None:
@@ -912,6 +951,7 @@ class PlayerMarketService:
         base_buy = unit
         base_sell = self._money(unit * Decimal("0.25"))
         stmt = pg_insert(EconomyMarketItem).values(
+            server_id=self.server_id,
             material=material_upper,
             display_name=display_name or None,
             base_buy_price=base_buy,
@@ -921,7 +961,7 @@ class PlayerMarketService:
             buy_multiplier=Decimal("1"),
             sell_multiplier=Decimal("1"),
             metadata_json={"source": "player_market"},
-        ).on_conflict_do_nothing(index_elements=["material"])
+        ).on_conflict_do_nothing(index_elements=["server_id", "material"])
         self.session.execute(stmt)
         self.session.flush()
 

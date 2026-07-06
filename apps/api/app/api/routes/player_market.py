@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user
 from apps.api.app.dependencies.server_auth import require_game_auth_secret
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 from apps.api.app.schemas.player_market import (
     PlayerMarketBuyOrderCreate,
@@ -46,8 +48,11 @@ router_public = APIRouter(prefix="/market/player", tags=["player-market"])
 router_player = APIRouter(prefix="/market/player/me", tags=["player-market"])
 
 
-def get_service(session: Annotated[Session, Depends(get_db_session)]) -> PlayerMarketService:
-    return PlayerMarketService(session)
+def get_service(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> PlayerMarketService:
+    return PlayerMarketService(session, server.id)
 
 
 # ── Game-sync endpoints ────────────────────────────────────────────────────────
