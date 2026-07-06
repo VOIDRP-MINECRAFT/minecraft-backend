@@ -21,6 +21,8 @@ from apps.api.app.api.routes.play_ticket import server_router as server_auth_tic
 from apps.api.app.api.routes.profiles import router as profiles_router
 from apps.api.app.api.routes.referrals import router as referrals_router
 from apps.api.app.api.routes.server_auth import router as server_auth_router
+from apps.api.app.api.routes.servers import router as servers_router
+from apps.api.app.api.routes.admin_servers import router as admin_servers_router
 from apps.api.app.api.routes.social import router as social_router
 from apps.api.app.api.routes.alliances import router as alliances_router
 from apps.api.app.api.routes.donate import router as donate_router
@@ -100,3 +102,5 @@ api_router.include_router(game_ui_nation_market_router)
 api_router.include_router(game_ui_treasury_router)
 api_router.include_router(game_ui_battlepass_router)
 api_router.include_router(game_ui_alliance_router)
+api_router.include_router(servers_router)
+api_router.include_router(admin_servers_router)
