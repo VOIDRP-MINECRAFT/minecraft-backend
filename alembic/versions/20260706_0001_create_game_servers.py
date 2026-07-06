@@ -61,7 +61,13 @@ def upgrade() -> None:
     # so all existing plugins/mods keep authenticating during migration.
     from apps.api.app.config import get_settings
 
-    default_secret = get_settings().game_auth_shared_secret
+    settings = get_settings()
+    default_secret = settings.game_auth_shared_secret
+    # Ping host: the backend runs on the same box as the MC server, so status
+    # must ping the internal address (127.0.0.1) — pinging the public domain
+    # from the same host fails (no NAT hairpin) and shows the server as offline.
+    status_host = settings.minecraft_server_host or '127.0.0.1'
+    status_port = settings.minecraft_server_port or 25565
 
     game_servers = sa.table(
         'game_servers',
@@ -83,6 +89,8 @@ def upgrade() -> None:
         sa.column('manifest_url', sa.String()),
         sa.column('pack_version', sa.String()),
         sa.column('min_launcher_version', sa.String()),
+        sa.column('status_host', sa.String()),
+        sa.column('status_port', sa.Integer()),
         sa.column('max_players', sa.Integer()),
         sa.column('whitelist_mode', sa.String()),
         sa.column('game_auth_secret', sa.String()),
@@ -109,6 +117,8 @@ def upgrade() -> None:
                 'manifest_url': 'https://void-rp.ru/launcher/manifests/manifest.json',
                 'pack_version': '1.0.0',
                 'min_launcher_version': '0.1.0',
+                'status_host': status_host,
+                'status_port': status_port,
                 'max_players': 100,
                 'whitelist_mode': 'public',
                 'game_auth_secret': default_secret,

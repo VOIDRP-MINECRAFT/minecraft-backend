@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.repositories.game_server_repository import GameServerRepository
@@ -47,8 +48,18 @@ def _ping_status(host: str, port: int) -> GameServerStatus:
 def _to_public(server: GameServer, with_status: bool = True) -> GameServerPublic:
     dto = GameServerPublic.model_validate(server)
     if with_status:
-        host = server.status_host or server.host
-        port = server.status_port or server.port
+        host = server.status_host
+        port = server.status_port
+        # For the default server, if no explicit status host is set, ping the
+        # configured internal MC address rather than the public domain — the
+        # backend runs on the same box and pinging the public domain fails
+        # (no NAT hairpin), which would wrongly report the server as offline.
+        if not host and server.is_default:
+            settings = get_settings()
+            host = settings.minecraft_server_host or server.host
+            port = port or settings.minecraft_server_port or server.port
+        host = host or server.host
+        port = port or server.port
         dto.status = _ping_status(host, port)
     return dto
 
