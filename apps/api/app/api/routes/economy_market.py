@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.user_messages import translate_user_message
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_auth import require_game_auth_secret
+from apps.api.app.dependencies.server_auth import require_game_auth_secret, require_game_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.schemas.economy_market import (
     EconomyMarketPriceListResponse,
     EconomyMarketPriceRead,
@@ -35,8 +36,9 @@ router = APIRouter(prefix="/game-sync", tags=["game-sync", "economy-market"])
 
 def get_economy_market_service(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
 ) -> EconomyMarketService:
-    return EconomyMarketService(session=session)
+    return EconomyMarketService(session=session, server_id=server.id)
 
 
 @router.get(

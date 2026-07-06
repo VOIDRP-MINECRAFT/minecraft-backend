@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
@@ -27,8 +28,9 @@ from apps.api.app.services.economy_market_service import EconomyMarketNotFoundEr
 
 
 class MarketPublicService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
 
     def list_items(
         self,
@@ -39,7 +41,7 @@ class MarketPublicService:
         direction: str = "asc",
         limit: int = 200,
     ) -> PublicMarketItemListResponse:
-        stmt = select(EconomyMarketItem)
+        stmt = select(EconomyMarketItem).where(EconomyMarketItem.server_id == self.server_id)
         if not include_disabled:
             stmt = stmt.where(EconomyMarketItem.enabled.is_(True))
         if q:
@@ -79,43 +81,62 @@ class MarketPublicService:
         now = utc_now()
         since = now - timedelta(hours=24)
         active_items = self.session.scalar(
-            select(func.count(EconomyMarketItem.id)).where(EconomyMarketItem.enabled.is_(True))
+            select(func.count(EconomyMarketItem.id)).where(
+                EconomyMarketItem.server_id == self.server_id,
+                EconomyMarketItem.enabled.is_(True),
+            )
         ) or 0
-        total_items = self.session.scalar(select(func.count(EconomyMarketItem.id))) or 0
+        total_items = self.session.scalar(
+            select(func.count(EconomyMarketItem.id)).where(EconomyMarketItem.server_id == self.server_id)
+        ) or 0
         active_nation_listings = self.session.scalar(
             select(func.count(NationMarketListing.id)).where(
+                NationMarketListing.server_id == self.server_id,
                 NationMarketListing.status == "active",
                 NationMarketListing.remaining_amount > 0,
             )
         ) or 0
         stock_value = self.session.scalar(
             select(func.coalesce(func.sum(NationMarketListing.current_unit_price * NationMarketListing.remaining_amount), 0)).where(
+                NationMarketListing.server_id == self.server_id,
                 NationMarketListing.status == "active",
                 NationMarketListing.remaining_amount > 0,
             )
         ) or Decimal("0")
         shop_tx_count = self.session.scalar(
-            select(func.count(EconomyShopTransaction.id)).where(EconomyShopTransaction.created_at >= since)
+            select(func.count(EconomyShopTransaction.id)).where(
+                EconomyShopTransaction.server_id == self.server_id,
+                EconomyShopTransaction.created_at >= since,
+            )
         ) or 0
         shop_volume = self.session.scalar(
-            select(func.coalesce(func.sum(EconomyShopTransaction.final_total_price), 0)).where(EconomyShopTransaction.created_at >= since)
+            select(func.coalesce(func.sum(EconomyShopTransaction.final_total_price), 0)).where(
+                EconomyShopTransaction.server_id == self.server_id,
+                EconomyShopTransaction.created_at >= since,
+            )
         ) or Decimal("0")
         nation_orders = self.session.scalar(
-            select(func.count(NationMarketOrder.id)).where(NationMarketOrder.created_at >= since)
+            select(func.count(NationMarketOrder.id)).where(
+                NationMarketOrder.server_id == self.server_id,
+                NationMarketOrder.created_at >= since,
+            )
         ) or 0
         nation_volume = self.session.scalar(
-            select(func.coalesce(func.sum(NationMarketOrder.gross_total), 0)).where(NationMarketOrder.created_at >= since)
+            select(func.coalesce(func.sum(NationMarketOrder.gross_total), 0)).where(
+                NationMarketOrder.server_id == self.server_id,
+                NationMarketOrder.created_at >= since,
+            )
         ) or Decimal("0")
 
         top_demand = self.session.execute(
             select(EconomyMarketItem)
-            .where(EconomyMarketItem.enabled.is_(True))
+            .where(EconomyMarketItem.server_id == self.server_id, EconomyMarketItem.enabled.is_(True))
             .order_by(EconomyMarketItem.demand_score.desc())
             .limit(6)
         ).scalars().all()
         top_supply = self.session.execute(
             select(EconomyMarketItem)
-            .where(EconomyMarketItem.enabled.is_(True))
+            .where(EconomyMarketItem.server_id == self.server_id, EconomyMarketItem.enabled.is_(True))
             .order_by(EconomyMarketItem.supply_score.desc())
             .limit(6)
         ).scalars().all()
@@ -142,6 +163,7 @@ class MarketPublicService:
         limit: int = 100,
     ) -> PublicMarketListingListResponse:
         stmt = select(NationMarketListing).options(joinedload(NationMarketListing.nation)).where(
+            NationMarketListing.server_id == self.server_id,
             NationMarketListing.status == "active",
             NationMarketListing.remaining_amount > 0,
         )
@@ -165,7 +187,7 @@ class MarketPublicService:
         return PublicMarketListingListResponse(total=len(listings), items=[self._listing_read(item) for item in listings])
 
     def list_transactions(self, material: str | None = None, limit: int = 50) -> PublicMarketTransactionListResponse:
-        stmt = select(EconomyShopTransaction)
+        stmt = select(EconomyShopTransaction).where(EconomyShopTransaction.server_id == self.server_id)
         if material:
             stmt = stmt.where(EconomyShopTransaction.material == self._normalize_material(material))
         transactions = self.session.execute(
@@ -187,6 +209,7 @@ class MarketPublicService:
         snaps = self.session.execute(
             select(PriceHistorySnapshot)
             .where(
+                PriceHistorySnapshot.server_id == self.server_id,
                 PriceHistorySnapshot.material == normalized,
                 PriceHistorySnapshot.recorded_at >= since,
             )
@@ -255,7 +278,7 @@ class MarketPublicService:
         return self.patch_item(material, AdminMarketItemPatch(reset_to_base=True, admin_note="Reset to base by admin"))
 
     def recalculate(self, decay_scores: bool = True) -> AdminMarketRecalculateResponse:
-        result = EconomyMarketService(self.session).recalculate_prices(decay_scores=decay_scores)
+        result = EconomyMarketService(self.session, self.server_id).recalculate_prices(decay_scores=decay_scores)
         return AdminMarketRecalculateResponse(total=result.total, changed=result.changed)
 
     def _item_read(self, item: EconomyMarketItem) -> PublicMarketItemRead:
@@ -349,7 +372,12 @@ class MarketPublicService:
         normalized = self._normalize_material(material)
         if not normalized:
             return None
-        return self.session.execute(select(EconomyMarketItem).where(EconomyMarketItem.material == normalized)).scalar_one_or_none()
+        return self.session.execute(
+            select(EconomyMarketItem).where(
+                EconomyMarketItem.material == normalized,
+                EconomyMarketItem.server_id == self.server_id,
+            )
+        ).scalar_one_or_none()
 
     def _metadata_string(self, metadata: dict, key: str) -> str | None:
         value = metadata.get(key)

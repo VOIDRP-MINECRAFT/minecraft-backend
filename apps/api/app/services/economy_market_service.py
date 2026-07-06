@@ -65,13 +65,17 @@ class EconomyMarketService:
     SCORE_DECAY = Decimal("0.92")
     MAX_PRICE_STEP = Decimal("0.08")
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
 
     def list_prices(self) -> EconomyMarketPriceListResponse:
         items = self.session.execute(
             select(EconomyMarketItem)
-            .where(EconomyMarketItem.enabled.is_(True))
+            .where(
+                EconomyMarketItem.server_id == self.server_id,
+                EconomyMarketItem.enabled.is_(True),
+            )
             .order_by(EconomyMarketItem.material.asc())
         ).scalars().all()
         reads = [self._price_read(item) for item in items]
@@ -85,7 +89,10 @@ class EconomyMarketService:
 
     def recalculate_prices(self, decay_scores: bool = True) -> EconomyMarketRecalculateResponse:
         items = self.session.execute(
-            select(EconomyMarketItem).where(EconomyMarketItem.enabled.is_(True))
+            select(EconomyMarketItem).where(
+                EconomyMarketItem.server_id == self.server_id,
+                EconomyMarketItem.enabled.is_(True),
+            )
         ).scalars().all()
 
         changed = 0
@@ -111,12 +118,17 @@ class EconomyMarketService:
         return EconomyMarketRecalculateResponse(total=len(items), changed=changed)
 
     def _try_save_snapshots(self, items: list[EconomyMarketItem]) -> None:
-        last_recorded = self.session.scalar(select(func.max(PriceHistorySnapshot.recorded_at)))
+        last_recorded = self.session.scalar(
+            select(func.max(PriceHistorySnapshot.recorded_at)).where(
+                PriceHistorySnapshot.server_id == self.server_id
+            )
+        )
         now = utc_now()
         if last_recorded is not None and (now - last_recorded).total_seconds() < 55 * 60:
             return
         for item in items:
             self.session.add(PriceHistorySnapshot(
+                server_id=self.server_id,
                 material=item.material,
                 buy_price=self._money(item.current_buy_price),
                 sell_price=self._money(item.current_sell_price),
@@ -153,6 +165,7 @@ class EconomyMarketService:
             metadata["source"] = payload.source
 
         transaction = EconomyShopTransaction(
+            server_id=self.server_id,
             player_name=payload.player_name,
             material=material,
             amount=payload.amount,
@@ -215,6 +228,7 @@ class EconomyMarketService:
         current = self._clamp_money(market_price * relative, min_price, max_price)
 
         listing = NationMarketListing(
+            server_id=self.server_id,
             nation_id=nation.id,
             seller_player_name=payload.seller_player_name,
             seller_role=role,
@@ -316,6 +330,7 @@ class EconomyMarketService:
             listing.sold_out_at = utc_now()
 
         order = NationMarketOrder(
+            server_id=self.server_id,
             listing_id=listing.id,
             nation_id=listing.nation_id,
             buyer_player_name=payload.buyer_player_name,
@@ -333,6 +348,7 @@ class EconomyMarketService:
 
         self.session.add(
             NationTreasuryTransaction(
+                server_id=self.server_id,
                 transaction_type="nation_market_sale",
                 nation_id=listing.nation_id,
                 gross_amount=gross_total,
@@ -594,7 +610,10 @@ class EconomyMarketService:
     def _get_market_item(self, material: str) -> EconomyMarketItem | None:
         normalized = self._normalize_material(material)
         return self.session.execute(
-            select(EconomyMarketItem).where(EconomyMarketItem.material == normalized)
+            select(EconomyMarketItem).where(
+                EconomyMarketItem.material == normalized,
+                EconomyMarketItem.server_id == self.server_id,
+            )
         ).scalar_one_or_none()
 
     def _get_nation_by_slug(self, slug: str) -> Nation | None:
@@ -621,9 +640,14 @@ class EconomyMarketService:
         return bool(left_normalized) and left_normalized == right_normalized
 
     def _get_or_create_nation_stat(self, nation_id) -> NationStat:
-        stat = self.session.execute(select(NationStat).where(NationStat.nation_id == nation_id)).scalar_one_or_none()
+        stat = self.session.execute(
+            select(NationStat).where(
+                NationStat.nation_id == nation_id,
+                NationStat.server_id == self.server_id,
+            )
+        ).scalar_one_or_none()
         if stat is None:
-            stat = NationStat(nation_id=nation_id)
+            stat = NationStat(server_id=self.server_id, nation_id=nation_id)
             self.session.add(stat)
             self.session.flush()
         return stat

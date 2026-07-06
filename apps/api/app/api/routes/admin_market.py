@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.user_messages import translate_user_message
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.schemas.market_public import (
     AdminMarketActionResponse,
     AdminMarketItemPatch,
@@ -27,8 +29,9 @@ router = APIRouter(
 
 def get_market_public_service(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> MarketPublicService:
-    return MarketPublicService(session=session)
+    return MarketPublicService(session=session, server_id=server.id)
 
 
 @router.get("/summary", response_model=PublicMarketSummaryResponse)
