@@ -9,7 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.nation import Nation
 from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.player_account import PlayerAccount
@@ -19,8 +21,11 @@ from apps.api.app.services.nation_stats_service import NationNotFoundError, Nati
 router = APIRouter(prefix="/game-ui/treasury", tags=["game-ui", "treasury"])
 
 
-def _stats_service(db: Annotated[Session, Depends(get_db_session)]) -> NationStatsService:
-    return NationStatsService(db)
+def _stats_service(
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> NationStatsService:
+    return NationStatsService(db, server.id)
 
 
 class TreasurySummary(BaseModel):

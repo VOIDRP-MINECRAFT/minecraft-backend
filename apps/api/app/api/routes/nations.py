@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.user_messages import localize_response_message, translate_user_message
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user, get_optional_current_user
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 from apps.api.app.schemas.nation import (
     NationActionResponse,
@@ -37,16 +39,25 @@ from apps.api.app.services.nation_service import (
 router = APIRouter(prefix="/nations", tags=["nations"])
 
 
-def get_nation_service(session: Annotated[Session, Depends(get_db_session)]) -> NationService:
-    return NationService(session=session)
+def get_nation_service(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> NationService:
+    return NationService(session=session, server_id=server.id)
 
 
-def get_nation_media_service(session: Annotated[Session, Depends(get_db_session)]) -> NationMediaService:
-    return NationMediaService(session=session)
+def get_nation_media_service(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> NationMediaService:
+    return NationMediaService(session=session, server_id=server.id)
 
 
-def get_nation_activity_service(session: Annotated[Session, Depends(get_db_session)]) -> NationActivityService:
-    return NationActivityService(session=session)
+def get_nation_activity_service(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> NationActivityService:
+    return NationActivityService(session=session, server_id=server.id)
 
 
 @router.get("", response_model=NationListResponse)
@@ -209,7 +220,7 @@ def transfer_leadership(slug: str, payload: NationTransferLeadershipRequest, cur
 async def upload_nation_asset(slot: str, file: UploadFile = File(...), current_user: Annotated[User, Depends(get_current_user)] = None, media_service: Annotated[NationMediaService, Depends(get_nation_media_service)] = None) -> NationRead:
     try:
         nation = await media_service.save_nation_asset(current_user, slot, file)
-        return NationService(media_service.session).get_by_slug(nation.slug, viewer=current_user)
+        return NationService(media_service.session, media_service.server_id).get_by_slug(nation.slug, viewer=current_user)
     except NationMediaValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=translate_user_message(str(exc))) from exc
     except NationPermissionError as exc:
@@ -222,7 +233,7 @@ async def upload_nation_asset(slot: str, file: UploadFile = File(...), current_u
 def delete_nation_asset(slot: str, current_user: Annotated[User, Depends(get_current_user)], media_service: Annotated[NationMediaService, Depends(get_nation_media_service)]) -> NationRead:
     try:
         nation = media_service.delete_nation_asset(current_user, slot)
-        return NationService(media_service.session).get_by_slug(nation.slug, viewer=current_user)
+        return NationService(media_service.session, media_service.server_id).get_by_slug(nation.slug, viewer=current_user)
     except NationMediaValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=translate_user_message(str(exc))) from exc
     except NationPermissionError as exc:

@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user, get_optional_current_user
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.alliance import Alliance, AllianceMember, AllianceProposal, AllianceProposalStatus
 from apps.api.app.models.nation import Nation
 from apps.api.app.models.nation_member import NationMember
@@ -37,8 +39,11 @@ from apps.api.app.services.alliance_service import (
 router = APIRouter(prefix="/alliances", tags=["alliances"])
 
 
-def get_alliance_service(session: Annotated[Session, Depends(get_db_session)]) -> AllianceService:
-    return AllianceService(session)
+def get_alliance_service(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> AllianceService:
+    return AllianceService(session, server.id)
 
 
 def _get_current_user_nation(session: Session, current_user: User) -> Nation | None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 from PIL import Image
 from fastapi import UploadFile
@@ -21,11 +22,12 @@ class NationMediaValidationError(Exception): ...
 
 
 class NationMediaService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
         self.settings = get_settings()
-        self.nation_service = NationService(session)
-        self.activity_service = NationActivityService(session)
+        self.nation_service = NationService(session, server_id)
+        self.activity_service = NationActivityService(session, server_id)
 
     async def save_nation_asset(self, current_user: User, slot: str, upload: UploadFile) -> Nation:
         nation = self._require_manageable_nation(current_user)

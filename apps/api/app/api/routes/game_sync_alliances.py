@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_auth import require_game_auth_secret
+from apps.api.app.dependencies.server_auth import require_game_auth_secret, require_game_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.alliance import (
     Alliance,
     AllianceMember,
@@ -50,8 +51,11 @@ class GameAllianceKickRequest(BaseModel):
     target_nation_slug: str
 
 
-def _get_service(session: Annotated[Session, Depends(get_db_session)]) -> AllianceService:
-    return AllianceService(session)
+def _get_service(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> AllianceService:
+    return AllianceService(session, server.id)
 
 
 def _lookup(session: Session, minecraft_nickname: str):

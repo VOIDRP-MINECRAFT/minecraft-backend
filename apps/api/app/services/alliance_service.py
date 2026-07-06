@@ -43,9 +43,10 @@ class AllianceNotFoundError(Exception):
 
 
 class AllianceService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
-        self.activity = NationActivityService(session)
+        self.server_id = server_id
+        self.activity = NationActivityService(session, server_id)
 
     def list_alliances(self) -> list[Alliance]:
         return self.session.execute(
@@ -58,7 +59,7 @@ class AllianceService:
         alliance = self.session.execute(
             select(Alliance)
             .options(joinedload(Alliance.members))
-            .where(Alliance.slug == slug)
+            .where(Alliance.slug == slug, Alliance.server_id == self.server_id)
         ).unique().scalar_one_or_none()
         if alliance is None:
             raise AllianceNotFoundError("Альянс не найден.")
@@ -81,11 +82,14 @@ class AllianceService:
         tag = (tag or "").strip().upper()
         description = (description or "").strip() or None
 
-        existing = self.session.execute(select(Alliance).where(Alliance.slug == slug)).scalar_one_or_none()
+        existing = self.session.execute(
+            select(Alliance).where(Alliance.slug == slug, Alliance.server_id == self.server_id)
+        ).scalar_one_or_none()
         if existing is not None:
             raise AllianceValidationError("Такой slug альянса уже занят.")
 
         alliance = Alliance(
+            server_id=self.server_id,
             slug=slug,
             title=title,
             tag=tag,
@@ -103,7 +107,7 @@ class AllianceService:
         self.session.add(alliance)
         self.session.flush()
 
-        self.session.add(AllianceMember(alliance_id=alliance.id, nation_id=source_nation.id, role=AllianceMemberRole.founder.value))
+        self.session.add(AllianceMember(server_id=self.server_id, alliance_id=alliance.id, nation_id=source_nation.id, role=AllianceMemberRole.founder.value))
 
         self.activity.record(
             nation_id=source_nation.id,
@@ -122,7 +126,7 @@ class AllianceService:
         self._assert_nation_can_join_alliance(source_nation.id)
 
         alliance = self.get_by_slug(alliance_slug)
-        self.session.add(AllianceMember(alliance_id=alliance.id, nation_id=source_nation.id, role=AllianceMemberRole.member.value))
+        self.session.add(AllianceMember(server_id=self.server_id, alliance_id=alliance.id, nation_id=source_nation.id, role=AllianceMemberRole.member.value))
 
         self.activity.record(
             nation_id=source_nation.id,
@@ -209,6 +213,7 @@ class AllianceService:
         if normalized_type not in {item.value for item in AllianceProposalType}:
             raise AllianceValidationError("Неизвестный тип предложения альянса.")
         proposal = AllianceProposal(
+            server_id=self.server_id,
             alliance_id=alliance.id,
             proposer_nation_id=source_nation.id,
             proposal_type=normalized_type,
@@ -256,7 +261,7 @@ class AllianceService:
         ).scalar_one_or_none()
 
         if existing is None:
-            existing = AllianceVote(proposal_id=proposal.id, nation_id=source_nation.id, vote=normalized_vote, comment=comment)
+            existing = AllianceVote(server_id=self.server_id, proposal_id=proposal.id, nation_id=source_nation.id, vote=normalized_vote, comment=comment)
             self.session.add(existing)
         else:
             existing.vote = normalized_vote
@@ -375,7 +380,7 @@ class AllianceService:
         if proposal.proposal_type == AllianceProposalType.add_member.value:
             target_nation = self._get_nation_by_slug(str(payload.get("nation_slug", "")).strip())
             self._assert_nation_can_join_alliance(target_nation.id)
-            self.session.add(AllianceMember(alliance_id=alliance.id, nation_id=target_nation.id, role=AllianceMemberRole.member.value))
+            self.session.add(AllianceMember(server_id=self.server_id, alliance_id=alliance.id, nation_id=target_nation.id, role=AllianceMemberRole.member.value))
             self.activity.record(
                 nation_id=target_nation.id,
                 actor_user_id=current_user.id,
@@ -433,6 +438,7 @@ class AllianceService:
         metadata = {"alliance_slug": alliance.slug, "from_nation_slug": from_nation.slug, "to_nation_slug": to_nation.slug}
 
         self.session.add(NationTreasuryTransaction(
+            server_id=self.server_id,
             transaction_type="alliance_transfer_out",
             nation_id=from_nation.id,
             counterparty_nation_id=to_nation.id,
@@ -445,6 +451,7 @@ class AllianceService:
             metadata_json=metadata,
         ))
         self.session.add(NationTreasuryTransaction(
+            server_id=self.server_id,
             transaction_type="alliance_transfer_in",
             nation_id=to_nation.id,
             counterparty_nation_id=from_nation.id,
@@ -457,6 +464,7 @@ class AllianceService:
             metadata_json=metadata,
         ))
         self.session.add(NationTreasuryTransaction(
+            server_id=self.server_id,
             transaction_type="alliance_fee_income",
             nation_id=None,
             counterparty_nation_id=None,
@@ -581,7 +589,7 @@ class AllianceService:
     def _get_or_create_nation_stat(self, nation_id: UUID) -> NationStat:
         stat = self.session.execute(select(NationStat).where(NationStat.nation_id == nation_id)).scalar_one_or_none()
         if stat is None:
-            stat = NationStat(nation_id=nation_id)
+            stat = NationStat(server_id=self.server_id, nation_id=nation_id)
             self.session.add(stat)
             self.session.flush()
         return stat

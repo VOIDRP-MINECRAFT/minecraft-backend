@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -17,8 +19,9 @@ class NationActivityNotFoundError(Exception): ...
 
 
 class NationActivityService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
 
     def record(
         self,
@@ -32,6 +35,7 @@ class NationActivityService:
     ) -> None:
         self.session.add(
             NationActivityLog(
+                server_id=self.server_id,
                 nation_id=nation_id,
                 actor_user_id=actor_user_id,
                 target_user_id=target_user_id,
@@ -42,7 +46,9 @@ class NationActivityService:
         )
 
     def list_for_slug(self, slug: str, limit: int = 30) -> NationActivityLogListResponse:
-        nation = self.session.execute(select(Nation).where(Nation.slug == slug)).scalar_one_or_none()
+        nation = self.session.execute(
+            select(Nation).where(Nation.slug == slug, Nation.server_id == self.server_id)
+        ).scalar_one_or_none()
         if nation is None:
             raise NationActivityNotFoundError("nation was not found")
         return self.list_for_nation_id(nation.id, limit=limit)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -37,13 +38,15 @@ class GameSyncValidationError(Exception):
 
 
 class GameSyncService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
 
     def list_nations_for_game_sync(self) -> GameNationListResponse:
         nations = (
             self.session.execute(
                 select(Nation)
+                .where(Nation.server_id == self.server_id)
                 .options(
                     joinedload(Nation.members)
                     .joinedload(NationMember.user)
@@ -163,6 +166,7 @@ class GameSyncService:
             if existing is None:
                 self.session.add(
                     NationMember(
+                        server_id=self.server_id,
                         nation_id=nation.id,
                         user_id=user_id,
                         role=role,
@@ -197,6 +201,7 @@ class GameSyncService:
             if leader_membership is None:
                 self.session.add(
                     NationMember(
+                        server_id=self.server_id,
                         nation_id=nation.id,
                         user_id=leader_user_id,
                         role="leader",
@@ -246,6 +251,7 @@ class GameSyncService:
 
         reward = self.session.execute(
             select(ReferralRewardPeriod).where(
+                ReferralRewardPeriod.server_id == self.server_id,
                 ReferralRewardPeriod.user_id == account.user_id,
                 ReferralRewardPeriod.reward_state == "active",
                 ReferralRewardPeriod.expires_at > utc_now(),
@@ -280,7 +286,10 @@ class GameSyncService:
 
     def set_nation_capital(self, slug: str, payload: NationCapitalUpdateRequest) -> None:
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == slug)
+            select(Nation).where(
+                Nation.slug == slug,
+                Nation.server_id == self.server_id,
+            )
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("nation was not found")
@@ -301,7 +310,7 @@ class GameSyncService:
             select(NationStat).where(NationStat.nation_id == nation.id)
         ).scalar_one_or_none()
         if stat is None:
-            stat = NationStat(nation_id=nation.id)
+            stat = NationStat(server_id=self.server_id, nation_id=nation.id)
             self.session.add(stat)
             self.session.flush()
 
@@ -310,6 +319,7 @@ class GameSyncService:
 
         self.session.add(
             NationTreasuryTransaction(
+                server_id=self.server_id,
                 transaction_type="capital_reward",
                 nation_id=nation.id,
                 created_by_user_id=None,
@@ -321,7 +331,7 @@ class GameSyncService:
             )
         )
 
-        NationActivityService(self.session).record(
+        NationActivityService(self.session, self.server_id).record(
             nation_id=nation.id,
             event_type="capital_reward_granted",
             actor_user_id=None,
@@ -381,7 +391,10 @@ class GameSyncService:
                     .joinedload(NationMember.user)
                     .joinedload(User.player_account)
                 )
-                .where(Nation.slug == slug)
+                .where(
+                    Nation.slug == slug,
+                    Nation.server_id == self.server_id,
+                )
             )
             .unique()
             .scalar_one_or_none()

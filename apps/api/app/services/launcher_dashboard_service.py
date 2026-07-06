@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,10 +21,11 @@ from apps.api.app.services.redis_cache_service import RedisCacheService
 
 
 class LauncherDashboardService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
-        self.nation_service = NationService(session)
-        self.nation_stats_service = NationStatsService(session)
+        self.server_id = server_id
+        self.nation_service = NationService(session, server_id)
+        self.nation_stats_service = NationStatsService(session, server_id)
         self.cache = RedisCacheService()
 
     def get_for_user(self, current_user: User) -> LauncherDashboardRead:
@@ -125,14 +128,18 @@ class LauncherDashboardService:
 
     def _player_stats_from_cache(self, current_user: User) -> LauncherDashboardPlayerStatsRead | None:
         entry = self.session.execute(
-            select(PlayerStatCache).where(PlayerStatCache.user_id == current_user.id)
+            select(PlayerStatCache).where(
+                PlayerStatCache.user_id == current_user.id,
+                PlayerStatCache.server_id == self.server_id,
+            )
         ).scalar_one_or_none()
 
         if entry is None and current_user.player_account is not None:
             normalized = current_user.player_account.minecraft_nickname_normalized
             entry = self.session.execute(
                 select(PlayerStatCache).where(
-                    PlayerStatCache.minecraft_nickname_normalized == normalized
+                    PlayerStatCache.minecraft_nickname_normalized == normalized,
+                    PlayerStatCache.server_id == self.server_id,
                 )
             ).scalar_one_or_none()
 

@@ -56,9 +56,10 @@ class NationValidationError(Exception):
 
 
 class NationService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
-        self.activity_service = NationActivityService(session)
+        self.server_id = server_id
+        self.activity_service = NationActivityService(session, server_id)
 
     def list_public(self, viewer: User | None = None) -> NationListResponse:
         nations = (
@@ -69,6 +70,7 @@ class NationService:
                     joinedload(Nation.members).joinedload(NationMember.user).joinedload(User.player_account),
                     joinedload(Nation.join_requests).joinedload(NationJoinRequest.user).joinedload(User.player_account),
                 )
+                .where(Nation.server_id == self.server_id)
                 .where(Nation.is_public.is_(True))
                 .where(User.is_admin.is_(False))
                 .order_by(Nation.created_at.desc())
@@ -102,6 +104,7 @@ class NationService:
             raise NationConflictError("nation slug is already taken")
 
         nation = Nation(
+            server_id=self.server_id,
             slug=slug,
             title=payload.title.strip(),
             tag=payload.tag.strip().upper(),
@@ -118,6 +121,7 @@ class NationService:
 
         self.session.add(
             NationMember(
+                server_id=self.server_id,
                 nation_id=nation.id,
                 user_id=current_user.id,
                 role="leader",
@@ -234,6 +238,7 @@ class NationService:
         if nation.recruitment_policy == "open":
             self.session.add(
                 NationMember(
+                    server_id=self.server_id,
                     nation_id=nation.id,
                     user_id=current_user.id,
                     role="member",
@@ -255,6 +260,7 @@ class NationService:
             )
 
         join_request = NationJoinRequest(
+            server_id=self.server_id,
             nation_id=nation.id,
             user_id=current_user.id,
             message=(payload.message or "").strip() or None,
@@ -303,6 +309,7 @@ class NationService:
 
         self.session.add(
             NationMember(
+                server_id=self.server_id,
                 nation_id=nation.id,
                 user_id=join_request.user_id,
                 role="member",
@@ -685,6 +692,7 @@ class NationService:
                     joinedload(Nation.join_requests).joinedload(NationJoinRequest.user).joinedload(User.player_account),
                 )
                 .where(NationMember.user_id == user_id)
+                .where(Nation.server_id == self.server_id)
             )
             .unique()
             .scalar_one_or_none()
@@ -700,6 +708,7 @@ class NationService:
                     joinedload(Nation.join_requests).joinedload(NationJoinRequest.user).joinedload(User.player_account),
                 )
                 .where(Nation.slug == normalized)
+                .where(Nation.server_id == self.server_id)
             )
             .unique()
             .scalar_one_or_none()
@@ -717,7 +726,10 @@ class NationService:
         snapshot = (
             self.session.execute(
                 select(NationMemberStatSnapshot)
-                .where(NationMemberStatSnapshot.user_id == user_id)
+                .where(
+                    NationMemberStatSnapshot.user_id == user_id,
+                    NationMemberStatSnapshot.server_id == self.server_id,
+                )
                 .order_by(NationMemberStatSnapshot.last_synced_at.desc(), NationMemberStatSnapshot.created_at.desc())
             )
             .scalars()
@@ -727,7 +739,10 @@ class NationService:
             return Decimal(str(getattr(snapshot, "current_balance", 0) or 0))
 
         cache = self.session.execute(
-            select(PlayerStatCache).where(PlayerStatCache.user_id == user_id)
+            select(PlayerStatCache).where(
+                PlayerStatCache.user_id == user_id,
+                PlayerStatCache.server_id == self.server_id,
+            )
         ).scalar_one_or_none()
         if cache is not None:
             return Decimal(str(getattr(cache, "current_balance", 0) or 0))
@@ -735,7 +750,12 @@ class NationService:
         return Decimal("0")
 
     def _slug_exists(self, slug: str) -> bool:
-        return self.session.execute(select(Nation.id).where(Nation.slug == slug)).scalar_one_or_none() is not None
+        return self.session.execute(
+            select(Nation.id).where(
+                Nation.slug == slug,
+                Nation.server_id == self.server_id,
+            )
+        ).scalar_one_or_none() is not None
 
     def _normalize_slug(self, slug: str) -> str:
         normalized = SLUG_CLEANUP_PATTERN.sub("-", (slug or "").strip().lower()).strip("-")

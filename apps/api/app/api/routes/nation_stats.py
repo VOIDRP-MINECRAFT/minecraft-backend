@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user
 from apps.api.app.dependencies.server_auth import require_game_auth_secret
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 from apps.api.app.schemas.nation_stats import (
     NationDonorListResponse,
@@ -38,8 +40,9 @@ router = APIRouter(prefix="/nation-stats", tags=["nation-stats"])
 
 def get_stats_service(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> NationStatsService:
-    return NationStatsService(session)
+    return NationStatsService(session, server.id)
 
 
 @router.get("/nations/{slug}", response_model=NationStatsRead)

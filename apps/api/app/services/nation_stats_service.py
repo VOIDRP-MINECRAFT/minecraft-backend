@@ -49,14 +49,15 @@ class NationStatsValidationError(Exception):
 
 
 class NationStatsService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
-        self.activity = NationActivityService(session)
+        self.server_id = server_id
+        self.activity = NationActivityService(session, server_id)
         self.cache = RedisCacheService()
 
     def get_stats_by_slug(self, slug: str) -> NationStatsRead:
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == slug)
+            select(Nation).where(Nation.slug == slug, Nation.server_id == self.server_id)
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("Государство не найдено.")
@@ -83,7 +84,7 @@ class NationStatsService:
 
     def upsert_from_game(self, payload: NationStatsUpsertRequest) -> NationStatsUpsertResponse:
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == payload.nation_slug)
+            select(Nation).where(Nation.slug == payload.nation_slug, Nation.server_id == self.server_id)
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("Государство не найдено.")
@@ -125,7 +126,7 @@ class NationStatsService:
         payload: NationMemberStatsSyncRequest,
     ) -> NationMemberStatsSyncResponse:
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == payload.nation_slug)
+            select(Nation).where(Nation.slug == payload.nation_slug, Nation.server_id == self.server_id)
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("Государство не найдено.")
@@ -148,6 +149,7 @@ class NationStatsService:
             snapshot = existing_by_norm.get(normalized)
             if snapshot is None:
                 snapshot = NationMemberStatSnapshot(
+                    server_id=self.server_id,
                     nation_id=nation.id,
                     minecraft_nickname=item.minecraft_nickname.strip(),
                     minecraft_nickname_normalized=normalized,
@@ -370,6 +372,7 @@ class NationStatsService:
 
         self.session.add(
             NationTreasuryTransaction(
+                server_id=self.server_id,
                 transaction_type="withdraw",
                 nation_id=nation.id,
                 created_by_user_id=current_user.id,
@@ -412,7 +415,7 @@ class NationStatsService:
     ) -> NationTreasuryActionResponse:
         amount = self._normalize_money_amount(amount)
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == nation_slug)
+            select(Nation).where(Nation.slug == nation_slug, Nation.server_id == self.server_id)
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("Государство не найдено.")
@@ -473,7 +476,7 @@ class NationStatsService:
     ) -> NationTreasuryActionResponse:
         amount = self._normalize_money_amount(amount)
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == nation_slug)
+            select(Nation).where(Nation.slug == nation_slug, Nation.server_id == self.server_id)
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("Государство не найдено.")
@@ -499,6 +502,7 @@ class NationStatsService:
 
         self.session.add(
             NationTreasuryTransaction(
+                server_id=self.server_id,
                 transaction_type="withdraw",
                 nation_id=nation.id,
                 created_by_user_id=player_account.user_id,
@@ -542,7 +546,7 @@ class NationStatsService:
         limit: int = 25,
     ) -> NationTreasuryTransactionListResponse:
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == nation_slug)
+            select(Nation).where(Nation.slug == nation_slug, Nation.server_id == self.server_id)
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("Государство не найдено.")
@@ -565,7 +569,7 @@ class NationStatsService:
         limit: int = 10,
     ) -> NationDonorListResponse:
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == nation_slug)
+            select(Nation).where(Nation.slug == nation_slug, Nation.server_id == self.server_id)
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("Государство не найдено.")
@@ -661,6 +665,7 @@ class NationStatsService:
 
         self.session.add(
             NationTreasuryTransaction(
+                server_id=self.server_id,
                 transaction_type=transaction_type,
                 nation_id=nation.id,
                 created_by_user_id=actor_user_id,
@@ -764,7 +769,7 @@ class NationStatsService:
         lock_for_update: bool = False,
     ) -> tuple[Nation, NationStat]:
         nation = self.session.execute(
-            select(Nation).where(Nation.slug == nation_slug)
+            select(Nation).where(Nation.slug == nation_slug, Nation.server_id == self.server_id)
         ).scalar_one_or_none()
         if nation is None:
             raise NationNotFoundError("Государство не найдено.")
@@ -810,7 +815,7 @@ class NationStatsService:
 
         stat = self.session.execute(statement).scalar_one_or_none()
         if stat is None:
-            stat = NationStat(nation_id=nation.id)
+            stat = NationStat(server_id=self.server_id, nation_id=nation.id)
             self.session.add(stat)
             self.session.flush()
         return stat
@@ -859,6 +864,7 @@ class NationStatsService:
             stat.treasury_balance = self._as_money(balance - tax)
             self.session.add(
                 NationTreasuryTransaction(
+                    server_id=self.server_id,
                     transaction_type="tax",
                     nation_id=stat.nation_id,
                     created_by_user_id=None,
