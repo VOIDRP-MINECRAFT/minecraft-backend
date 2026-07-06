@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
@@ -26,8 +27,9 @@ class UnknownTierError(Exception):
 
 
 class ProgressionService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
 
     def unlock_tier(self, payload: TierUnlockRequest) -> TierUnlockResponse:
         if payload.tier_name not in PROGRESSION_TIERS:
@@ -37,6 +39,7 @@ class ProgressionService:
         existing = self.session.execute(
             select(PlayerProgression).where(
                 and_(
+                    PlayerProgression.server_id == self.server_id,
                     PlayerProgression.minecraft_nickname_normalized == normalized,
                     PlayerProgression.tier_name == payload.tier_name,
                 )
@@ -47,6 +50,7 @@ class ProgressionService:
             return TierUnlockResponse(accepted=True, already_had=True)
 
         record = PlayerProgression(
+            server_id=self.server_id,
             minecraft_nickname=payload.minecraft_nickname,
             minecraft_nickname_normalized=normalized,
             minecraft_uuid=payload.minecraft_uuid,
@@ -62,7 +66,10 @@ class ProgressionService:
         tiers = (
             self.session.execute(
                 select(PlayerProgression)
-                .where(PlayerProgression.minecraft_nickname_normalized == normalized)
+                .where(
+                    PlayerProgression.server_id == self.server_id,
+                    PlayerProgression.minecraft_nickname_normalized == normalized,
+                )
                 .order_by(PlayerProgression.unlocked_at)
             )
             .scalars()
@@ -99,7 +106,10 @@ class ProgressionService:
             records = (
                 self.session.execute(
                     select(PlayerProgression)
-                    .where(PlayerProgression.tier_name == tier_name)
+                    .where(
+                        PlayerProgression.server_id == self.server_id,
+                        PlayerProgression.tier_name == tier_name,
+                    )
                     .order_by(PlayerProgression.unlocked_at)
                     .limit(20)
                 )

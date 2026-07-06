@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import secrets
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
@@ -28,8 +29,9 @@ class ReferralNotFoundError(Exception):
 
 
 class ReferralService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
         self.settings = get_settings()
 
     def get_dashboard(self, *, current_user: User) -> ReferralDashboardResponse:
@@ -91,6 +93,7 @@ class ReferralService:
         current_reward = self.session.execute(
             select(ReferralRewardPeriod).where(
                 ReferralRewardPeriod.user_id == current_user.id,
+                ReferralRewardPeriod.server_id == self.server_id,
                 ReferralRewardPeriod.reward_state == "active",
                 ReferralRewardPeriod.expires_at > utc_now(),
             )
@@ -194,6 +197,7 @@ class ReferralService:
         active = self.session.execute(
             select(ReferralRewardPeriod).where(
                 ReferralRewardPeriod.user_id == user.id,
+                ReferralRewardPeriod.server_id == self.server_id,
                 ReferralRewardPeriod.reward_state == "active",
             )
         ).scalars().all()
@@ -217,6 +221,7 @@ class ReferralService:
         active_current = self.session.execute(
             select(ReferralRewardPeriod).where(
                 ReferralRewardPeriod.user_id == user.id,
+                ReferralRewardPeriod.server_id == self.server_id,
                 ReferralRewardPeriod.reward_state == "active",
                 ReferralRewardPeriod.expires_at > now,
             )
@@ -235,6 +240,7 @@ class ReferralService:
         if should_create:
             self.session.add(
                 ReferralRewardPeriod(
+                    server_id=self.server_id,
                     user_id=user.id,
                     referral_rank=desired_rank,
                     starts_at=now,

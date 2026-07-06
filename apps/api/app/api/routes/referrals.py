@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.user_messages import localize_response_message, translate_user_message
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 from apps.api.app.schemas.referral import (
     ReferralCodePreviewResponse,
@@ -21,8 +23,9 @@ router = APIRouter(prefix="/referrals", tags=["referrals"])
 
 def get_referral_service(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> ReferralService:
-    return ReferralService(session=session)
+    return ReferralService(session=session, server_id=server.id)
 
 
 @router.get("/me", response_model=ReferralDashboardResponse)

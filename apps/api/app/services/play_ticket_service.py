@@ -49,8 +49,9 @@ class ConsumedPlayTicket:
 
 
 class PlayTicketService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
         self.settings = get_settings()
 
     def issue_for_user(
@@ -63,13 +64,14 @@ class PlayTicketService:
         if user.player_account is None:
             raise PlayTicketValidationError("player account is not linked")
 
-        self._expire_existing_tickets(user.id)
+        self._expire_existing_tickets(user.id, self.server_id)
 
         raw_ticket = generate_opaque_token()
         now = utc_now()
         expires_at = now + timedelta(minutes=self.settings.play_ticket_expire_minutes)
 
         ticket = PlayTicket(
+            server_id=self.server_id,
             user_id=user.id,
             minecraft_nickname=user.player_account.minecraft_nickname,
             ticket_hash=hash_opaque_token(raw_ticket),
@@ -141,11 +143,12 @@ class PlayTicketService:
             expires_at=play_ticket.expires_at,
         )
 
-    def _expire_existing_tickets(self, user_id: UUID) -> None:
+    def _expire_existing_tickets(self, user_id: UUID, server_id: UUID) -> None:
         now = utc_now()
         active_tickets = self.session.execute(
             select(PlayTicket).where(
                 PlayTicket.user_id == user_id,
+                PlayTicket.server_id == server_id,
                 PlayTicket.expires_at > now,
             ).with_for_update()
         ).scalars().all()

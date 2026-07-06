@@ -9,6 +9,8 @@ from apps.api.app.core.user_messages import translate_user_message
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user
 from apps.api.app.dependencies.server_auth import require_game_auth_secret
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 from apps.api.app.schemas.play_ticket import (
     ConsumePlayTicketRequest,
@@ -24,8 +26,9 @@ server_router = APIRouter(prefix="/server/auth", tags=["server-auth"])
 
 def get_play_ticket_service(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> PlayTicketService:
-    return PlayTicketService(session=session)
+    return PlayTicketService(session=session, server_id=server.id)
 
 
 @launcher_router.post("/play-ticket", response_model=IssuePlayTicketResponse)

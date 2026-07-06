@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -42,13 +42,15 @@ def _to_response(record: BattlePassPremium) -> BattlePassPremiumResponse:
 
 
 class BattlePassService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
 
     def get_premium_status(self, minecraft_uuid: str) -> BattlePassPremiumStatusResponse:
         record = self.session.execute(
             select(BattlePassPremium).where(
-                BattlePassPremium.minecraft_uuid == minecraft_uuid
+                BattlePassPremium.server_id == self.server_id,
+                BattlePassPremium.minecraft_uuid == minecraft_uuid,
             )
         ).scalar_one_or_none()
 
@@ -80,12 +82,14 @@ class BattlePassService:
 
         record = self.session.execute(
             select(BattlePassPremium).where(
-                BattlePassPremium.minecraft_uuid == req.minecraft_uuid
+                BattlePassPremium.server_id == self.server_id,
+                BattlePassPremium.minecraft_uuid == req.minecraft_uuid,
             )
         ).scalar_one_or_none()
 
         if record is None:
             record = BattlePassPremium(
+                server_id=self.server_id,
                 minecraft_uuid=req.minecraft_uuid,
                 minecraft_nickname=req.minecraft_nickname,
                 expires_at=new_expiry,
@@ -117,7 +121,8 @@ class BattlePassService:
     def revoke_premium(self, minecraft_uuid: str) -> None:
         record = self.session.execute(
             select(BattlePassPremium).where(
-                BattlePassPremium.minecraft_uuid == minecraft_uuid
+                BattlePassPremium.server_id == self.server_id,
+                BattlePassPremium.minecraft_uuid == minecraft_uuid,
             )
         ).scalar_one_or_none()
 
@@ -135,7 +140,8 @@ class BattlePassService:
         """Revoke by nickname: updates DB if record found, always runs RCON."""
         record = self.session.execute(
             select(BattlePassPremium).where(
-                func.lower(BattlePassPremium.minecraft_nickname) == nickname.lower()
+                BattlePassPremium.server_id == self.server_id,
+                func.lower(BattlePassPremium.minecraft_nickname) == nickname.lower(),
             )
         ).scalar_one_or_none()
         if record is not None:
@@ -149,13 +155,17 @@ class BattlePassService:
         now = datetime.now(timezone.utc)
         total = self.session.execute(
             select(func.count(BattlePassPremium.id)).where(
-                BattlePassPremium.expires_at > now
+                BattlePassPremium.server_id == self.server_id,
+                BattlePassPremium.expires_at > now,
             )
         ).scalar_one()
 
         records = self.session.execute(
             select(BattlePassPremium)
-            .where(BattlePassPremium.expires_at > now)
+            .where(
+                BattlePassPremium.server_id == self.server_id,
+                BattlePassPremium.expires_at > now,
+            )
             .order_by(BattlePassPremium.expires_at.desc())
             .offset(skip)
             .limit(limit)
@@ -170,11 +180,14 @@ class BattlePassService:
         self, skip: int = 0, limit: int = 50
     ) -> BattlePassPremiumListResponse:
         total = self.session.execute(
-            select(func.count(BattlePassPremium.id))
+            select(func.count(BattlePassPremium.id)).where(
+                BattlePassPremium.server_id == self.server_id
+            )
         ).scalar_one()
 
         records = self.session.execute(
             select(BattlePassPremium)
+            .where(BattlePassPremium.server_id == self.server_id)
             .order_by(BattlePassPremium.expires_at.desc())
             .offset(skip)
             .limit(limit)
@@ -190,6 +203,7 @@ class BattlePassService:
             pg_insert(BattlePassProgress)
             .values(
                 id=uuid4(),
+                server_id=self.server_id,
                 minecraft_uuid=req.minecraft_uuid,
                 minecraft_nickname=req.minecraft_nickname,
                 season=req.season,
@@ -197,7 +211,7 @@ class BattlePassService:
                 xp=req.xp,
             )
             .on_conflict_do_update(
-                index_elements=["minecraft_uuid"],
+                index_elements=["server_id", "minecraft_uuid"],
                 set_={
                     "minecraft_nickname": req.minecraft_nickname,
                     "season": req.season,
@@ -213,7 +227,8 @@ class BattlePassService:
     def get_public_profile(self, minecraft_uuid: str) -> BattlePassPublicProfileResponse:
         progress = self.session.execute(
             select(BattlePassProgress).where(
-                BattlePassProgress.minecraft_uuid == minecraft_uuid
+                BattlePassProgress.server_id == self.server_id,
+                BattlePassProgress.minecraft_uuid == minecraft_uuid,
             )
         ).scalar_one_or_none()
         premium_status = self.get_premium_status(minecraft_uuid)
@@ -229,7 +244,8 @@ class BattlePassService:
     def get_public_profile_by_nick(self, nickname: str) -> BattlePassPublicProfileResponse | None:
         progress = self.session.execute(
             select(BattlePassProgress).where(
-                BattlePassProgress.minecraft_nickname == nickname
+                BattlePassProgress.server_id == self.server_id,
+                BattlePassProgress.minecraft_nickname == nickname,
             )
         ).scalar_one_or_none()
         if progress is None:
@@ -247,7 +263,8 @@ class BattlePassService:
     def get_admin_player_info_by_nick(self, nickname: str) -> AdminBattlePassPlayerInfo:
         progress = self.session.execute(
             select(BattlePassProgress).where(
-                func.lower(BattlePassProgress.minecraft_nickname) == nickname.lower()
+                BattlePassProgress.server_id == self.server_id,
+                func.lower(BattlePassProgress.minecraft_nickname) == nickname.lower(),
             )
         ).scalar_one_or_none()
 
@@ -255,14 +272,16 @@ class BattlePassService:
         if progress:
             premium = self.session.execute(
                 select(BattlePassPremium).where(
-                    BattlePassPremium.minecraft_uuid == progress.minecraft_uuid
+                    BattlePassPremium.server_id == self.server_id,
+                    BattlePassPremium.minecraft_uuid == progress.minecraft_uuid,
                 )
             ).scalar_one_or_none()
         else:
             # may have premium without progress (granted before first login)
             premium = self.session.execute(
                 select(BattlePassPremium).where(
-                    func.lower(BattlePassPremium.minecraft_nickname) == nickname.lower()
+                    BattlePassPremium.server_id == self.server_id,
+                    func.lower(BattlePassPremium.minecraft_nickname) == nickname.lower(),
                 )
             ).scalar_one_or_none()
 
@@ -293,9 +312,11 @@ class BattlePassService:
                 select(BattlePassProgress, BattlePassPremium)
                 .outerjoin(
                     BattlePassPremium,
-                    BattlePassProgress.minecraft_uuid == BattlePassPremium.minecraft_uuid,
+                    (BattlePassProgress.minecraft_uuid == BattlePassPremium.minecraft_uuid)
+                    & (BattlePassPremium.server_id == self.server_id),
                 )
                 .where(
+                    BattlePassProgress.server_id == self.server_id,
                     BattlePassProgress.minecraft_nickname.notlike("% %"),
                     func.length(BattlePassProgress.minecraft_nickname) >= 3,
                     func.length(BattlePassProgress.minecraft_nickname) <= 16,
@@ -326,7 +347,9 @@ class BattlePassService:
             )
 
         total = self.session.execute(
-            select(func.count(BattlePassProgress.id))
+            select(func.count(BattlePassProgress.id)).where(
+                BattlePassProgress.server_id == self.server_id
+            )
         ).scalar_one()
         season = rows[0][0].season if rows else None
         return BattlePassLeaderboardResponse(season=season, entries=entries, total=total)
@@ -334,11 +357,14 @@ class BattlePassService:
     def get_stats(self) -> dict[str, int]:
         now = datetime.now(timezone.utc)
         total = self.session.execute(
-            select(func.count(BattlePassPremium.id))
+            select(func.count(BattlePassPremium.id)).where(
+                BattlePassPremium.server_id == self.server_id
+            )
         ).scalar_one()
         active = self.session.execute(
             select(func.count(BattlePassPremium.id)).where(
-                BattlePassPremium.expires_at > now
+                BattlePassPremium.server_id == self.server_id,
+                BattlePassPremium.expires_at > now,
             )
         ).scalar_one()
         return {"total": total, "active": active}
