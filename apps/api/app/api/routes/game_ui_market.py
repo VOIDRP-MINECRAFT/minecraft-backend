@@ -40,8 +40,12 @@ def get_items(svc: Annotated[PlayerMarketService, Depends(_service)]):
 
 
 @router.get("/order-book/{item_key:path}", response_model=PlayerMarketOrderBookResponse)
-def get_order_book(item_key: str, svc: Annotated[PlayerMarketService, Depends(_service)]):
-    return svc.get_order_book(item_key)
+def get_order_book(
+    item_key: str,
+    svc: Annotated[PlayerMarketService, Depends(_service)],
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+):
+    return svc.get_order_book(item_key, exclude_player=player.minecraft_nickname)
 
 
 @router.get("/my-sell-orders", response_model=PlayerMarketSellOrderListResponse)
@@ -50,9 +54,8 @@ def get_my_sell_orders(
     svc: Annotated[PlayerMarketService, Depends(_service)],
 ):
     orders = svc.list_my_sell_orders(player.minecraft_nickname)
-    return PlayerMarketSellOrderListResponse(
-        items=[PlayerMarketSellOrderPublicRead.model_validate(o) for o in orders]
-    )
+    validated = [PlayerMarketSellOrderPublicRead.model_validate(o) for o in orders]
+    return PlayerMarketSellOrderListResponse(total=len(validated), items=validated)
 
 
 @router.get("/my-buy-orders", response_model=PlayerMarketBuyOrderListResponse)
@@ -61,9 +64,8 @@ def get_my_buy_orders(
     svc: Annotated[PlayerMarketService, Depends(_service)],
 ):
     orders = svc.list_my_buy_orders(player.minecraft_nickname)
-    return PlayerMarketBuyOrderListResponse(
-        items=[PlayerMarketBuyOrderRead.model_validate(o) for o in orders]
-    )
+    validated = [PlayerMarketBuyOrderRead.model_validate(o) for o in orders]
+    return PlayerMarketBuyOrderListResponse(total=len(validated), items=validated)
 
 
 @router.get("/my-trades", response_model=PlayerMarketTradeListResponse)
@@ -107,7 +109,7 @@ def create_pending_action(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
 ):
-    allowed = {"buy", "cancel_buy", "cancel_sell", "pickup"}
+    allowed = {"buy", "sell", "cancel_buy", "cancel_sell", "pickup"}
     if req.action_type not in allowed:
         raise HTTPException(status_code=400, detail=f"Unknown action_type: {req.action_type}")
 

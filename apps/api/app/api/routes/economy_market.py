@@ -127,6 +127,21 @@ def list_nation_market_listings(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=translate_user_message(str(exc))) from exc
 
 
+@router.get(
+    "/nation-market/listings/{listing_id}",
+    response_model=NationMarketListingRead,
+    dependencies=[Depends(require_game_auth_secret)],
+)
+def get_nation_market_listing(
+    listing_id: UUID,
+    service: Annotated[EconomyMarketService, Depends(get_economy_market_service)],
+) -> NationMarketListingRead:
+    try:
+        return service.get_nation_listing(listing_id)
+    except EconomyMarketNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=translate_user_message(str(exc))) from exc
+
+
 @router.post(
     "/nation-market/listings/{listing_id}/purchase",
     response_model=NationMarketPurchaseResponse,

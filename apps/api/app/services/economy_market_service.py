@@ -237,6 +237,18 @@ class EconomyMarketService:
         self.session.refresh(listing)
         return self._listing_read(listing)
 
+    def get_nation_listing(self, listing_id: UUID) -> NationMarketListingRead:
+        listing = self.session.execute(
+            select(NationMarketListing)
+            .options(joinedload(NationMarketListing.nation))
+            .where(NationMarketListing.id == listing_id)
+        ).unique().scalar_one_or_none()
+        if listing is None:
+            raise EconomyMarketNotFoundError("market listing was not found")
+        self._refresh_listing_price(listing)
+        self.session.commit()
+        return self._listing_read(listing)
+
     def list_nation_market_listings(
         self,
         nation_slug: str | None = None,

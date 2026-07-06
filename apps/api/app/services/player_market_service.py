@@ -291,31 +291,39 @@ class PlayerMarketService:
 
     # ── Order book / public reads ──────────────────────────────────────────────
 
-    def get_order_book(self, item_key: str) -> PlayerMarketOrderBookResponse:
+    def get_order_book(self, item_key: str, exclude_player: str | None = None) -> PlayerMarketOrderBookResponse:
         item_key = self._normalize_key(item_key)
 
+        params: dict = {"key": item_key}
+        player_filter_sell = ""
+        player_filter_buy  = ""
+        if exclude_player:
+            params["excl"] = exclude_player.lower()
+            player_filter_sell = " AND LOWER(seller_player_name) != :excl"
+            player_filter_buy  = " AND LOWER(buyer_player_name) != :excl"
+
         sell_rows = self.session.execute(
-            text("""
+            text(f"""
                 SELECT unit_price, SUM(remaining_amount) AS total_amount, COUNT(*) AS order_count
                 FROM player_market_sell_orders
-                WHERE item_key = :key AND status IN ('active', 'partially_filled') AND remaining_amount > 0
+                WHERE item_key = :key AND status IN ('active', 'partially_filled') AND remaining_amount > 0{player_filter_sell}
                 GROUP BY unit_price
                 ORDER BY unit_price ASC
                 LIMIT 20
             """),
-            {"key": item_key},
+            params,
         ).fetchall()
 
         buy_rows = self.session.execute(
-            text("""
+            text(f"""
                 SELECT unit_price, SUM(remaining_amount) AS total_amount, COUNT(*) AS order_count
                 FROM player_market_buy_orders
-                WHERE item_key = :key AND status IN ('active', 'partially_filled') AND remaining_amount > 0
+                WHERE item_key = :key AND status IN ('active', 'partially_filled') AND remaining_amount > 0{player_filter_buy}
                 GROUP BY unit_price
                 ORDER BY unit_price DESC
                 LIMIT 20
             """),
-            {"key": item_key},
+            params,
         ).fetchall()
 
         last_trade = self.session.execute(
