@@ -20,7 +20,7 @@ branch_labels = None
 depends_on = None
 
 _ALL_FEATURES = (
-    '{"nations": true, "economy": true, "alliances": true, '
+    '{"nations": true, "economy": true, "shop": true, "alliances": true, '
     '"battlepass": true, "quests": true, "leaderboards": true, "map": true}'
 )
 

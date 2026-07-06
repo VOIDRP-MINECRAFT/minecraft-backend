@@ -20,6 +20,7 @@ WHITELIST_MODE_INVITE = "invite"
 SERVER_FEATURE_KEYS = (
     "nations",
     "economy",
+    "shop",
     "alliances",
     "battlepass",
     "quests",
