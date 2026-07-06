@@ -2,6 +2,7 @@ from apps.api.app.models.alliance import Alliance, AllianceMember, AlliancePropo
 from apps.api.app.models.battlepass import BattlePassPremium
 from apps.api.app.models.email_token import EmailToken
 from apps.api.app.models.economy_market import EconomyMarketItem, EconomyShopTransaction
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.media_asset import MediaAsset
 from apps.api.app.models.nation import Nation
 from apps.api.app.models.nation_activity_log import NationActivityLog
@@ -39,6 +40,7 @@ __all__ = [
     "EmailToken",
     "EconomyMarketItem",
     "EconomyShopTransaction",
+    "GameServer",
     "MediaAsset",
     "Nation",
     "NationActivityLog",
