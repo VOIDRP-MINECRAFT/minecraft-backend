@@ -55,6 +55,9 @@ def create_server(
 
     data = payload.model_dump()
     secret = data.pop("game_auth_secret", None) or secrets.token_urlsafe(32)
+    # Let the column default (all features on) apply when not explicitly provided.
+    if data.get("features") is None:
+        data.pop("features", None)
 
     server = GameServer(**data, game_auth_secret=secret)
     if server.is_default:
@@ -88,6 +91,9 @@ def update_server(
     updates = payload.model_dump(exclude_unset=True)
     if updates.get("is_default") is True:
         repo.clear_default_flag(except_id=server.id)
+    # Never null out the NOT NULL features column.
+    if "features" in updates and updates["features"] is None:
+        updates.pop("features")
     for field, value in updates.items():
         setattr(server, field, value)
 

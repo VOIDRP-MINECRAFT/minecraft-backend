@@ -25,6 +25,10 @@ class PlayerFeedback(UuidPrimaryKeyMixin, TimestampMixin, Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Which server this feedback was submitted from (nullable: global/legacy).
+    server_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("game_servers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     type: Mapped[FeedbackType] = mapped_column(
         String(20), nullable=False, index=True
     )

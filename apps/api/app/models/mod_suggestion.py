@@ -18,6 +18,10 @@ class ModSuggestion(UuidPrimaryKeyMixin, TimestampMixin, Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Which server this suggestion was submitted from (nullable: global/legacy).
+    server_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("game_servers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 

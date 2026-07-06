@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import get_current_admin_user
 from apps.api.app.dependencies.auth import get_current_user
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.mod_suggestion import ModSuggestion
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.user import User
@@ -26,10 +28,12 @@ router = APIRouter(tags=["mod-suggestions"])
 def create_suggestion(
     payload: ModSuggestionCreate,
     current_user: Annotated[User, Depends(get_current_user)],
+    server: Annotated[GameServer, Depends(resolve_server)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     suggestion = ModSuggestion(
         user_id=current_user.id,
+        server_id=server.id,
         url=payload.url,
         comment=payload.comment,
     )
@@ -44,9 +48,10 @@ def list_suggestions(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> ModSuggestionListResponse:
     rows = session.execute(
-        select(ModSuggestion, User, PlayerAccount)
+        select(ModSuggestion, User, PlayerAccount, GameServer)
         .join(User, ModSuggestion.user_id == User.id)
         .outerjoin(PlayerAccount, PlayerAccount.user_id == User.id)
+        .outerjoin(GameServer, GameServer.id == ModSuggestion.server_id)
         .order_by(ModSuggestion.created_at.desc())
     ).all()
 
@@ -58,6 +63,7 @@ def list_suggestions(
             created_at=row.ModSuggestion.created_at,
             user_login=row.User.site_login,
             user_nickname=row.PlayerAccount.minecraft_nickname if row.PlayerAccount else None,
+            server_name=row.GameServer.name if row.GameServer else None,
         )
         for row in rows
     ]

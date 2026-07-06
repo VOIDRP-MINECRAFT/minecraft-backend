@@ -33,6 +33,8 @@ class GameServerPublic(BaseModel):
     max_players: int
     whitelist_mode: str
     maintenance: bool
+    map_url: str | None = None
+    features: dict[str, bool] = Field(default_factory=dict)
     status: GameServerStatus | None = None
 
     model_config = {"from_attributes": True}
@@ -82,6 +84,9 @@ class GameServerCreate(BaseModel):
     whitelist_mode: str = Field(default="public", pattern=r"^(public|whitelist|invite)$")
     maintenance: bool = False
 
+    map_url: str | None = None
+    features: dict[str, bool] | None = None
+
     # If omitted, a strong secret is generated server-side.
     game_auth_secret: str | None = None
 
@@ -113,3 +118,6 @@ class GameServerUpdate(BaseModel):
     max_players: int | None = Field(default=None, ge=1)
     whitelist_mode: str | None = Field(default=None, pattern=r"^(public|whitelist|invite)$")
     maintenance: bool | None = None
+
+    map_url: str | None = None
+    features: dict[str, bool] | None = None

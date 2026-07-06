@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import Boolean, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
@@ -9,6 +12,24 @@ from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
 WHITELIST_MODE_PUBLIC = "public"
 WHITELIST_MODE_WHITELIST = "whitelist"
 WHITELIST_MODE_INVITE = "invite"
+
+# Per-server feature flags. Absent/unknown keys default to enabled, so the
+# default server keeps every tab. Admin toggles these to hide sections on
+# servers that don't have that game system (e.g. a vanilla server has no
+# nations/economy). Consumed by the launcher nav and the site nav.
+SERVER_FEATURE_KEYS = (
+    "nations",
+    "economy",
+    "alliances",
+    "battlepass",
+    "quests",
+    "leaderboards",
+    "map",
+)
+
+
+def default_features() -> dict[str, bool]:
+    return {key: True for key in SERVER_FEATURE_KEYS}
 
 
 class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
@@ -53,6 +74,12 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
         String(16), nullable=False, default=WHITELIST_MODE_PUBLIC
     )
     maintenance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # ── Features / integrations ───────────────────────────────────────────
+    # Web map (Bluemap/Dynmap) URL for this server; empty hides/disables the map tab.
+    map_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Feature flags controlling which tabs/sections appear in launcher & site.
+    features: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=default_features)
 
     # ── Game-server auth ──────────────────────────────────────────────────
     game_auth_secret: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)

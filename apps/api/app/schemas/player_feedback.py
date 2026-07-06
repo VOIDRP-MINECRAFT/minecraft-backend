@@ -48,6 +48,7 @@ class PlayerFeedbackRead(BaseModel):
     created_at: datetime
     user_login: str
     user_nickname: str | None
+    server_name: str | None = None
 
     model_config = {"from_attributes": True}
 
