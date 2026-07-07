@@ -29,7 +29,9 @@ class LauncherDashboardService:
         self.cache = RedisCacheService()
 
     def get_for_user(self, current_user: User) -> LauncherDashboardRead:
-        cache_key = f"launcher_dashboard:user:{current_user.id}"
+        # Ключ обязан включать сервер: дашборд per-server, и общий ключ отдавал
+        # лаунчеру статистику прошлого сервера после переключения.
+        cache_key = f"launcher_dashboard:user:{current_user.id}:srv:{self.server_id}"
         cached = self.cache.get_json(cache_key)
         if cached is not None:
             return LauncherDashboardRead.model_validate(cached)
