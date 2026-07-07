@@ -34,6 +34,7 @@ class GameServerPublic(BaseModel):
     whitelist_mode: str
     maintenance: bool
     map_url: str | None = None
+    accent_color: str | None = None
     features: dict[str, bool] = Field(default_factory=dict)
     status: GameServerStatus | None = None
 
@@ -86,6 +87,7 @@ class GameServerCreate(BaseModel):
     maintenance: bool = False
 
     map_url: str | None = None
+    accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     features: dict[str, bool] | None = None
     easydonate_server_id: int | None = None
 
@@ -122,5 +124,6 @@ class GameServerUpdate(BaseModel):
     maintenance: bool | None = None
 
     map_url: str | None = None
+    accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     features: dict[str, bool] | None = None
     easydonate_server_id: int | None = None

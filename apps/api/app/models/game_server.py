@@ -79,6 +79,9 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # ── Features / integrations ───────────────────────────────────────────
     # Web map (Bluemap/Dynmap) URL for this server; empty hides/disables the map tab.
     map_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Theme accent (hex, e.g. #7c3aed) used by the site/launcher to tint the UI
+    # for this server. Null → the default VoidRP violet.
+    accent_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # EasyDonate server id this game server maps to. Products/commands for a
     # purchase are delivered to this EasyDonate server. Null → use the global default.
     easydonate_server_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
