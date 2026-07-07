@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.dependencies.admin import get_current_admin_user
 from apps.api.app.models.alliance import Alliance
 from apps.api.app.models.battlepass import BattlePassPremium, BattlePassProgress
@@ -35,6 +37,7 @@ def _get_admin_db_service(
 @router.get("/stats")
 def get_dashboard_stats(
     session: Annotated[Session, Depends(_get_admin_db_service)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> dict:
     now = datetime.now(UTC)
     week_ago = now - timedelta(days=7)
@@ -58,25 +61,30 @@ def get_dashboard_stats(
         or 0
     )
     total_players = session.scalar(select(func.count()).select_from(PlayerAccount)) or 0
-    total_nations = session.scalar(select(func.count()).select_from(Nation)) or 0
-    total_alliances = session.scalar(select(func.count()).select_from(Alliance)) or 0
+    total_nations = session.scalar(select(func.count()).select_from(Nation).where(Nation.server_id == server.id)) or 0
+    total_alliances = session.scalar(select(func.count()).select_from(Alliance).where(Alliance.server_id == server.id)) or 0
     total_mod_suggestions = session.scalar(select(func.count()).select_from(ModSuggestion)) or 0
 
     # Battle Pass
-    bp_total = session.scalar(select(func.count()).select_from(BattlePassPremium)) or 0
+    bp_total = session.scalar(select(func.count()).select_from(BattlePassPremium).where(BattlePassPremium.server_id == server.id)) or 0
     bp_active = session.scalar(
-        select(func.count()).select_from(BattlePassPremium).where(BattlePassPremium.expires_at > now)
+        select(func.count())
+        .select_from(BattlePassPremium)
+        .where(BattlePassPremium.server_id == server.id, BattlePassPremium.expires_at > now)
     ) or 0
-    bp_progress_count = session.scalar(select(func.count()).select_from(BattlePassProgress)) or 0
+    bp_progress_count = session.scalar(select(func.count()).select_from(BattlePassProgress).where(BattlePassProgress.server_id == server.id)) or 0
 
     # Market
-    market_items = session.scalar(select(func.count()).select_from(EconomyMarketItem)) or 0
+    market_items = session.scalar(select(func.count()).select_from(EconomyMarketItem).where(EconomyMarketItem.server_id == server.id)) or 0
     market_enabled = session.scalar(
-        select(func.count()).select_from(EconomyMarketItem).where(EconomyMarketItem.enabled)
+        select(func.count())
+        .select_from(EconomyMarketItem)
+        .where(EconomyMarketItem.server_id == server.id, EconomyMarketItem.enabled)
     ) or 0
     market_tx_week = session.scalar(
         select(func.count()).select_from(EconomyShopTransaction).where(
-            EconomyShopTransaction.created_at >= week_ago
+            EconomyShopTransaction.server_id == server.id,
+            EconomyShopTransaction.created_at >= week_ago,
         )
     ) or 0
 

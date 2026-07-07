@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.rcon_client import send_rcon_command
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.anticheat import (
     AnticheatInjectionReport,
     AnticheatModSnapshot,
@@ -18,6 +19,7 @@ from apps.api.app.models.anticheat import (
     AnticheatViolation,
     ModVerdict,
 )
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.user import User
 
@@ -118,10 +120,13 @@ class ActionRequest(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _latest_suspicious(session: Session, player_uuid: str) -> list[str]:
+def _latest_suspicious(session: Session, player_uuid: str, server_id) -> list[str]:
     snap = (
         session.query(AnticheatModSnapshot)
-        .filter(AnticheatModSnapshot.player_uuid == player_uuid)
+        .filter(
+            AnticheatModSnapshot.player_uuid == player_uuid,
+            AnticheatModSnapshot.server_id == server_id,
+        )
         .order_by(AnticheatModSnapshot.created_at.desc())
         .first()
     )
@@ -149,6 +154,7 @@ def _find_user(session: Session, nick: str) -> User | None:
 @router.get("/players", response_model=AnticheatPlayerListResponse)
 def list_players(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     only_suspicious: bool = Query(default=False),
@@ -164,6 +170,7 @@ def list_players(
             func.sum(case((AnticheatViolation.reviewed == False, 1), else_=0)).label("unreviewed"),  # noqa: E712
             func.max(AnticheatViolation.created_at).label("last_at"),
         )
+        .filter(AnticheatViolation.server_id == server.id)
         .group_by(AnticheatViolation.player_uuid, AnticheatViolation.player_nick)
         .order_by(func.max(AnticheatViolation.created_at).desc())
     )
@@ -172,7 +179,7 @@ def list_players(
 
     items: list[AnticheatPlayerSummary] = []
     for row in rows:
-        suspicious = _latest_suspicious(session, row.player_uuid)
+        suspicious = _latest_suspicious(session, row.player_uuid, server.id)
         if only_suspicious and not suspicious:
             continue
         items.append(AnticheatPlayerSummary(
@@ -195,16 +202,23 @@ def list_players(
 def get_player_detail(
     player_uuid: str,
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> AnticheatPlayerDetail:
     violations = (
         session.query(AnticheatViolation)
-        .filter(AnticheatViolation.player_uuid == player_uuid)
+        .filter(
+            AnticheatViolation.player_uuid == player_uuid,
+            AnticheatViolation.server_id == server.id,
+        )
         .order_by(AnticheatViolation.created_at.desc())
         .all()
     )
     snapshots = (
         session.query(AnticheatModSnapshot)
-        .filter(AnticheatModSnapshot.player_uuid == player_uuid)
+        .filter(
+            AnticheatModSnapshot.player_uuid == player_uuid,
+            AnticheatModSnapshot.server_id == server.id,
+        )
         .order_by(AnticheatModSnapshot.created_at.desc())
         .all()
     )
@@ -244,7 +258,10 @@ def get_player_detail(
 
     injection_records = (
         session.query(AnticheatInjectionReport)
-        .filter(AnticheatInjectionReport.player_uuid == player_uuid)
+        .filter(
+            AnticheatInjectionReport.player_uuid == player_uuid,
+            AnticheatInjectionReport.server_id == server.id,
+        )
         .order_by(AnticheatInjectionReport.created_at.desc())
         .all()
     )
@@ -274,15 +291,22 @@ def player_action(
     player_uuid: str,
     req: ActionRequest,
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> dict[str, str]:
     violations = (
         session.query(AnticheatViolation)
-        .filter(AnticheatViolation.player_uuid == player_uuid)
+        .filter(
+            AnticheatViolation.player_uuid == player_uuid,
+            AnticheatViolation.server_id == server.id,
+        )
         .all()
     )
     snapshots = (
         session.query(AnticheatModSnapshot)
-        .filter(AnticheatModSnapshot.player_uuid == player_uuid)
+        .filter(
+            AnticheatModSnapshot.player_uuid == player_uuid,
+            AnticheatModSnapshot.server_id == server.id,
+        )
         .all()
     )
     if not violations and not snapshots:
