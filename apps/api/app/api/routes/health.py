@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.schemas.common import HealthResponse
 
 router = APIRouter(tags=["health"])
@@ -20,27 +22,20 @@ def healthcheck() -> HealthResponse:
 
 
 @router.get("/server/status")
-def public_server_status() -> dict:
-    """Public endpoint — checks if the Minecraft server is reachable."""
-    s = get_settings()
-    host = s.minecraft_server_host
-    port = s.minecraft_server_port
+def public_server_status(
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    """Public endpoint — checks if the selected game server is reachable."""
+    from apps.api.app.api.routes.servers import _to_public
 
-    if not host:
+    st = _to_public(server).status
+    if st is None or not st.online:
         return {"online": False}
-
-    try:
-        from mcstatus import JavaServer  # type: ignore[import-untyped]
-
-        server = JavaServer(host, port, timeout=3)
-        status = server.status()
-        return {
-            "online": True,
-            "players_online": status.players.online,
-            "players_max": status.players.max,
-        }
-    except Exception:
-        return {"online": False}
+    return {
+        "online": True,
+        "players_online": st.players_online,
+        "players_max": st.players_max,
+    }
 
 
 @router.get("/server/stats")
