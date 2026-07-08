@@ -66,6 +66,12 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     manifest_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     pack_version: Mapped[str] = mapped_column(String(32), nullable=False, default="1.0.0")
     min_launcher_version: Mapped[str] = mapped_column(String(32), nullable=False, default="0.1.0")
+    # Java-runtime bootstrap for this server's pack. Seed = small JSON that
+    # points to the platform manifest; manifest URL is the direct fallback
+    # (or a base URL — the launcher appends the platform file name if the
+    # value doesn't end with .json). Null → launcher-global defaults.
+    runtime_seed_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    runtime_manifest_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # ── Status / policy ───────────────────────────────────────────────────
     status_host: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -28,6 +28,8 @@ class GameServerPublic(BaseModel):
     loader: str
     java_version: int
     manifest_url: str | None = None
+    runtime_seed_url: str | None = None
+    runtime_manifest_url: str | None = None
     pack_version: str
     min_launcher_version: str
     max_players: int
@@ -77,6 +79,8 @@ class GameServerCreate(BaseModel):
     pack_root: str | None = None
     pack_base_url: str | None = None
     manifest_url: str | None = None
+    runtime_seed_url: str | None = None
+    runtime_manifest_url: str | None = None
     pack_version: str = "1.0.0"
     min_launcher_version: str = "0.1.0"
 
@@ -114,6 +118,8 @@ class GameServerUpdate(BaseModel):
     pack_root: str | None = None
     pack_base_url: str | None = None
     manifest_url: str | None = None
+    runtime_seed_url: str | None = None
+    runtime_manifest_url: str | None = None
     pack_version: str | None = None
     min_launcher_version: str | None = None
 
