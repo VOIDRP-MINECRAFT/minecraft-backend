@@ -1,5 +1,6 @@
 from apps.api.app.models.alliance import Alliance, AllianceMember, AllianceProposal, AllianceVote
 from apps.api.app.models.battlepass import BattlePassPremium
+from apps.api.app.models.claim import Claim, ClaimTrusted
 from apps.api.app.models.email_token import EmailToken
 from apps.api.app.models.economy_market import EconomyMarketItem, EconomyShopTransaction
 from apps.api.app.models.game_server import GameServer
@@ -34,6 +35,8 @@ from apps.api.app.models.player_market import (
 __all__ = [
     "Alliance",
     "BattlePassPremium",
+    "Claim",
+    "ClaimTrusted",
     "AllianceMember",
     "AllianceProposal",
     "AllianceVote",

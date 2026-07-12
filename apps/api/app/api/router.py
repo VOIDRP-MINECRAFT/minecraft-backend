@@ -34,6 +34,8 @@ from apps.api.app.api.routes.admin_battlepass import router as admin_battlepass_
 from apps.api.app.api.routes.admin_donate import router as admin_donate_router
 from apps.api.app.api.routes.admin_anticheat import router as admin_anticheat_router
 from apps.api.app.api.routes.game_sync_anticheat import router as game_sync_anticheat_router
+from apps.api.app.api.routes.game_sync_claims import router as game_sync_claims_router
+from apps.api.app.api.routes.claims import router as claims_router
 from apps.api.app.api.routes.launcher_crash import router as launcher_crash_router
 from apps.api.app.api.routes.admin_launcher_crashes import router as admin_launcher_crashes_router
 from apps.api.app.api.routes.game_sync_alliances import router as game_sync_alliances_router
@@ -85,6 +87,8 @@ api_router.include_router(admin_battlepass_router)
 api_router.include_router(admin_donate_router)
 api_router.include_router(admin_anticheat_router)
 api_router.include_router(game_sync_anticheat_router)
+api_router.include_router(game_sync_claims_router)
+api_router.include_router(claims_router)
 api_router.include_router(launcher_crash_router)
 api_router.include_router(admin_launcher_crashes_router)
 api_router.include_router(game_sync_alliances_router)
