@@ -2,6 +2,7 @@ from apps.api.app.models.alliance import Alliance, AllianceMember, AlliancePropo
 from apps.api.app.models.battlepass import BattlePassPremium
 from apps.api.app.models.bounty import Bounty
 from apps.api.app.models.claim import Claim, ClaimTrusted
+from apps.api.app.models.kill_event import KillEvent
 from apps.api.app.models.email_token import EmailToken
 from apps.api.app.models.economy_market import EconomyMarketItem, EconomyShopTransaction
 from apps.api.app.models.game_server import GameServer
@@ -38,6 +39,7 @@ __all__ = [
     "BattlePassPremium",
     "Bounty",
     "Claim",
+    "KillEvent",
     "ClaimTrusted",
     "AllianceMember",
     "AllianceProposal",
