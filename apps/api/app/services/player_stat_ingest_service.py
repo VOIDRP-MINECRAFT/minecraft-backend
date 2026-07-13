@@ -51,12 +51,15 @@ class PlayerStatIngestService:
         elif row.user_id is None:
             row.user_id = self._user_id_by_nick(normalized)
 
-        row.pvp_kills += delta.pvp_kills
-        row.mob_kills += delta.mob_kills
-        row.deaths += delta.deaths
-        row.total_playtime_minutes += delta.playtime_minutes
-        row.blocks_placed += delta.blocks_placed
-        row.blocks_broken += delta.blocks_broken
+        # Counter columns can be None here: on a freshly-constructed row SQLAlchemy
+        # applies the ``default=0`` only at INSERT/flush time, and legacy rows from
+        # other code paths may hold NULL — so coalesce before accumulating.
+        row.pvp_kills = (row.pvp_kills or 0) + delta.pvp_kills
+        row.mob_kills = (row.mob_kills or 0) + delta.mob_kills
+        row.deaths = (row.deaths or 0) + delta.deaths
+        row.total_playtime_minutes = (row.total_playtime_minutes or 0) + delta.playtime_minutes
+        row.blocks_placed = (row.blocks_placed or 0) + delta.blocks_placed
+        row.blocks_broken = (row.blocks_broken or 0) + delta.blocks_broken
         row.source = "live"
         row.last_seen_at = now
         row.last_synced_at = now
