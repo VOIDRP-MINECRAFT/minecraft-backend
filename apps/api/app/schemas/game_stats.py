@@ -14,6 +14,10 @@ class PlayerStatDelta(BaseModel):
     playtime_minutes: int = 0
     blocks_placed: int = 0
     blocks_broken: int = 0
+    # Notoriety: absolute (not accumulated) — current streak now, and the peak
+    # streak reached since the last flush (so short-lived peaks aren't lost).
+    kill_streak: int = 0
+    max_kill_streak: int = 0
 
 
 class PlayerStatsBatchRequest(BaseModel):

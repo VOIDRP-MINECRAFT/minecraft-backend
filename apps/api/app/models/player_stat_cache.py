@@ -41,6 +41,10 @@ class PlayerStatCache(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Ba
     pvp_kills: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     mob_kills: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deaths: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Notoriety (anarchy): current PvP kill streak (reset on any death) and the best
+    # streak ever reached. Fed as absolute values by the mod, not accumulated.
+    current_kill_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    best_kill_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     blocks_placed: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     blocks_broken: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     current_balance: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)

@@ -11,6 +11,8 @@ class BountyPlaceRequest(BaseModel):
     target_nick: str
     placed_by_nick: str
     amount: int = Field(gt=0)
+    # "player" (diamonds escrowed by the mod) or "server" (notoriety auto-bounty).
+    source: str = "player"
 
 
 class BountyClaimRequest(BaseModel):
@@ -33,6 +35,8 @@ class BountyBoardEntry(BaseModel):
     total_amount: int
     contributor_count: int
     last_updated: datetime
+    # True if any part of the pledge is a server-funded "wanted" (notoriety) bounty.
+    is_wanted: bool = False
 
 
 class BountyBoardResponse(BaseModel):

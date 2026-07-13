@@ -66,6 +66,7 @@ class BountyService:
             placed_by_user_id=self._user_id_by_nick(placer_norm),
             amount=req.amount,
             status="open",
+            source=req.source if req.source in ("player", "server") else "player",
         )
         self.session.add(bounty)
         self.session.flush()
@@ -108,6 +109,7 @@ class BountyService:
                 func.sum(Bounty.amount).label("total"),
                 func.count(Bounty.id).label("cnt"),
                 func.max(Bounty.updated_at).label("last"),
+                func.bool_or(Bounty.source == "server").label("wanted"),
             )
             .where(Bounty.server_id == self.server_id, Bounty.status == "open")
             .group_by(Bounty.target_nick_normalized, Bounty.target_nick)
@@ -120,6 +122,7 @@ class BountyService:
                     total_amount=int(r.total),
                     contributor_count=int(r.cnt),
                     last_updated=r.last,
+                    is_wanted=bool(r.wanted),
                 )
                 for r in rows
             ]

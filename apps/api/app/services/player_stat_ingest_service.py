@@ -60,6 +60,11 @@ class PlayerStatIngestService:
         row.total_playtime_minutes = (row.total_playtime_minutes or 0) + delta.playtime_minutes
         row.blocks_placed = (row.blocks_placed or 0) + delta.blocks_placed
         row.blocks_broken = (row.blocks_broken or 0) + delta.blocks_broken
+        # Kill streak is authoritative-absolute, not accumulated: the mod owns the
+        # live value. ``max_kill_streak`` carries the window peak so short spikes
+        # (streak up then reset by a death before the flush) still set the record.
+        row.current_kill_streak = delta.kill_streak
+        row.best_kill_streak = max(row.best_kill_streak or 0, delta.max_kill_streak, delta.kill_streak)
         row.source = "live"
         row.last_seen_at = now
         row.last_synced_at = now
