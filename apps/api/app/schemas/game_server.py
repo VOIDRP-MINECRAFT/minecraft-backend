@@ -38,6 +38,7 @@ class GameServerPublic(BaseModel):
     map_url: str | None = None
     accent_color: str | None = None
     features: dict[str, bool] = Field(default_factory=dict)
+    is_default: bool = False
     status: GameServerStatus | None = None
 
     model_config = {"from_attributes": True}
@@ -47,7 +48,6 @@ class GameServerAdmin(GameServerPublic):
     """Full admin view — adds internal / config fields."""
 
     is_visible: bool
-    is_default: bool
     neoforge_version: str | None = None
     pack_root: str | None = None
     pack_base_url: str | None = None
