@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -21,8 +23,9 @@ _CATEGORIES = [
 
 
 class PlayerStatsService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
+        self.server_id = server_id
 
     def get_top(self) -> PlayerTopResponse:
         categories: list[PlayerTopCategory] = []
@@ -35,6 +38,7 @@ class PlayerStatsService:
             rows = (
                 self.session.execute(
                     select(PlayerStatCache)
+                    .where(PlayerStatCache.server_id == self.server_id)
                     .order_by(order)
                     .limit(TOP_LIMIT)
                 )
