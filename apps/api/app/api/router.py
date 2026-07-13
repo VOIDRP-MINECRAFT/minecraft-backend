@@ -36,6 +36,9 @@ from apps.api.app.api.routes.admin_anticheat import router as admin_anticheat_ro
 from apps.api.app.api.routes.game_sync_anticheat import router as game_sync_anticheat_router
 from apps.api.app.api.routes.game_sync_claims import router as game_sync_claims_router
 from apps.api.app.api.routes.claims import router as claims_router
+from apps.api.app.api.routes.game_sync_bounties import router as game_sync_bounties_router
+from apps.api.app.api.routes.bounties import router as bounties_router
+from apps.api.app.api.routes.game_sync_stats import router as game_sync_stats_router
 from apps.api.app.api.routes.launcher_crash import router as launcher_crash_router
 from apps.api.app.api.routes.admin_launcher_crashes import router as admin_launcher_crashes_router
 from apps.api.app.api.routes.game_sync_alliances import router as game_sync_alliances_router
@@ -89,6 +92,9 @@ api_router.include_router(admin_anticheat_router)
 api_router.include_router(game_sync_anticheat_router)
 api_router.include_router(game_sync_claims_router)
 api_router.include_router(claims_router)
+api_router.include_router(game_sync_bounties_router)
+api_router.include_router(bounties_router)
+api_router.include_router(game_sync_stats_router)
 api_router.include_router(launcher_crash_router)
 api_router.include_router(admin_launcher_crashes_router)
 api_router.include_router(game_sync_alliances_router)
