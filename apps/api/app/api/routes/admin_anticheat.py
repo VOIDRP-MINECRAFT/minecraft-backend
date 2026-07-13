@@ -502,8 +502,9 @@ def update_config(
         if item.key not in rows_map:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown config key: {item.key}")
         row = rows_map[item.key]
-        clamped = max(row.min_value, min(row.max_value, item.value))
-        row.value = clamped
+        # Only enforce the lower bound (a sane floor); admins may raise a threshold
+        # above the recommended slider range by typing it into the number field.
+        row.value = max(row.min_value, item.value)
         row.updated_by = req.updated_by
     session.commit()
     rows = session.query(AnticheatThresholdConfig).order_by(AnticheatThresholdConfig.key).all()
@@ -543,9 +544,20 @@ class AnticheatStats(BaseModel):
 @router.get("/stats", response_model=AnticheatStats)
 def get_stats(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> AnticheatStats:
-    total = session.query(func.count(AnticheatViolation.id)).scalar() or 0
-    unique = session.query(func.count(func.distinct(AnticheatViolation.player_uuid))).scalar() or 0
+    total = (
+        session.query(func.count(AnticheatViolation.id))
+        .filter(AnticheatViolation.server_id == server.id)
+        .scalar()
+        or 0
+    )
+    unique = (
+        session.query(func.count(func.distinct(AnticheatViolation.player_uuid)))
+        .filter(AnticheatViolation.server_id == server.id)
+        .scalar()
+        or 0
+    )
 
     rows = (
         session.query(
@@ -556,6 +568,7 @@ def get_stats(
             func.max(AnticheatViolation.actual_value).label("max_actual"),
             func.avg(AnticheatViolation.expected_max).label("avg_expected_max"),
         )
+        .filter(AnticheatViolation.server_id == server.id)
         .group_by(AnticheatViolation.check_type)
         .order_by(func.count(AnticheatViolation.id).desc())
         .all()
