@@ -1,0 +1,11 @@
+# Посмотреть когда следующий тик ватчдога
+systemctl list-timers minecraft-watchdog.timer                                                                                                                     
+                                                                                                                                                                
+# Смотреть лог ватчдога в реальном времени                                                                                                                         
+tail -f /home/mironoouv/minecraft/scripts/watchdog.log                                                                                                           
+                                                                                                                                                                    
+# Включить режим обслуживания (ватчдог не будет трогать сервер)                                                                                                    
+touch /home/mironoouv/minecraft/minecraft_server/maintenance.flag                                                                                                  
+                                                                                                                                                                    
+# Отключить режим обслуживания                                                                                                                                   
+rm /home/mironoouv/minecraft/minecraft_server/maintenance.flag
