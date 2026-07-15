@@ -37,6 +37,15 @@ ALWAYS_OVERWRITE_SKIP_EXTS = {
     ".ogg", ".wav", ".mp3", ".ttf", ".otf",
 }
 
+# The client launcher profile (CmlLib loader id) can intentionally differ from a
+# server's own neoforge_version in game_servers. voidrp's server core runs
+# 21.1.232, but clients must provision 21.1.233 (a client-only mod, enchdesc,
+# requires it). Keyed by server slug; absent → derive from the DB value.
+# Keep the server DB value as-is (it correctly describes the server).
+CLIENT_PROFILE_NEOFORGE = {
+    "voidrp": "21.1.233",
+}
+
 REQUIRED_LOCKED_MODS = {
     "FancyMod":  {"displayName": "FancyMod (Античит)", "description": "Обязательный античит-модуль. Нельзя отключить."},
     "AntiFraud": {"displayName": "AntiFraud",          "description": "Обязательный модуль защиты. Нельзя отключить."},
@@ -281,8 +290,13 @@ def _load_servers_from_db(env_path: str, slug: str | None) -> list[dict]:
 
 
 def _meta_from_server(row: dict, args) -> dict:
-    # CLI override wins if given, else the server's own DB value, else a safe default.
-    neoforge = args.neoforge_version or row.get("neoforge_version") or "21.1.232"
+    # Client launcher-profile loader version: CLI override → per-slug client map →
+    # server's own DB value → safe default. The client map lets the launcher provision
+    # a different loader than the server core runs (see CLIENT_PROFILE_NEOFORGE).
+    neoforge = (args.neoforge_version
+                or CLIENT_PROFILE_NEOFORGE.get(row.get("slug"))
+                or row.get("neoforge_version")
+                or "21.1.232")
     loader = row.get("loader") or "neoforge"
     # Derive the launcher profile (CmlLib version id) from THIS server's loader version,
     # not a global CLI default — otherwise --all stamps every server (e.g. abyss on 26.2)
