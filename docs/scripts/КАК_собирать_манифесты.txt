@@ -1,0 +1,79 @@
+╔══════════════════════════════════════════════════════════════════╗
+║   КАК ПЕРЕСОБИРАТЬ МАНИФЕСТЫ ЛАУНЧЕРА VoidRP                        ║
+║   (актуально на 2026-07-15)                                        ║
+╚══════════════════════════════════════════════════════════════════╝
+
+ВСЕ КОМАНДЫ ЗАПУСКАТЬ ИЗ:  /home/mironoouv/minecraft
+
+У каждого сервера свой путь и свой способ сборки — НЕ путать.
+
+
+────────────────────────────────────────────────────────────────────
+1) ОСНОВНОЙ СЕРВЕР  (voidrp / "VoidRP: Evolution", MC 1.21.1)
+────────────────────────────────────────────────────────────────────
+
+    minecraft_backend/.venv/bin/python scripts/generate_launcher_manifest.py --server-slug voidrp
+
+  • Запускать именно через venv бэкенда (нужен DATABASE_URL из .env).
+  • НИКАКИХ флагов версии не надо. Клиентский профиль NeoForge 21.1.233
+    подставляется автоматически (карта CLIENT_PROFILE_NEOFORGE в скрипте).
+    Важно: сервер-ядро работает на 21.1.232, а клиент осознанно на 21.1.233 —
+    так и должно быть, не «исправлять».
+  • Пишет:  /home/mironoouv/launcher/manifests/voidrp.json
+    и копирует его в  /home/mironoouv/launcher/manifests/manifest.json
+    (manifest.json — это и есть файл, который реально тянет клиент).
+  • Фиксы применяются сами: fancymenu-картинки не перекачиваются каждый
+    запуск (managed), мелкие конфиги остаются alwaysOverwrite.
+
+  Читает пак из:  /home/mironoouv/launcher/pack
+
+
+────────────────────────────────────────────────────────────────────
+2) АНАРХИЯ  (abyss / "VoidRP: Abyss", MC 26.2, NeoForge 26.2.0.8-beta)
+────────────────────────────────────────────────────────────────────
+
+    scripts/generate_abyss_manifests.sh
+
+  • Отдельный скрипт. Все версии (26.2.0.8-beta, Java 25 и т.д.) зашиты внутри.
+  • Пишет в СВОЙ каталог:  /home/mironoouv/launcher/v26-abyss/manifests/
+    (abyss.json + runtime-манифесты). Это и есть настоящие файлы abyss.
+  • Читает пак из:  /home/mironoouv/launcher/v26-abyss/pack
+
+
+────────────────────────────────────────────────────────────────────
+⚠️  ЧЕГО НЕ ДЕЛАТЬ
+────────────────────────────────────────────────────────────────────
+
+  • НЕ запускать  ... generate_launcher_manifest.py --all
+    Он пишет ВСЁ в один каталог /home/mironoouv/launcher/manifests/ и:
+      – voidrp соберёт правильно,
+      – но для abyss создаст ЛИШНИЙ /manifests/abyss.json (его никто не читает),
+        а настоящий abyss в v26-abyss/ не обновит.
+    Итог: путаница. Для abyss всегда только его скрипт (пункт 2).
+
+  • Порядок простой:
+        voidrp → команда из пункта 1
+        abyss  → скрипт из пункта 2
+
+
+────────────────────────────────────────────────────────────────────
+ПРОВЕРКА ПОСЛЕ СБОРКИ (по желанию)
+────────────────────────────────────────────────────────────────────
+
+  voidrp — профиль должен быть neoforge-21.1.233:
+    python3 -c "import json;m=json.load(open('/home/mironoouv/launcher/manifests/manifest.json'));print(m['launcherProfileId'], m['neoForgeVersion'])"
+
+  abyss — профиль должен быть neoforge-26.2.0.8-beta:
+    python3 -c "import json;m=json.load(open('/home/mironoouv/launcher/v26-abyss/manifests/abyss.json'));print(m['launcherProfileId'], m['neoForgeVersion'])"
+
+
+────────────────────────────────────────────────────────────────────
+ЗАМЕТКИ
+────────────────────────────────────────────────────────────────────
+
+  • /manifests/voidrp.json — побочный файл, клиент его НЕ читает (читает
+    manifest.json). Трогать/удалять не нужно.
+  • Пути каждого сервера хранятся в БД, таблица game_servers
+    (pack_root, manifest_url и т.д.).
+  • Runtime-манифесты (Java) для abyss собирает его же скрипт; для voidrp
+    они меняются редко и живут в /home/mironoouv/launcher/manifests/.
