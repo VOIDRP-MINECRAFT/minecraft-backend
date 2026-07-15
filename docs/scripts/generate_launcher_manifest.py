@@ -281,12 +281,18 @@ def _load_servers_from_db(env_path: str, slug: str | None) -> list[dict]:
 
 
 def _meta_from_server(row: dict, args) -> dict:
-    neoforge = row.get("neoforge_version") or args.neoforge_version
+    # CLI override wins if given, else the server's own DB value, else a safe default.
+    neoforge = args.neoforge_version or row.get("neoforge_version") or "21.1.232"
+    loader = row.get("loader") or "neoforge"
+    # Derive the launcher profile (CmlLib version id) from THIS server's loader version,
+    # not a global CLI default — otherwise --all stamps every server (e.g. abyss on 26.2)
+    # with the default 21.1.x profile. Explicit --launcher-profile-id still overrides.
+    profile_id = args.launcher_profile_id or f"{loader}-{neoforge}"
     return {
         "packName":           row.get("name") or "VoidRP",
         "packVersion":        row.get("pack_version") or "1.0.0",
         "packDisplayVersion": args.pack_display_version,
-        "launcherProfileId":  args.launcher_profile_id,
+        "launcherProfileId":  profile_id,
         "neoForgeVersion":    neoforge,
         "fmlVersion":         args.fml_version,
         "neoFormVersion":     args.neoform_version,
@@ -438,8 +444,9 @@ def main():
     ap.add_argument("--manifests-dir", default=DEFAULT_MANIFESTS_DIR)
     # Launcher-specific defaults (not stored per-server in DB)
     ap.add_argument("--pack-display-version", default="VOID-RP")
-    ap.add_argument("--launcher-profile-id",  default="neoforge-21.1.232")
-    ap.add_argument("--neoforge-version",     default="21.1.232")
+    # Default None → derive per-server from the DB loader version; pass to force-override.
+    ap.add_argument("--launcher-profile-id",  default=None)
+    ap.add_argument("--neoforge-version",     default=None)
     ap.add_argument("--fml-version",          default="4.0.42")
     ap.add_argument("--neoform-version",      default="1.21.1-20240808.144430")
     # Legacy single-manifest mode (used only when neither --all nor --server-slug given)
@@ -478,8 +485,8 @@ def main():
         "packName":           args.pack_name,
         "packVersion":        args.pack_version,
         "packDisplayVersion": args.pack_display_version,
-        "launcherProfileId":  args.launcher_profile_id,
-        "neoForgeVersion":    args.neoforge_version,
+        "launcherProfileId":  args.launcher_profile_id or "neoforge-21.1.232",
+        "neoForgeVersion":    args.neoforge_version or "21.1.232",
         "fmlVersion":         args.fml_version,
         "neoFormVersion":     args.neoform_version,
         "minecraftVersion":   args.mc_version,
