@@ -45,6 +45,32 @@
 - **Admin Panel API** — управление игроками, вердикты по модам, действия
 - **WebGUI Game-UI** — API для браузерных страниц внутри Minecraft клиента
 - **Медиа** — аватары, скины, статические файлы через `/media`
+- **Мульти-сервер** — общий аккаунт, но игровые данные скоупятся по серверу (см. ниже)
+
+---
+
+## 🖥️ Мульти-сервер
+
+Платформа поддерживает несколько игровых серверов при **едином аккаунте**.
+`users` / `player_accounts` — глобальные, а все игровые данные (нации, альянсы,
+экономика, статистика, play-tickets, battlepass, античит…) скоупятся по
+`server_id` → `game_servers`.
+
+- **`game_servers`** (`models/game_server.py`): `slug`, витрина, подключение
+  (`host`/`port`/`mc_version`/`loader`/`neoforge_version`), модпак
+  (`pack_root`/`manifest_url`/…), доступ (`whitelist_mode`, `maintenance`),
+  `features` (JSONB — какие вкладки показывать) и уникальный `game_auth_secret`.
+  Ровно один сервер `is_default=True`.
+- **Резолв сервера:**
+  - плагины/game-sync → `dependencies/server_auth.py` по `X-Game-Auth-Secret`
+    (у каждого сервера свой секрет; legacy-секрет → дефолтный сервер);
+  - сайт/лаунчер → `dependencies/server_context.py` по `?server=<slug>` →
+    заголовку `X-Server-Slug` → дефолтному серверу.
+- **Admin:** `routes/admin_servers.py` (`/admin/servers`, CRUD + regenerate-secret
+  + загрузка иконок). **Public:** `routes/servers.py` (`/servers`, live-пинг через
+  mcstatus с кэшем 30 с).
+- **Миграции:** `20260706_0001` (таблица + дефолт-сид) и `20260706_0002`
+  (`server_id` в 30 таблиц + свопы уникальных индексов).
 
 ---
 
