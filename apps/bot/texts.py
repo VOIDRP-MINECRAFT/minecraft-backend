@@ -35,7 +35,7 @@ HELP_GAMES_ADMIN = (
 )
 HELP_GAMES_PLAYER = (
     "\n<b>Игры</b> (в игровых чатах):\n"
-    "/games /dice /slots /guess /quiz /duel /rps /8ball /daily /top /me\n"
+    "/games /dice /slots /rps /duel /guess /8ball /daily /top /me\n"
 )
 
 WHOAMI_UNLINKED = "Ты не привязан. Нажми /start и привяжи аккаунт VoidRP."

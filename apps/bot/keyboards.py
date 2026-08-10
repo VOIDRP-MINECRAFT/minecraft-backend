@@ -62,14 +62,6 @@ def rps_kb(stake: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def quiz_kb(options: list[str]) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    for i, opt in enumerate(options):
-        kb.button(text=opt, callback_data=f"quiz:{i}")
-    kb.adjust(1)
-    return kb.as_markup()
-
-
 def duel_kb(challenger_id: int, opponent_id: int, reward: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="⚔️ Принять", callback_data=f"duel:accept:{challenger_id}:{opponent_id}:{reward}")

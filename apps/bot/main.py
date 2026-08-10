@@ -37,7 +37,7 @@ GROUP_COMMANDS = [
     BotCommand(command="rps", description="✊ КНБ на ставку: /rps 20"),
     BotCommand(command="duel", description="⚔️ Дуэль (ответом): /duel 50"),
     BotCommand(command="guess", description="🔢 Угадай число"),
-    BotCommand(command="quiz", description="🧠 Викторина"),
+    BotCommand(command="8ball", description="🎱 Магический шар"),
     BotCommand(command="daily", description="🎁 Ежедневная награда"),
     BotCommand(command="top", description="🏆 Топ игроков"),
     BotCommand(command="me", description="💰 Мой счёт"),

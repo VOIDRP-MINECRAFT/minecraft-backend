@@ -10,14 +10,13 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.orm import Session
 
 from apps.bot import texts
-from apps.bot.keyboards import duel_kb, quiz_kb, rps_kb
+from apps.bot.keyboards import duel_kb, rps_kb
 from apps.bot.services import games as g
 
 router = Router(name="games")
 
 # In-memory per-(chat, thread) round state.
 _active_guess: dict[tuple, dict] = {}
-_active_quiz: dict[tuple, dict] = {}
 
 MIN_STAKE = 5
 DUEL_DEFAULT = 30
@@ -31,8 +30,8 @@ GAMES_LIST = (
     "✊ /rps &lt;ставка&gt; — камень-ножницы-бумага против бота\n\n"
     "<b>Против игроков:</b>\n"
     "⚔️ /duel &lt;ставка&gt; — ответом на игрока; победитель забирает войды\n\n"
-    "<b>На умение:</b>\n"
-    "🔢 /guess — угадай число · 🧠 /quiz — викторина\n"
+    "<b>На умение / фан:</b>\n"
+    "🔢 /guess — угадай число · 🎱 /8ball &lt;вопрос&gt;\n"
     "🎁 /daily — ежедневная награда · 🏆 /top · 💰 /me\n"
 )
 
@@ -242,41 +241,6 @@ async def on_guess_number(message: Message, session: Session) -> None:
         _active_guess.pop(key, None)
         total = g.add_score(session, message.from_user.id, message.chat.id, _uname(message), 25)
         await message.reply(f"🎯 В точку! Это было <b>{target}</b>. +25 войдов. Баланс: <b>{total}</b>.")
-
-
-@router.message(Command("quiz"))
-async def cmd_quiz(message: Message, session: Session) -> None:
-    if not await _guard(message, session):
-        return
-    wait = g.check_cooldown(message.chat.id, message.from_user.id, "quiz", 120)
-    if wait:
-        await message.answer(texts.COOLDOWN.format(sec=wait))
-        return
-    key = _key(message.chat.id, _thread(message))
-    if key in _active_quiz:
-        await message.answer("🧠 Вопрос уже висит — отвечай на него!")
-        return
-    q = random.choice(g.QUIZ)
-    _active_quiz[key] = {"a": q["a"], "answered": False}
-    await message.answer(f"🧠 <b>{q['q']}</b>\nПервый верный ответ — +15 войдов.", reply_markup=quiz_kb(q["opts"]))
-
-
-@router.callback_query(F.data.startswith("quiz:"))
-async def on_quiz_answer(cb: CallbackQuery, session: Session) -> None:
-    key = _key(cb.message.chat.id, cb.message.message_thread_id if getattr(cb.message, "is_topic_message", False) else None)
-    game = _active_quiz.get(key)
-    if game is None or game["answered"]:
-        await cb.answer("Уже отвечено 🙂")
-        return
-    idx = int(cb.data.split(":", 1)[1])
-    if idx != game["a"]:
-        await cb.answer("Мимо ❌")
-        return
-    game["answered"] = True
-    _active_quiz.pop(key, None)
-    total = g.add_score(session, cb.from_user.id, cb.message.chat.id, cb.from_user.username or cb.from_user.full_name, 15)
-    await cb.message.edit_text(f"🧠 Верно! 🏆 <b>{cb.from_user.full_name}</b> +15 войдов (баланс {total}).")
-    await cb.answer("Правильно! +15")
 
 
 @router.message(Command("8ball"))
