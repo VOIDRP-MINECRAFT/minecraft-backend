@@ -19,17 +19,21 @@ router = Router(name="games")
 _active_guess: dict[tuple, dict] = {}
 _active_quiz: dict[tuple, dict] = {}
 
+MIN_STAKE = 5
+DUEL_DEFAULT = 30
+
 GAMES_LIST = (
-    "🎮 <b>Мини-игры VoidRP</b>\n\n"
-    "🎲 /dice — бросок кубика (очки = ×2 значения)\n"
-    "🎰 /slots — слот-машина, три в ряд = джекпот\n"
-    "🔢 /guess — угадай число 1–100\n"
-    "🧠 /quiz — викторина по Minecraft\n"
-    "⚔️ /duel — дуэль (ответом на сообщение игрока)\n"
-    "✊ /rps — камень-ножницы-бумага\n"
-    "🎱 /8ball &lt;вопрос&gt; — магический шар\n"
-    "🎁 /daily — ежедневная награда\n"
-    "🏆 /top — топ игроков · /me — мой счёт\n"
+    "🎮 <b>Мини-игры VoidRP</b>\n"
+    "Очки — <b>войды</b>. Их можно выиграть и проиграть (вплоть до 0). Стартовый доход — /daily.\n\n"
+    "<b>На ставку (риск):</b>\n"
+    "🎲 /dice &lt;ставка&gt; — кубик: 4–6 выигрыш, 1–3 проигрыш\n"
+    "🎰 /slots &lt;ставка&gt; — слоты: три в ряд ×4, джекпот ×10\n"
+    "✊ /rps &lt;ставка&gt; — камень-ножницы-бумага против бота\n\n"
+    "<b>Против игроков:</b>\n"
+    "⚔️ /duel &lt;ставка&gt; — ответом на игрока; победитель забирает войды\n\n"
+    "<b>На умение:</b>\n"
+    "🔢 /guess — угадай число · 🧠 /quiz — викторина\n"
+    "🎁 /daily — ежедневная награда · 🏆 /top · 💰 /me\n"
 )
 
 
@@ -42,7 +46,6 @@ def _key(chat_id: int, thread: int | None) -> tuple:
 
 
 async def _guard(message: Message, session: Session) -> bool:
-    """True if games are allowed here; else nudge and return False."""
     if message.chat.type == ChatType.PRIVATE:
         await message.answer("🎮 Игры доступны в игровых чатах сервера, не в личке.")
         return False
@@ -57,49 +60,158 @@ def _uname(message: Message) -> str | None:
     return u.username or (u.full_name if u else None)
 
 
-@router.message(Command("games"))
-async def cmd_games(message: Message, session: Session) -> None:
-    if not await _guard(message, session):
-        return
-    await message.answer(GAMES_LIST)
+def _parse_stake(command: CommandObject, balance: int) -> tuple[int | None, str | None]:
+    """Return (stake, error_message)."""
+    if not command.args:
+        return None, f"Укажи ставку: например <code>{command.command} 20</code>. Твой баланс: {balance}."
+    raw = command.args.strip().split()[0]
+    if not raw.isdigit():
+        return None, "Ставка должна быть числом."
+    stake = int(raw)
+    if stake < MIN_STAKE:
+        return None, f"Минимальная ставка — {MIN_STAKE} войдов."
+    if stake > balance:
+        return None, f"Недостаточно войдов. Твой баланс: {balance}. Возьми /daily."
+    return stake, None
 
 
+# ── Solo staked games ────────────────────────────────────────────────────────
 @router.message(Command("dice"))
-async def cmd_dice(message: Message, session: Session) -> None:
+async def cmd_dice(message: Message, command: CommandObject, session: Session) -> None:
     if not await _guard(message, session):
         return
-    wait = g.check_cooldown(message.chat.id, message.from_user.id, "dice", 60)
-    if wait:
-        await message.answer(texts.COOLDOWN.format(sec=wait))
+    bal = g.get_score(session, message.from_user.id, message.chat.id)
+    stake, err = _parse_stake(command, bal)
+    if err:
+        await message.answer(err)
         return
     msg = await message.answer_dice(emoji=DiceEmoji.DICE)
     await asyncio.sleep(3.6)
-    reward = msg.dice.value * 2
-    total = g.add_score(session, message.from_user.id, message.chat.id, _uname(message), reward)
-    await message.answer(f"🎲 {msg.dice.value} → +{reward} войдов. Баланс: <b>{total}</b>.")
+    mult = {1: 0, 2: 0, 3: 0, 4: 1.5, 5: 2, 6: 2.5}[msg.dice.value]
+    gross = int(stake * mult)
+    total = g.solo_wager(session, message.chat.id, message.from_user.id, _uname(message), stake, gross)
+    if gross:
+        await message.answer(f"🎲 {msg.dice.value} → выигрыш <b>+{gross - stake}</b>! Баланс: <b>{total}</b>.")
+    else:
+        await message.answer(f"🎲 {msg.dice.value} → мимо, −{stake}. Баланс: <b>{total}</b>.")
 
 
 @router.message(Command("slots"))
-async def cmd_slots(message: Message, session: Session) -> None:
+async def cmd_slots(message: Message, command: CommandObject, session: Session) -> None:
     if not await _guard(message, session):
         return
-    wait = g.check_cooldown(message.chat.id, message.from_user.id, "slots", 60)
-    if wait:
-        await message.answer(texts.COOLDOWN.format(sec=wait))
+    bal = g.get_score(session, message.from_user.id, message.chat.id)
+    stake, err = _parse_stake(command, bal)
+    if err:
+        await message.answer(err)
         return
     msg = await message.answer_dice(emoji=DiceEmoji.SLOT_MACHINE)
     await asyncio.sleep(2.2)
     v = msg.dice.value
     if v == 64:
-        reward, note = 150, "🎉 ДЖЕКПОТ 777!"
+        mult, note = 10, "🎉 ДЖЕКПОТ 777!"
     elif v in (1, 22, 43):
-        reward, note = 60, "🔥 Три в ряд!"
+        mult, note = 4, "🔥 Три в ряд!"
     else:
-        reward, note = 5, "Почти!"
-    total = g.add_score(session, message.from_user.id, message.chat.id, _uname(message), reward)
-    await message.answer(f"🎰 {note} +{reward} войдов. Баланс: <b>{total}</b>.")
+        mult, note = 0, "Мимо"
+    gross = stake * mult
+    total = g.solo_wager(session, message.chat.id, message.from_user.id, _uname(message), stake, gross)
+    if gross:
+        await message.answer(f"🎰 {note} <b>+{gross - stake}</b> войдов! Баланс: <b>{total}</b>.")
+    else:
+        await message.answer(f"🎰 {note}, −{stake}. Баланс: <b>{total}</b>.")
 
 
+@router.message(Command("rps"))
+async def cmd_rps(message: Message, command: CommandObject, session: Session) -> None:
+    if not await _guard(message, session):
+        return
+    bal = g.get_score(session, message.from_user.id, message.chat.id)
+    stake, err = _parse_stake(command, bal)
+    if err:
+        await message.answer(err)
+        return
+    await message.answer(f"✊ Ставка {stake}. Твой ход:", reply_markup=rps_kb(stake))
+
+
+@router.callback_query(F.data.startswith("rps:"))
+async def on_rps(cb: CallbackQuery, session: Session) -> None:
+    _, choice, raw_stake = cb.data.split(":")
+    stake = int(raw_stake)
+    uname = cb.from_user.username or cb.from_user.full_name
+    bot_choice = random.choice(["rock", "scissors", "paper"])
+    beats = {"rock": "scissors", "scissors": "paper", "paper": "rock"}
+    emoji = {"rock": "🪨", "scissors": "✂️", "paper": "📄"}
+    if choice == bot_choice:
+        gross, tail = stake, "Ничья — ставка возвращена."
+    elif beats[choice] == bot_choice:
+        gross, tail = stake * 2, f"Ты выиграл +{stake}! 🎉"
+    else:
+        gross, tail = 0, f"Я выиграл −{stake} 😎"
+    total = g.solo_wager(session, cb.message.chat.id, cb.from_user.id, uname, stake, gross)
+    if total is None:  # balance changed since the prompt
+        await cb.answer("Недостаточно войдов на ставку.", show_alert=True)
+        return
+    await cb.message.edit_text(f"Ты: {emoji[choice]}  Я: {emoji[bot_choice]}\n{tail} Баланс: <b>{total}</b>.")
+    await cb.answer()
+
+
+# ── PvP: duel ────────────────────────────────────────────────────────────────
+@router.message(Command("duel"))
+async def cmd_duel(message: Message, command: CommandObject, session: Session) -> None:
+    if not await _guard(message, session):
+        return
+    reply = message.reply_to_message
+    if reply is None or reply.from_user is None or reply.from_user.is_bot:
+        await message.answer("⚔️ Ответь этой командой на сообщение игрока, которого вызываешь. Ставка: <code>/duel 50</code>.")
+        return
+    if reply.from_user.id == message.from_user.id:
+        await message.answer("Сам с собой? 🙃")
+        return
+    reward = DUEL_DEFAULT
+    if command.args and command.args.strip().split()[0].isdigit():
+        reward = max(MIN_STAKE, int(command.args.strip().split()[0]))
+    await message.answer(
+        f"⚔️ <b>{message.from_user.full_name}</b> вызывает <b>{reply.from_user.full_name}</b> на дуэль-кубик!\n"
+        f"Победитель получает <b>{reward}</b> войдов, проигравший отдаёт сколько есть (не в минус).",
+        reply_markup=duel_kb(message.from_user.id, reply.from_user.id, reward),
+    )
+
+
+@router.callback_query(F.data.startswith("duel:"))
+async def on_duel(cb: CallbackQuery, session: Session, bot: Bot) -> None:
+    _, action, challenger_id, opponent_id, reward = cb.data.split(":")
+    challenger_id, opponent_id, reward = int(challenger_id), int(opponent_id), int(reward)
+    if cb.from_user.id != opponent_id:
+        await cb.answer("Это вызов не тебе 🙂", show_alert=True)
+        return
+    if action == "decline":
+        await cb.message.edit_text("🏳 Дуэль отклонена.")
+        await cb.answer()
+        return
+    await cb.answer("Бросаем кубики!")
+    thread = cb.message.message_thread_id if getattr(cb.message, "is_topic_message", False) else None
+    d1 = await bot.send_dice(cb.message.chat.id, emoji=DiceEmoji.DICE, message_thread_id=thread)
+    d2 = await bot.send_dice(cb.message.chat.id, emoji=DiceEmoji.DICE, message_thread_id=thread)
+    await asyncio.sleep(3.6)
+    v1, v2 = d1.dice.value, d2.dice.value
+    if v1 == v2:
+        await cb.message.answer(f"⚔️ {v1}:{v2} — ничья! Переиграйте: /duel {reward}")
+        return
+    winner_id, loser_id = (challenger_id, opponent_id) if v1 > v2 else (opponent_id, challenger_id)
+    winner = (await bot.get_chat_member(cb.message.chat.id, winner_id)).user
+    loser = (await bot.get_chat_member(cb.message.chat.id, loser_id)).user
+    gain, loss = g.pvp_settle(
+        session, cb.message.chat.id,
+        winner_id=winner_id, winner_name=winner.username or winner.full_name,
+        loser_id=loser_id, loser_name=loser.username or loser.full_name, reward=reward,
+    )
+    w_total = g.get_score(session, winner_id, cb.message.chat.id)
+    note = f"забрал {loss} у соперника" if loss >= gain else (f"получил {gain} (у соперника было лишь {loss})" if loss else f"получил {gain} (у соперника пусто)")
+    await cb.message.answer(f"⚔️ {v1}:{v2} — победил <b>{winner.full_name}</b>, {note}! Баланс: <b>{w_total}</b>.")
+
+
+# ── Skill games ──────────────────────────────────────────────────────────────
 @router.message(Command("guess"))
 async def cmd_guess(message: Message, session: Session) -> None:
     if not await _guard(message, session):
@@ -109,7 +221,7 @@ async def cmd_guess(message: Message, session: Session) -> None:
         await message.answer("🔢 Игра уже идёт — присылай число 1–100!")
         return
     _active_guess[key] = {"number": random.randint(1, 100)}
-    await message.answer("🔢 Я загадал число от 1 до 100. Пишите варианты числом — подскажу «больше/меньше». Победитель получит <b>40</b> войдов!")
+    await message.answer("🔢 Я загадал число 1–100. Пишите варианты числом — подскажу «больше/меньше». Победитель получит <b>25</b> войдов!")
 
 
 @router.message(F.text.regexp(r"^\d{1,3}$"), F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
@@ -128,13 +240,17 @@ async def on_guess_number(message: Message, session: Session) -> None:
         await message.reply("📉 Меньше!")
     else:
         _active_guess.pop(key, None)
-        total = g.add_score(session, message.from_user.id, message.chat.id, _uname(message), 40)
-        await message.reply(f"🎯 В точку! Это было <b>{target}</b>. +40 войдов. Баланс: <b>{total}</b>.")
+        total = g.add_score(session, message.from_user.id, message.chat.id, _uname(message), 25)
+        await message.reply(f"🎯 В точку! Это было <b>{target}</b>. +25 войдов. Баланс: <b>{total}</b>.")
 
 
 @router.message(Command("quiz"))
 async def cmd_quiz(message: Message, session: Session) -> None:
     if not await _guard(message, session):
+        return
+    wait = g.check_cooldown(message.chat.id, message.from_user.id, "quiz", 120)
+    if wait:
+        await message.answer(texts.COOLDOWN.format(sec=wait))
         return
     key = _key(message.chat.id, _thread(message))
     if key in _active_quiz:
@@ -161,72 +277,6 @@ async def on_quiz_answer(cb: CallbackQuery, session: Session) -> None:
     total = g.add_score(session, cb.from_user.id, cb.message.chat.id, cb.from_user.username or cb.from_user.full_name, 15)
     await cb.message.edit_text(f"🧠 Верно! 🏆 <b>{cb.from_user.full_name}</b> +15 войдов (баланс {total}).")
     await cb.answer("Правильно! +15")
-
-
-@router.message(Command("rps"))
-async def cmd_rps(message: Message, session: Session) -> None:
-    if not await _guard(message, session):
-        return
-    await message.answer("✊ Твой ход:", reply_markup=rps_kb())
-
-
-@router.callback_query(F.data.startswith("rps:"))
-async def on_rps(cb: CallbackQuery, session: Session) -> None:
-    choice = cb.data.split(":", 1)[1]
-    bot_choice = random.choice(["rock", "scissors", "paper"])
-    beats = {"rock": "scissors", "scissors": "paper", "paper": "rock"}
-    emoji = {"rock": "🪨", "scissors": "✂️", "paper": "📄"}
-    if choice == bot_choice:
-        res = "Ничья 🤝"
-    elif beats[choice] == bot_choice:
-        total = g.add_score(session, cb.from_user.id, cb.message.chat.id, cb.from_user.username or cb.from_user.full_name, 10)
-        res = f"Ты выиграл! +10 войдов (баланс {total}) 🎉"
-    else:
-        res = "Я выиграл 😎"
-    await cb.message.edit_text(f"Ты: {emoji[choice]}  Я: {emoji[bot_choice]}\n{res}")
-    await cb.answer()
-
-
-@router.message(Command("duel"))
-async def cmd_duel(message: Message, session: Session) -> None:
-    if not await _guard(message, session):
-        return
-    reply = message.reply_to_message
-    if reply is None or reply.from_user is None or reply.from_user.is_bot:
-        await message.answer("⚔️ Ответь этой командой на сообщение игрока, которого вызываешь.")
-        return
-    if reply.from_user.id == message.from_user.id:
-        await message.answer("Сам с собой? 🙃")
-        return
-    await message.answer(
-        f"⚔️ <b>{message.from_user.full_name}</b> вызывает <b>{reply.from_user.full_name}</b> на дуэль-кубик! Победитель +30 войдов.",
-        reply_markup=duel_kb(message.from_user.id, reply.from_user.id),
-    )
-
-
-@router.callback_query(F.data.startswith("duel:"))
-async def on_duel(cb: CallbackQuery, session: Session, bot: Bot) -> None:
-    parts = cb.data.split(":")
-    action, challenger_id, opponent_id = parts[1], int(parts[2]), int(parts[3])
-    if cb.from_user.id != opponent_id:
-        await cb.answer("Это вызов не тебе 🙂", show_alert=True)
-        return
-    if action == "decline":
-        await cb.message.edit_text("🏳 Дуэль отклонена.")
-        await cb.answer()
-        return
-    await cb.answer("Бросаем кубики!")
-    d1 = await bot.send_dice(cb.message.chat.id, emoji=DiceEmoji.DICE, message_thread_id=cb.message.message_thread_id)
-    d2 = await bot.send_dice(cb.message.chat.id, emoji=DiceEmoji.DICE, message_thread_id=cb.message.message_thread_id)
-    await asyncio.sleep(3.6)
-    v1, v2 = d1.dice.value, d2.dice.value
-    if v1 == v2:
-        await cb.message.answer(f"⚔️ {v1}:{v2} — ничья! Переиграйте.")
-        return
-    winner_id = challenger_id if v1 > v2 else opponent_id
-    winner_name = (await bot.get_chat_member(cb.message.chat.id, winner_id)).user.full_name
-    total = g.add_score(session, winner_id, cb.message.chat.id, None, 30)
-    await cb.message.answer(f"⚔️ {v1}:{v2} — победил <b>{winner_name}</b>! +30 войдов (баланс {total}).")
 
 
 @router.message(Command("8ball"))
@@ -261,6 +311,13 @@ async def cmd_me(message: Message, session: Session) -> None:
     rank = g.rank_of(session, message.from_user.id, message.chat.id)
     tail = f" · место #{rank}" if rank else ""
     await message.answer(f"💰 <b>{message.from_user.full_name}</b>: {score} войдов{tail}.")
+
+
+@router.message(Command("games"))
+async def cmd_games(message: Message, session: Session) -> None:
+    if not await _guard(message, session):
+        return
+    await message.answer(GAMES_LIST)
 
 
 @router.message(Command("top"))

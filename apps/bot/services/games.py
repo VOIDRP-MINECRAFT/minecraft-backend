@@ -130,6 +130,33 @@ def top_scores(session: Session, chat_id: int, limit: int = 10) -> list[Telegram
     ).all())
 
 
+def pvp_settle(
+    session: Session, chat_id: int, *, winner_id: int, winner_name: str | None,
+    loser_id: int, loser_name: str | None, reward: int,
+) -> tuple[int, int]:
+    """Competitive payout: the winner always gains ``reward``; the loser pays out
+    of pocket only what they have (min(reward, balance)) — never going negative.
+    If the loser is broke, nothing is taken but the winner still gets the reward.
+    Returns (winner_gain, loser_loss)."""
+    loser_bal = get_score(session, loser_id, chat_id)
+    loss = min(reward, loser_bal)
+    if loss:
+        add_score(session, loser_id, chat_id, loser_name, -loss)
+    add_score(session, winner_id, chat_id, winner_name, reward)
+    return reward, loss
+
+
+def solo_wager(
+    session: Session, chat_id: int, tg_id: int, username: str | None, stake: int, gross_payout: int,
+) -> int | None:
+    """Solo house game. Deducts ``stake`` and credits ``gross_payout`` (0 = lost).
+    Returns the new balance, or None if the player can't cover the stake."""
+    bal = get_score(session, tg_id, chat_id)
+    if stake > bal:
+        return None
+    return add_score(session, tg_id, chat_id, username, gross_payout - stake)
+
+
 def claim_daily(session: Session, tg_id: int, chat_id: int, username: str | None) -> tuple[bool, int, int]:
     """(claimed, amount_or_score, wait_seconds)."""
     row = _score_row(session, tg_id, chat_id, username)

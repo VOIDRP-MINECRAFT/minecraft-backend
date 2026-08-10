@@ -53,11 +53,11 @@ def gamechat_kb(action: str, thread: int | None) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def rps_kb() -> InlineKeyboardMarkup:
+def rps_kb(stake: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🪨 Камень", callback_data="rps:rock")
-    kb.button(text="✂️ Ножницы", callback_data="rps:scissors")
-    kb.button(text="📄 Бумага", callback_data="rps:paper")
+    kb.button(text="🪨 Камень", callback_data=f"rps:rock:{stake}")
+    kb.button(text="✂️ Ножницы", callback_data=f"rps:scissors:{stake}")
+    kb.button(text="📄 Бумага", callback_data=f"rps:paper:{stake}")
     kb.adjust(3)
     return kb.as_markup()
 
@@ -70,9 +70,9 @@ def quiz_kb(options: list[str]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def duel_kb(challenger_id: int, opponent_id: int) -> InlineKeyboardMarkup:
+def duel_kb(challenger_id: int, opponent_id: int, reward: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚔️ Принять дуэль", callback_data=f"duel:accept:{challenger_id}:{opponent_id}")
-    kb.button(text="🏳 Отказаться", callback_data=f"duel:decline:{challenger_id}:{opponent_id}")
+    kb.button(text="⚔️ Принять", callback_data=f"duel:accept:{challenger_id}:{opponent_id}:{reward}")
+    kb.button(text="🏳 Отказаться", callback_data=f"duel:decline:{challenger_id}:{opponent_id}:{reward}")
     kb.adjust(2)
     return kb.as_markup()

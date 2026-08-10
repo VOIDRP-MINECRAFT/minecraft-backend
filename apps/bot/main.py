@@ -31,13 +31,13 @@ PRIVATE_COMMANDS = [
 ]
 
 GROUP_COMMANDS = [
-    BotCommand(command="games", description="Список игр"),
-    BotCommand(command="dice", description="🎲 Бросок кубика"),
-    BotCommand(command="slots", description="🎰 Слот-машина"),
+    BotCommand(command="games", description="Список игр и правила"),
+    BotCommand(command="dice", description="🎲 Кубик на ставку: /dice 20"),
+    BotCommand(command="slots", description="🎰 Слоты на ставку: /slots 20"),
+    BotCommand(command="rps", description="✊ КНБ на ставку: /rps 20"),
+    BotCommand(command="duel", description="⚔️ Дуэль (ответом): /duel 50"),
     BotCommand(command="guess", description="🔢 Угадай число"),
     BotCommand(command="quiz", description="🧠 Викторина"),
-    BotCommand(command="duel", description="⚔️ Дуэль (ответом на игрока)"),
-    BotCommand(command="rps", description="✊ Камень-ножницы-бумага"),
     BotCommand(command="daily", description="🎁 Ежедневная награда"),
     BotCommand(command="top", description="🏆 Топ игроков"),
     BotCommand(command="me", description="💰 Мой счёт"),
