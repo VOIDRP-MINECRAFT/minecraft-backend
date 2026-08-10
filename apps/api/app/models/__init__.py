@@ -35,6 +35,7 @@ from apps.api.app.models.player_market import (
 )
 from apps.api.app.models.tiktok import TikTokCampaign, TikTokClickReward
 from apps.api.app.models.news import NewsPost
+from apps.api.app.models.telegram import TelegramGameChat, TelegramGameScore, TelegramLinkToken
 
 __all__ = [
     "Alliance",
@@ -79,4 +80,7 @@ __all__ = [
     "PlayerMarketTrade",
     "PlayerMarketPendingDelivery",
     "PlayerMarketWebAction",
+    "TelegramGameChat",
+    "TelegramGameScore",
+    "TelegramLinkToken",
 ]

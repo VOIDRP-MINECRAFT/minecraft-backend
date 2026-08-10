@@ -1,0 +1,24 @@
+# VoidRP Telegram bot (aiogram 3, long-polling).
+# Install (as the user that owns the backend):
+#   sudo cp deploy/voidrp-telegram-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now voidrp-telegram-bot.service
+#
+# Requires TELEGRAM_BOT_TOKEN + OUTBOUND_PROXY_URL in minecraft_backend/.env
+# and the bot deps installed:  .venv/bin/pip install -e ".[bot]"
+
+[Unit]
+Description=VoidRP Telegram bot (aiogram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mironoouv
+WorkingDirectory=/home/mironoouv/minecraft/minecraft_backend
+ExecStart=/home/mironoouv/minecraft/minecraft_backend/.venv/bin/python -m apps.bot.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

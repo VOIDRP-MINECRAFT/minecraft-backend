@@ -8,7 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
-from apps.api.app.core.permissions import ALL_KEYS
+from apps.api.app.core.permissions import ALL_KEYS, resolve_user_permissions
 from apps.api.app.core.security import decode_access_token
 from apps.api.app.db import get_db_session
 from apps.api.app.models.user import User
@@ -115,11 +115,9 @@ def caller_permissions(
     user = _user_from_credentials(credentials, session)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin access required")
-    if user.is_admin:
-        return set(ALL_KEYS)
-    if user.is_moderator:
-        return set(user.staff_permissions or [])
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
+    if not (user.is_admin or user.is_moderator):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
+    return resolve_user_permissions(user)
 
 
 def require_permission(key: str):

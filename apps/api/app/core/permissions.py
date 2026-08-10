@@ -64,6 +64,12 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "news.media.manage", "label": "Новости/медиа (публикация/редактирование)"},
         ],
     },
+    {
+        "group": "Telegram",
+        "permissions": [
+            {"key": "telegram.games.manage", "label": "TG-бот: управление игровыми чатами", "sensitive": True},
+        ],
+    },
 ]
 
 ALL_KEYS: frozenset[str] = frozenset(
@@ -92,6 +98,22 @@ def sanitize_permissions(keys: list[str] | None) -> list[str]:
     """Keep only known keys, de-duplicated, in catalog order."""
     given = set(keys or [])
     return [k for k in _ORDERED_KEYS if k in given]
+
+
+def resolve_user_permissions(user) -> set[str]:
+    """Effective permission set for a User object.
+
+    Full admins get every key; moderators get their sanitized granted subset;
+    everyone else gets nothing. Shared by the admin API (``caller_permissions``)
+    and the Telegram bot so both agree on what a user can do.
+    """
+    if user is None or not getattr(user, "is_active", True):
+        return set()
+    if getattr(user, "is_admin", False):
+        return set(ALL_KEYS)
+    if getattr(user, "is_moderator", False):
+        return set(sanitize_permissions(user.staff_permissions or []))
+    return set()
 
 
 _ORDERED_KEYS: list[str] = [

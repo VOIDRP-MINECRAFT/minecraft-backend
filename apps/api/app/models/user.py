@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from typing import Any
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import BigInteger, Boolean, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +43,10 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # (is_admin) bypass all permission checks.
     is_moderator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     staff_permissions: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+
+    # Telegram account link (for the aiogram bot: news publishing / admin).
+    telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True, index=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     player_account: Mapped["PlayerAccount"] = relationship(
         back_populates="user",

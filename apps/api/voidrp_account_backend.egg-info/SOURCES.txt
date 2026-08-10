@@ -17,6 +17,9 @@ apps/api/app/api/routes/admin_landing.py
 apps/api/app/api/routes/admin_launcher_crashes.py
 apps/api/app/api/routes/admin_market.py
 apps/api/app/api/routes/admin_metrika.py
+apps/api/app/api/routes/admin_moderators.py
+apps/api/app/api/routes/admin_news.py
+apps/api/app/api/routes/admin_notifications.py
 apps/api/app/api/routes/admin_server_ops.py
 apps/api/app/api/routes/admin_servers.py
 apps/api/app/api/routes/alliances.py
@@ -33,6 +36,7 @@ apps/api/app/api/routes/game_sync_bounties.py
 apps/api/app/api/routes/game_sync_claims.py
 apps/api/app/api/routes/game_sync_killfeed.py
 apps/api/app/api/routes/game_sync_stats.py
+apps/api/app/api/routes/game_sync_tiktok.py
 apps/api/app/api/routes/game_ui_alliance.py
 apps/api/app/api/routes/game_ui_battlepass.py
 apps/api/app/api/routes/game_ui_hud.py
@@ -49,11 +53,13 @@ apps/api/app/api/routes/market_public.py
 apps/api/app/api/routes/mod_suggestions.py
 apps/api/app/api/routes/nation_stats.py
 apps/api/app/api/routes/nations.py
+apps/api/app/api/routes/news.py
 apps/api/app/api/routes/play_ticket.py
 apps/api/app/api/routes/player_feedback.py
 apps/api/app/api/routes/player_heads.py
 apps/api/app/api/routes/player_market.py
 apps/api/app/api/routes/player_stats.py
+apps/api/app/api/routes/profile_telegram.py
 apps/api/app/api/routes/profiles.py
 apps/api/app/api/routes/progression.py
 apps/api/app/api/routes/referrals.py
@@ -61,7 +67,9 @@ apps/api/app/api/routes/rss.py
 apps/api/app/api/routes/server_auth.py
 apps/api/app/api/routes/servers.py
 apps/api/app/api/routes/social.py
+apps/api/app/api/routes/tiktok_public.py
 apps/api/app/core/__init__.py
+apps/api/app/core/permissions.py
 apps/api/app/core/rcon_client.py
 apps/api/app/core/security.py
 apps/api/app/core/server_ops.py
@@ -96,6 +104,7 @@ apps/api/app/models/nation_member.py
 apps/api/app/models/nation_member_stat_snapshot.py
 apps/api/app/models/nation_stat.py
 apps/api/app/models/nation_treasury_transaction.py
+apps/api/app/models/news.py
 apps/api/app/models/play_ticket.py
 apps/api/app/models/player_account.py
 apps/api/app/models/player_feedback.py
@@ -109,6 +118,8 @@ apps/api/app/models/referral_code.py
 apps/api/app/models/referral_link.py
 apps/api/app/models/referral_reward_period.py
 apps/api/app/models/refresh_session.py
+apps/api/app/models/telegram.py
+apps/api/app/models/tiktok.py
 apps/api/app/models/user.py
 apps/api/app/repositories/__init__.py
 apps/api/app/repositories/game_server_repository.py
@@ -116,6 +127,7 @@ apps/api/app/repositories/user_repository.py
 apps/api/app/schemas/__init__.py
 apps/api/app/schemas/account.py
 apps/api/app/schemas/admin.py
+apps/api/app/schemas/admin_notification.py
 apps/api/app/schemas/alliance.py
 apps/api/app/schemas/auth.py
 apps/api/app/schemas/battlepass.py
@@ -134,6 +146,7 @@ apps/api/app/schemas/mod_suggestion.py
 apps/api/app/schemas/nation.py
 apps/api/app/schemas/nation_activity.py
 apps/api/app/schemas/nation_stats.py
+apps/api/app/schemas/news.py
 apps/api/app/schemas/play_ticket.py
 apps/api/app/schemas/player_feedback.py
 apps/api/app/schemas/player_market.py
@@ -143,6 +156,8 @@ apps/api/app/schemas/progression.py
 apps/api/app/schemas/referral.py
 apps/api/app/schemas/server_auth.py
 apps/api/app/schemas/social.py
+apps/api/app/schemas/telegram.py
+apps/api/app/schemas/tiktok.py
 apps/api/app/services/__init__.py
 apps/api/app/services/admin_player_service.py
 apps/api/app/services/alliance_service.py
@@ -164,6 +179,7 @@ apps/api/app/services/nation_activity_service.py
 apps/api/app/services/nation_media_service.py
 apps/api/app/services/nation_service.py
 apps/api/app/services/nation_stats_service.py
+apps/api/app/services/news_service.py
 apps/api/app/services/play_ticket_service.py
 apps/api/app/services/player_market_service.py
 apps/api/app/services/player_skin_service.py
@@ -175,6 +191,7 @@ apps/api/app/services/redis_cache_service.py
 apps/api/app/services/referral_service.py
 apps/api/app/services/server_player_access_service.py
 apps/api/app/services/social_service.py
+apps/api/app/services/tiktok_service.py
 apps/api/app/utils/__init__.py
 apps/api/app/utils/normalization.py
 apps/api/voidrp_account_backend.egg-info/PKG-INFO

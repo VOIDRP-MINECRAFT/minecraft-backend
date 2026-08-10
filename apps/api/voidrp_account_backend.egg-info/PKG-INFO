@@ -24,6 +24,8 @@ Requires-Dist: psutil>=6.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0.0; extra == "dev"
 Requires-Dist: httpx>=0.28.0; extra == "dev"
+Provides-Extra: bot
+Requires-Dist: aiogram>=3.13.0; extra == "bot"
 
 # ⚙️ VoidRP Backend
 

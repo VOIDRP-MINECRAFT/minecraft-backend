@@ -16,6 +16,9 @@ mcstatus>=11.0.0
 mcrcon>=0.7.0
 psutil>=6.0.0
 
+[bot]
+aiogram>=3.13.0
+
 [dev]
 pytest>=8.0.0
 httpx>=0.28.0
