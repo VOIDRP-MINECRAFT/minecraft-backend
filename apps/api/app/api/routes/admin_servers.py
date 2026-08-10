@@ -60,12 +60,19 @@ def suggest_paths(
     slug: Annotated[str, Query(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")],
     neoforge_version: Annotated[str | None, Query()] = None,
     mc_version: Annotated[str | None, Query()] = None,
+    loader: Annotated[str | None, Query()] = None,
+    java_version: Annotated[int | None, Query()] = None,
 ) -> dict:
     """Derived modpack + monitoring defaults for a new server (slug + core
     version). The create form calls this to prefill blank fields; everything
-    stays editable."""
+    stays editable. Runtime is reused from a same-engine server if one exists,
+    else flagged as new-engine (runtime_needs_build)."""
     fields = server_provision.suggested_fields(slug, neoforge_version, mc_version)
     fields["rcon_port"] = _next_free_rcon_port(session)
+    existing = GameServerRepository(session).list_all()
+    fields.update(server_provision.resolve_runtime(
+        existing, slug, mc_version, loader or "neoforge", java_version, neoforge_version
+    ))
     return fields
 
 
@@ -95,6 +102,24 @@ def create_server(
             data[field] = default
     if not data.get("rcon_port"):
         data["rcon_port"] = _next_free_rcon_port(session)
+
+    # Runtime: reuse a same-engine server's runtime, or (new engine) point at
+    # per-server runtime files and scaffold the build script. Only fills blanks.
+    rt = server_provision.resolve_runtime(
+        repo.list_all(), data["slug"], data.get("mc_version"),
+        data.get("loader"), data.get("java_version"), data.get("neoforge_version"),
+    )
+    for field in ("runtime_seed_url", "runtime_manifest_url", "manifest_build_script"):
+        if rt.get(field) and not data.get(field):
+            data[field] = rt[field]
+    # New engine → generate the pack+runtime build script if that's the chosen one.
+    if rt["runtime_needs_build"] and data.get("manifest_build_script") == server_provision.runtime_build_script_rel(data["slug"]):
+        server_provision.write_runtime_build_script(
+            data["slug"], name=data["name"], mc_version=data.get("mc_version"),
+            loader=data.get("loader"), neoforge_version=data.get("neoforge_version"),
+            java_version=data.get("java_version"), port=data.get("port"),
+        )
+
     try:
         server_provision.provision_dirs(data.get("pack_root"), data.get("data_dir"))
     except server_provision.ServerProvisionError as exc:
