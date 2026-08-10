@@ -25,6 +25,7 @@ RPS_BEATS = {"rock": "scissors", "scissors": "paper", "paper": "rock"}
 
 MIN_STAKE = 5
 DUEL_DEFAULT = 30
+RESCUE_AMOUNT = 5
 
 GAMES_LIST = (
     "🎮 <b>Мини-игры VoidRP</b>\n"
@@ -38,7 +39,8 @@ GAMES_LIST = (
     "Победитель забирает войды; проигравший отдаёт сколько есть (не в минус).\n\n"
     "<b>На умение / фан:</b>\n"
     "🔢 /guess — угадай число · 🎱 /8ball &lt;вопрос&gt;\n"
-    "🎁 /daily — ежедневная награда · 🏆 /top · 💰 /me\n"
+    "🎁 /daily — ежедневная награда · 🆘 /rescue — +5 при нуле\n"
+    "🏆 /top · 💰 /me\n"
 )
 
 
@@ -301,6 +303,18 @@ async def cmd_8ball(message: Message, command: CommandObject, session: Session) 
         await message.answer("🎱 Задай вопрос: <code>/8ball будет ли вайп?</code>")
         return
     await message.answer(f"🎱 {random.choice(g.EIGHTBALL)}")
+
+
+@router.message(Command("rescue"))
+async def cmd_rescue(message: Message, session: Session) -> None:
+    if not await _guard(message, session):
+        return
+    bal = g.get_score(session, message.from_user.id, message.chat.id)
+    if bal > 0:
+        await message.answer(f"🆘 Спаскруг только при нуле войдов. Твой баланс: <b>{bal}</b>.")
+        return
+    total = g.add_score(session, message.from_user.id, message.chat.id, _uname(message), RESCUE_AMOUNT)
+    await message.answer(f"🆘 Держи <b>+{RESCUE_AMOUNT}</b> войдов на подъём. Баланс: <b>{total}</b>. Играй аккуратнее 😉")
 
 
 @router.message(Command("daily"))

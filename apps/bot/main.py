@@ -39,6 +39,7 @@ GROUP_COMMANDS = [
     BotCommand(command="guess", description="🔢 Угадай число"),
     BotCommand(command="8ball", description="🎱 Магический шар"),
     BotCommand(command="daily", description="🎁 Ежедневная награда"),
+    BotCommand(command="rescue", description="🆘 +5 войдов, если баланс 0"),
     BotCommand(command="top", description="🏆 Топ игроков"),
     BotCommand(command="me", description="💰 Мой счёт"),
 ]
