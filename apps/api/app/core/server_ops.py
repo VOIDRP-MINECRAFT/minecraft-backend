@@ -222,6 +222,46 @@ def collect_metrics(server: "GameServer") -> dict:
     }
 
 
+# ── Power control (systemctl start / restart / stop) ────────────────────────
+# The backend and the game servers run as the same OS user, but the units are
+# *system* services, so managing them still requires a polkit/sudoers grant for
+# that user (see scripts/polkit/49-voidrp-server-power.rules). We enqueue the job
+# with --no-block so the HTTP call returns immediately and the panel watches the
+# unit state flip via the metrics poll; a missing grant surfaces as PowerError.
+_POWER_ACTIONS = frozenset({"start", "restart", "stop"})
+
+
+class PowerError(RuntimeError):
+    pass
+
+
+class PowerNotConfigured(PowerError):
+    pass
+
+
+def power_action(server: "GameServer", action: str, timeout: float = 15.0) -> str:
+    """Run ``systemctl <action> <unit>`` for the server's unit. Returns any
+    stdout on success; raises ``PowerNotConfigured`` if the server has no unit
+    and ``PowerError`` on any systemctl failure (incl. "authentication required"
+    when the polkit/sudoers grant is missing)."""
+    if action not in _POWER_ACTIONS:
+        raise PowerError(f"Неизвестное действие: {action}")
+    unit = server.systemd_unit
+    if not unit:
+        raise PowerNotConfigured("systemd-юнит не настроен для этого сервера")
+    args = [_SYSTEMCTL, action, "--no-block", unit]
+    try:
+        res = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise PowerError(f"systemctl {action} превысил таймаут")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PowerError(str(exc))
+    if res.returncode != 0:
+        msg = (res.stderr or res.stdout or "").strip() or f"код выхода {res.returncode}"
+        raise PowerError(msg)
+    return (res.stdout or "").strip()
+
+
 # ── RCON ────────────────────────────────────────────────────────────────────
 # Self-contained Source RCON client. We avoid the `mcrcon` package because it
 # implements its read timeout with signal.alarm(), which only works in the main

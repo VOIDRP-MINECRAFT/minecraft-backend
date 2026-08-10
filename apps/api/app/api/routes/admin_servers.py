@@ -11,6 +11,7 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
+from apps.api.app.core import server_provision
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.models.game_server import GameServer
@@ -44,6 +45,30 @@ def list_servers(session: Annotated[Session, Depends(get_db_session)]) -> list[G
     return GameServerRepository(session).list_all()
 
 
+def _next_free_rcon_port(session: Session) -> int:
+    """A local RCON port not already used by another server (they share 127.0.0.1)."""
+    used = {s.rcon_port for s in GameServerRepository(session).list_all() if s.rcon_port}
+    port = max(used) + 1 if used else 25575
+    while port in used:
+        port += 1
+    return port
+
+
+@router.get("/suggest-paths")
+def suggest_paths(
+    session: Annotated[Session, Depends(get_db_session)],
+    slug: Annotated[str, Query(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")],
+    neoforge_version: Annotated[str | None, Query()] = None,
+    mc_version: Annotated[str | None, Query()] = None,
+) -> dict:
+    """Derived modpack + monitoring defaults for a new server (slug + core
+    version). The create form calls this to prefill blank fields; everything
+    stays editable."""
+    fields = server_provision.suggested_fields(slug, neoforge_version, mc_version)
+    fields["rcon_port"] = _next_free_rcon_port(session)
+    return fields
+
+
 @router.post("", response_model=GameServerAdmin, status_code=status.HTTP_201_CREATED)
 def create_server(
     payload: GameServerCreate,
@@ -58,6 +83,22 @@ def create_server(
     # Let the column default (all features on) apply when not explicitly provided.
     if data.get("features") is None:
         data.pop("features", None)
+
+    # Auto-provision: fill any blank modpack/monitoring path field from the
+    # slug+version convention, then create the on-disk folder skeleton. Explicit
+    # values the admin typed are kept as-is; only blanks are filled.
+    suggestions = server_provision.suggested_fields(
+        data["slug"], data.get("neoforge_version"), data.get("mc_version")
+    )
+    for field, default in suggestions.items():
+        if default and not data.get(field):
+            data[field] = default
+    if not data.get("rcon_port"):
+        data["rcon_port"] = _next_free_rcon_port(session)
+    try:
+        server_provision.provision_dirs(data.get("pack_root"), data.get("data_dir"))
+    except server_provision.ServerProvisionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     server = GameServer(**data, game_auth_secret=secret)
     if server.is_default:

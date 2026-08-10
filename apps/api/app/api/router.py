@@ -24,6 +24,7 @@ from apps.api.app.api.routes.server_auth import router as server_auth_router
 from apps.api.app.api.routes.servers import router as servers_router
 from apps.api.app.api.routes.admin_servers import router as admin_servers_router
 from apps.api.app.api.routes.admin_server_ops import router as admin_server_ops_router
+from apps.api.app.api.routes.admin_mods import router as admin_mods_router
 from apps.api.app.api.routes.social import router as social_router
 from apps.api.app.api.routes.alliances import router as alliances_router
 from apps.api.app.api.routes.donate import router as donate_router
@@ -134,3 +135,4 @@ api_router.include_router(game_ui_alliance_router)
 api_router.include_router(servers_router)
 api_router.include_router(admin_servers_router)
 api_router.include_router(admin_server_ops_router)
+api_router.include_router(admin_mods_router)

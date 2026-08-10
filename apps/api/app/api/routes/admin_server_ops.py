@@ -83,6 +83,28 @@ def moderate_player(
     return {"action": payload.action, "player": name, "output": server_ops.strip_color_codes(output)}
 
 
+# ── Power control (start / restart / stop the systemd unit) ──────────────────
+class PowerRequest(BaseModel):
+    action: str = Field(pattern=r"^(start|restart|stop)$")
+
+
+@router.post("/power", dependencies=[Depends(require_permission("monitoring.restart"))])
+def power_control(
+    server: Annotated[GameServer, Depends(resolve_server)],
+    payload: PowerRequest,
+) -> dict:
+    """Запуск / перезапуск / остановка systemd-юнита сервера. Требует прав
+    monitoring.restart. Задача ставится в очередь (--no-block) — панель ловит
+    смену состояния службы через опрос метрик."""
+    try:
+        output = server_ops.power_action(server, payload.action)
+    except server_ops.PowerNotConfigured as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except server_ops.PowerError as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось выполнить: {exc}")
+    return {"action": payload.action, "output": output or "ok"}
+
+
 # ── RCON console ────────────────────────────────────────────────────────────
 class RconRequest(BaseModel):
     command: str = Field(min_length=1, max_length=512)

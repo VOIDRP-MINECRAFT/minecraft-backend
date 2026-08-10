@@ -26,6 +26,7 @@ from apps.api.app.models.referral_code import ReferralCode
 from apps.api.app.models.referral_link import ReferralLink
 from apps.api.app.models.referral_reward_period import ReferralRewardPeriod
 from apps.api.app.models.refresh_session import RefreshSession
+from apps.api.app.models.server_mod import ServerModMeta
 from apps.api.app.models.user import User
 from apps.api.app.models.player_market import (
     PlayerMarketSellOrder,
@@ -76,6 +77,7 @@ __all__ = [
     "ReferralLink",
     "ReferralRewardPeriod",
     "RefreshSession",
+    "ServerModMeta",
     "User",
     "PlayerMarketSellOrder",
     "PlayerMarketBuyOrder",

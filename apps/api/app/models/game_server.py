@@ -73,6 +73,12 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # value doesn't end with .json). Null → launcher-global defaults.
     runtime_seed_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     runtime_manifest_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Optional custom manifest-rebuild script (path under scripts/, run with bash)
+    # for servers whose pack needs more than the standard DB-driven generator —
+    # e.g. abyss also builds Java runtime manifests. Null → standard generator
+    # (`generate_launcher_manifest.py --server-slug <slug>`). Keeps the admin
+    # "Моды" rebuild button data-driven instead of hardcoding per-slug logic.
+    manifest_build_script: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # ── Status / policy ───────────────────────────────────────────────────
     status_host: Mapped[str | None] = mapped_column(String(255), nullable=True)

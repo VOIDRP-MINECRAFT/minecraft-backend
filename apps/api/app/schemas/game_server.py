@@ -56,6 +56,7 @@ class GameServerAdmin(GameServerPublic):
     neoforge_version: str | None = None
     pack_root: str | None = None
     pack_base_url: str | None = None
+    manifest_build_script: str | None = None
     status_host: str | None = None
     status_port: int | None = None
     easydonate_server_id: int | None = None
@@ -95,6 +96,7 @@ class GameServerCreate(BaseModel):
     manifest_url: str | None = None
     runtime_seed_url: str | None = None
     runtime_manifest_url: str | None = None
+    manifest_build_script: str | None = None
     pack_version: str = "1.0.0"
     min_launcher_version: str = "0.1.0"
 
@@ -142,6 +144,7 @@ class GameServerUpdate(BaseModel):
     manifest_url: str | None = None
     runtime_seed_url: str | None = None
     runtime_manifest_url: str | None = None
+    manifest_build_script: str | None = None
     pack_version: str | None = None
     min_launcher_version: str | None = None
 

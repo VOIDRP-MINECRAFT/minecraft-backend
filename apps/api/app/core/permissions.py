@@ -23,8 +23,10 @@ PERMISSION_CATALOG: list[dict] = [
         "group": "Сервер",
         "permissions": [
             {"key": "monitoring.view", "label": "Мониторинг (CPU/RAM/лог/TPS)"},
-            {"key": "monitoring.restart", "label": "Перезапуск сервера (если неактивен)"},
+            {"key": "monitoring.restart", "label": "Питание сервера: запуск/перезапуск/остановка", "sensitive": True},
             {"key": "monitoring.rcon", "label": "RCON-консоль (команды)", "sensitive": True},
+            {"key": "mods.view", "label": "Моды (просмотр списка)"},
+            {"key": "mods.manage", "label": "Моды: добавлять/удалять/заменять, пересборка", "sensitive": True},
             {"key": "players.online.view", "label": "Онлайн игроки (просмотр)"},
             {"key": "players.online.moderate", "label": "Онлайн: кик/бан/оп", "sensitive": True},
             {"key": "market.view", "label": "Рынок (просмотр)", "sensitive": True},
@@ -80,7 +82,6 @@ ALL_KEYS: frozenset[str] = frozenset(
 MODERATOR_PRESET: list[str] = [
     "dashboard.view",
     "monitoring.view",
-    "monitoring.restart",
     "players.online.view",
     "nations.view",
     "mod_suggestions.view",
