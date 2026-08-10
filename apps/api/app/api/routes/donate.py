@@ -4,7 +4,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from apps.api.app.config import get_settings
 from apps.api.app.dependencies.auth import get_current_user
@@ -36,9 +36,14 @@ class DonateCallbackPayload(BaseModel):
     shop_id: int
     customer: str
     email: str | None = None
+    ip: str | None = None
+    server: object | None = None
     cost: float
-    income: float
-    products: list
+    income: float | None = None
+    payment_type: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    products: list = []
     signature: str
 
 
@@ -73,6 +78,15 @@ def list_servers(service: Annotated[EasyDonateService, Depends(get_donate_servic
 def last_payments(service: Annotated[EasyDonateService, Depends(get_donate_service)]):
     try:
         return service.get_last_payments()
+    except EasyDonateError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message)
+
+
+@router.get("/top-donors")
+def top_donors(service: Annotated[EasyDonateService, Depends(get_donate_service)]):
+    """PII-free leaderboard of top supporters (nickname + total spend)."""
+    try:
+        return service.get_top_donors()
     except EasyDonateError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message)
 
@@ -112,7 +126,12 @@ async def callback(request: Request, service: Annotated[EasyDonateService, Depen
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
 
-    payload = DonateCallbackPayload(**body)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
+    try:
+        payload = DonateCallbackPayload(**body)
+    except ValidationError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
 
     if not service.verify_callback_signature(
         payment_id=payload.payment_id,
@@ -123,13 +142,20 @@ async def callback(request: Request, service: Annotated[EasyDonateService, Depen
         logger.warning("EasyDonate callback: invalid signature for payment_id=%s", payload.payment_id)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
 
-    product_names = [p.get("name", str(p.get("id", "?"))) for p in payload.products]
+    product_names = [
+        (p.get("name") if isinstance(p, dict) else None) or str(p.get("id", "?") if isinstance(p, dict) else p)
+        for p in payload.products
+    ]
     logger.info(
-        "DONATE | payment_id=%s customer=%s cost=%.2f products=%s",
+        "DONATE | payment_id=%s customer=%s cost=%.2f type=%s products=%s",
         payload.payment_id,
         payload.customer,
         payload.cost,
+        payload.payment_type,
         product_names,
     )
+
+    # Fresh purchase → refresh the public donor wall / payments feed on next read.
+    service.invalidate_payment_caches()
 
     return {"ok": True}

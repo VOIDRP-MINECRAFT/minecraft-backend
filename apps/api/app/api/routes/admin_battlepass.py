@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.schemas.battlepass import (
@@ -23,7 +23,7 @@ from apps.api.app.services.battlepass_service import (
 router = APIRouter(
     prefix="/admin/battlepass",
     tags=["admin", "battlepass"],
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_permission("battlepass.view"))],
 )
 
 
@@ -47,7 +47,7 @@ def list_premium(
     return service.list_all_premium(skip=skip, limit=limit)
 
 
-@router.post("/premium/grant", response_model=BattlePassPremiumResponse)
+@router.post("/premium/grant", response_model=BattlePassPremiumResponse, dependencies=[Depends(require_permission("battlepass.manage"))])
 def admin_grant_premium(
     payload: BattlePassPremiumGrantRequest,
     service: Annotated[BattlePassService, Depends(get_battlepass_service)],
@@ -55,7 +55,7 @@ def admin_grant_premium(
     return service.grant_premium(payload, granted_by="admin")
 
 
-@router.delete("/premium/{minecraft_uuid}")
+@router.delete("/premium/{minecraft_uuid}", dependencies=[Depends(require_permission("battlepass.manage"))])
 def revoke_premium(
     minecraft_uuid: str,
     service: Annotated[BattlePassService, Depends(get_battlepass_service)],
@@ -70,7 +70,7 @@ def revoke_premium(
     return {"ok": True}
 
 
-@router.post("/premium/revoke-by-nick/{nickname}")
+@router.post("/premium/revoke-by-nick/{nickname}", dependencies=[Depends(require_permission("battlepass.manage"))])
 def revoke_premium_by_nick(
     nickname: str,
     service: Annotated[BattlePassService, Depends(get_battlepass_service)],

@@ -26,6 +26,7 @@ SERVER_FEATURE_KEYS = (
     "quests",
     "leaderboards",
     "map",
+    "news",
 )
 
 
@@ -94,5 +95,32 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # Feature flags controlling which tabs/sections appear in launcher & site.
     features: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=default_features)
 
+    # ── News auto-posting channels, per category ──────────────────────────
+    # Shape: {"update": {"telegram": [{"chat_id","thread_id"}], "discord": ["url"]},
+    #         "media":  {"telegram": [...], "discord": [...]}}
+    # telegram thread_id targets a forum topic; discord entries are webhook URLs.
+    news_channels: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+    def channels_for(self, category: str) -> dict[str, list]:
+        """News channels for a category → {'telegram': [...], 'discord': [...]}."""
+        cat = (self.news_channels or {}).get(category) or {}
+        return {"telegram": cat.get("telegram") or [], "discord": cat.get("discord") or []}
+
     # ── Game-server auth ──────────────────────────────────────────────────
     game_auth_secret: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+
+    # ── Operations / monitoring (admin dashboard) ─────────────────────────
+    # These wire the admin monitoring panel to the actual OS process. The
+    # backend and the game servers run under the same user on the same host,
+    # so with just the systemd unit name we can read MainPID / WorkingDirectory
+    # (→ CPU/RAM/disk) without any elevated privileges. RCON drives the live
+    # console, TPS, player list and moderation actions. All optional/null-safe:
+    # a server with none of these configured simply shows "not configured".
+    systemd_unit: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Overrides for the systemd-derived values (rarely needed). data_dir falls
+    # back to the unit's WorkingDirectory; log_path falls back to <data_dir>/logs/latest.log.
+    data_dir: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    log_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    rcon_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rcon_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rcon_password: Mapped[str | None] = mapped_column(String(255), nullable=True)

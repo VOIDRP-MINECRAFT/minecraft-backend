@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     public_api_base_url: str = "https://api.void-rp.ru"
     website_base_url: str = "https://void-rp.ru"
 
+    # Global Telegram bot token (one bot for all servers). Per-server chat_id and
+    # Discord webhook URL live on game_servers. Empty → Telegram auto-post skipped.
+    telegram_bot_token: str = ""
+
+    # Outbound HTTP(S) proxy for external calls (Telegram/Discord). This host has
+    # no direct egress — traffic must go through the local proxy. Empty → direct.
+    outbound_proxy_url: str = ""
+
     media_storage_root: str = "./media"
     media_public_mount_path: str = "/media"
     media_public_base_url: str = "https://api.void-rp.ru/media"
@@ -101,6 +109,10 @@ class Settings(BaseSettings):
     rcon_host: str = "127.0.0.1"
     rcon_port: int = 25575
     rcon_password: str = ""
+
+    # Admin monitoring: global watchdog log tail (source=watchdog). Per-server
+    # game logs are resolved from the server's systemd WorkingDirectory instead.
+    watchdog_log_path: str = "/home/mironoouv/minecraft/scripts/watchdog.log"
 
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_prefix: str = "voidrp"

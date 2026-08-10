@@ -12,7 +12,7 @@ from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
-from apps.api.app.dependencies.admin import get_current_admin_user
+from apps.api.app.dependencies.admin import caller_permissions, require_permission
 from apps.api.app.models.alliance import Alliance
 from apps.api.app.models.battlepass import BattlePassPremium, BattlePassProgress
 from apps.api.app.models.economy_market import EconomyMarketItem, EconomyShopTransaction
@@ -24,7 +24,7 @@ from apps.api.app.models.user import User
 router = APIRouter(
     prefix="/admin/dashboard",
     tags=["admin"],
-    dependencies=[Depends(get_current_admin_user)],
+    dependencies=[Depends(require_permission("dashboard.view"))],
 )
 
 
@@ -38,6 +38,7 @@ def _get_admin_db_service(
 def get_dashboard_stats(
     session: Annotated[Session, Depends(_get_admin_db_service)],
     server: Annotated[GameServer, Depends(resolve_server)],
+    perms: Annotated[set[str], Depends(caller_permissions)],
 ) -> dict:
     now = datetime.now(UTC)
     week_ago = now - timedelta(days=7)
@@ -110,7 +111,7 @@ def get_dashboard_stats(
         d = (trend_start + timedelta(days=i)).strftime("%Y-%m-%d")
         reg_trend.append({"date": d, "count": trend_map[d]})
 
-    return {
+    result: dict = {
         "users": {
             "total": total_users,
             "active": active_users,
@@ -131,17 +132,22 @@ def get_dashboard_stats(
         "mod_suggestions": {
             "total": total_mod_suggestions,
         },
-        "battlepass": {
+    }
+    # Sensitive blocks — only for callers holding the matching permission, so a
+    # moderator without them never receives the figures over the wire.
+    if "battlepass.view" in perms:
+        result["battlepass"] = {
             "active_premium": bp_active,
             "total_premium": bp_total,
             "progress_count": bp_progress_count,
-        },
-        "market": {
+        }
+    if "market.view" in perms:
+        result["market"] = {
             "total_items": market_items,
             "enabled_items": market_enabled,
             "tx_last_7d": market_tx_week,
-        },
-    }
+        }
+    return result
 
 
 @router.get("/server-status")
@@ -207,7 +213,7 @@ def get_recent_users(
     return {"users": users}
 
 
-@router.get("/metrika")
+@router.get("/metrika", dependencies=[Depends(require_permission("metrika.view"))])
 async def get_metrika_stats() -> dict:
     settings = get_settings()
     token = settings.yandex_metrika_token

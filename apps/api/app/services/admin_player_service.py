@@ -33,6 +33,7 @@ class AdminPlayerService:
         legacy_hash_present: bool | None = None,
         user_active: bool | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> AdminPlayersListResponse:
         filters = self._build_filters(
             q=q,
@@ -46,6 +47,7 @@ class AdminPlayerService:
             .join(PlayerAccount.user)
             .options(joinedload(PlayerAccount.user))
             .order_by(PlayerAccount.created_at.desc())
+            .offset(offset)
             .limit(limit)
         )
 

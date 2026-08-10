@@ -20,6 +20,8 @@ dependencies = [
   "Pillow>=10.4.0",
   "redis>=5.2.0",
   "mcstatus>=11.0.0",
+  "mcrcon>=0.7.0",
+  "psutil>=6.0.0",
 ]
 
 [project.optional-dependencies]

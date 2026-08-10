@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from typing import Any
+
 from sqlalchemy import Boolean, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
@@ -35,6 +38,11 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Staff moderator role: restricted admin-panel access driven by staff_permissions
+    # (list of permission keys, see apps/api/app/core/permissions.py). Full admins
+    # (is_admin) bypass all permission checks.
+    is_moderator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    staff_permissions: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
 
     player_account: Mapped["PlayerAccount"] = relationship(
         back_populates="user",

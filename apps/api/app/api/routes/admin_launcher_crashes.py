@@ -8,13 +8,13 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.models.launcher_crash_report import LauncherCrashReport
 
 router = APIRouter(
     prefix="/admin/launcher-crashes",
     tags=["admin", "launcher-crashes"],
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_permission("crashes.view"))],
 )
 
 
@@ -66,7 +66,11 @@ def list_crashes(
     )
 
 
-@router.delete("/{crash_id}", status_code=204)
+@router.delete(
+    "/{crash_id}",
+    status_code=204,
+    dependencies=[Depends(require_permission("crashes.manage"))],
+)
 def delete_crash(
     crash_id: str,
     session: Annotated[Session, Depends(get_db_session)],

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import get_current_admin_user
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.dependencies.auth import get_current_user
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
@@ -45,7 +45,7 @@ def create_feedback(
 
 @router.get("/admin/player-feedback/")
 def list_feedback(
-    _: Annotated[User, Depends(get_current_admin_user)],
+    _: Annotated[None, Depends(require_permission("feedback.view"))],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> PlayerFeedbackListResponse:
     rows = session.execute(
@@ -75,7 +75,7 @@ def list_feedback(
 @router.delete("/admin/player-feedback/{feedback_id}")
 def delete_feedback(
     feedback_id: UUID,
-    _: Annotated[User, Depends(get_current_admin_user)],
+    _: Annotated[None, Depends(require_permission("feedback.manage"))],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     feedback = session.get(PlayerFeedback, feedback_id)

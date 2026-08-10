@@ -22,6 +22,10 @@ class UserRead(ORMModel):
     email_verified: bool
     is_active: bool
     is_admin: bool
+    is_moderator: bool = False
+    # Granted moderator permission keys (empty for full admins — the frontend
+    # applies an is_admin bypass). Reads from the ORM ``staff_permissions`` column.
+    permissions: list[str] = Field(default_factory=list, validation_alias="staff_permissions")
     created_at: datetime
 
 

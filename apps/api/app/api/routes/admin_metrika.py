@@ -7,12 +7,12 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from apps.api.app.config import get_settings
-from apps.api.app.dependencies.admin import get_current_admin_user
+from apps.api.app.dependencies.admin import require_permission
 
 router = APIRouter(
     prefix="/admin/metrika",
     tags=["admin"],
-    dependencies=[Depends(get_current_admin_user)],
+    dependencies=[Depends(require_permission("metrika.view"))],
 )
 
 _TRAFFIC_SOURCE_NAMES = {

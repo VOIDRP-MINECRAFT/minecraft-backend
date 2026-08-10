@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.repositories.game_server_repository import GameServerRepository
 from apps.api.app.schemas.game_server import (
@@ -24,7 +24,7 @@ from apps.api.app.schemas.game_server import (
 router = APIRouter(
     prefix="/admin/servers",
     tags=["admin", "servers"],
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_permission("servers.manage"))],
 )
 
 _ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}

@@ -5,13 +5,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.app.config import get_settings
-from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.services.easydonate_service import EasyDonateError, EasyDonateService
 
 router = APIRouter(
     prefix="/admin/donate",
     tags=["admin", "donate"],
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_permission("donate.view"))],
 )
 
 

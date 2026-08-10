@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.schemas.admin import (
     AdminLegacySummaryResponse,
     AdminLegacyUpdateRequest,
@@ -20,7 +20,7 @@ from apps.api.app.services.admin_player_service import AdminPlayerService
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_permission("players.view"))],
 )
 
 
@@ -44,6 +44,7 @@ def list_players(
     legacy_hash_present: bool | None = Query(default=None),
     user_active: bool | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     service: Annotated[AdminPlayerService, Depends(get_admin_player_service)] = None,
 ) -> AdminPlayersListResponse:
     assert service is not None
@@ -53,6 +54,7 @@ def list_players(
         legacy_hash_present=legacy_hash_present,
         user_active=user_active,
         limit=limit,
+        offset=offset,
     )
 
 
@@ -70,7 +72,7 @@ def get_player(
     return record
 
 
-@router.patch("/players/{player_account_id}/legacy", response_model=AdminLegacyUpdateResponse)
+@router.patch("/players/{player_account_id}/legacy", response_model=AdminLegacyUpdateResponse, dependencies=[Depends(require_permission("players.manage"))])
 def update_legacy(
     player_account_id: UUID,
     payload: AdminLegacyUpdateRequest,

@@ -12,13 +12,13 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.models.landing_screenshot import LandingScreenshot
 
 router = APIRouter(
     prefix="/admin/landing",
     tags=["admin", "landing"],
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_permission("landing.manage"))],
 )
 
 _ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}

@@ -33,11 +33,16 @@ from apps.api.app.models.player_market import (
     PlayerMarketPendingDelivery,
     PlayerMarketWebAction,
 )
+from apps.api.app.models.tiktok import TikTokCampaign, TikTokClickReward
+from apps.api.app.models.news import NewsPost
 
 __all__ = [
     "Alliance",
     "BattlePassPremium",
     "Bounty",
+    "NewsPost",
+    "TikTokCampaign",
+    "TikTokClickReward",
     "Claim",
     "KillEvent",
     "ClaimTrusted",

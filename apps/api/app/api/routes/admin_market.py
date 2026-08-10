@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.user_messages import translate_user_message
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.schemas.market_public import (
@@ -23,7 +23,7 @@ from apps.api.app.services.market_public_service import MarketPublicService
 router = APIRouter(
     prefix="/admin/market",
     tags=["admin", "market"],
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_permission("market.view"))],
 )
 
 
@@ -53,7 +53,7 @@ def list_admin_market_items(
     return service.list_items(q=q, include_disabled=include_disabled, sort=sort, direction=direction, limit=limit)
 
 
-@router.patch("/items/{material}", response_model=AdminMarketActionResponse)
+@router.patch("/items/{material}", response_model=AdminMarketActionResponse, dependencies=[Depends(require_permission("market.manage"))])
 def patch_admin_market_item(
     material: str,
     payload: AdminMarketItemPatch,
@@ -65,7 +65,7 @@ def patch_admin_market_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=translate_user_message(str(exc))) from exc
 
 
-@router.post("/items/{material}/enable", response_model=AdminMarketActionResponse)
+@router.post("/items/{material}/enable", response_model=AdminMarketActionResponse, dependencies=[Depends(require_permission("market.manage"))])
 def enable_admin_market_item(
     material: str,
     service: Annotated[MarketPublicService, Depends(get_market_public_service)],
@@ -76,7 +76,7 @@ def enable_admin_market_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=translate_user_message(str(exc))) from exc
 
 
-@router.post("/items/{material}/disable", response_model=AdminMarketActionResponse)
+@router.post("/items/{material}/disable", response_model=AdminMarketActionResponse, dependencies=[Depends(require_permission("market.manage"))])
 def disable_admin_market_item(
     material: str,
     service: Annotated[MarketPublicService, Depends(get_market_public_service)],
@@ -87,7 +87,7 @@ def disable_admin_market_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=translate_user_message(str(exc))) from exc
 
 
-@router.post("/items/{material}/reset", response_model=AdminMarketActionResponse)
+@router.post("/items/{material}/reset", response_model=AdminMarketActionResponse, dependencies=[Depends(require_permission("market.manage"))])
 def reset_admin_market_item(
     material: str,
     service: Annotated[MarketPublicService, Depends(get_market_public_service)],
@@ -98,7 +98,7 @@ def reset_admin_market_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=translate_user_message(str(exc))) from exc
 
 
-@router.post("/recalculate", response_model=AdminMarketRecalculateResponse)
+@router.post("/recalculate", response_model=AdminMarketRecalculateResponse, dependencies=[Depends(require_permission("market.manage"))])
 def recalculate_admin_market(
     service: Annotated[MarketPublicService, Depends(get_market_public_service)],
     decay_scores: bool = Query(default=True),

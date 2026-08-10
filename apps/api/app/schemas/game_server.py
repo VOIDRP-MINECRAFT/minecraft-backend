@@ -5,6 +5,11 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+class TelegramTarget(BaseModel):
+    chat_id: str
+    thread_id: int | None = None
+
+
 class GameServerStatus(BaseModel):
     online: bool = False
     players_online: int = 0
@@ -54,7 +59,16 @@ class GameServerAdmin(GameServerPublic):
     status_host: str | None = None
     status_port: int | None = None
     easydonate_server_id: int | None = None
+    news_channels: dict = Field(default_factory=dict)
     game_auth_secret: str
+
+    # Operations / monitoring
+    systemd_unit: str | None = None
+    data_dir: str | None = None
+    log_path: str | None = None
+    rcon_host: str | None = None
+    rcon_port: int | None = None
+    rcon_password: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -94,6 +108,14 @@ class GameServerCreate(BaseModel):
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     features: dict[str, bool] | None = None
     easydonate_server_id: int | None = None
+    news_channels: dict = Field(default_factory=dict)
+
+    systemd_unit: str | None = None
+    data_dir: str | None = None
+    log_path: str | None = None
+    rcon_host: str | None = None
+    rcon_port: int | None = Field(default=None, ge=1, le=65535)
+    rcon_password: str | None = None
 
     # If omitted, a strong secret is generated server-side.
     game_auth_secret: str | None = None
@@ -133,3 +155,11 @@ class GameServerUpdate(BaseModel):
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     features: dict[str, bool] | None = None
     easydonate_server_id: int | None = None
+    news_channels: dict = Field(default_factory=dict)
+
+    systemd_unit: str | None = None
+    data_dir: str | None = None
+    log_path: str | None = None
+    rcon_host: str | None = None
+    rcon_port: int | None = Field(default=None, ge=1, le=65535)
+    rcon_password: str | None = None

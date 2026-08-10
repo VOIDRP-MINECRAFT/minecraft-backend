@@ -123,14 +123,52 @@ class EasyDonateService:
             params["success_url"] = success_url
         return self._get("/shop/payment/create", params=params)
 
+    @staticmethod
+    def _strip_payment_pii(payments: list) -> list:
+        """Drop buyer PII / internal fields from public payment views. This is a
+        public endpoint, so it must not leak emails or the executed commands."""
+        safe = []
+        for p in payments:
+            if not isinstance(p, dict):
+                continue
+            safe.append({k: v for k, v in p.items()
+                         if k not in ("email", "sent_commands", "additional_fields", "ip")})
+        return safe
+
     def get_last_payments(self) -> list:
         cached = _cache_get("last_payments")
         if cached is not None:
             return cached  # type: ignore[return-value]
         result = self._get("/shop/payments", params={"paginate": 10, "page": 1})
         data = result.get("data", result) if isinstance(result, dict) else result
+        data = self._strip_payment_pii(data if isinstance(data, list) else [])
         _cache_set("last_payments", data, ttl=60)
         return data
+
+    def get_top_donors(self, limit: int = 8) -> list:
+        """Aggregate recent paid payments into a PII-free top-donors board:
+        [{nickname, total, count}] sorted by total spend. Cached 5 min."""
+        cached = _cache_get("top_donors")
+        if cached is not None:
+            return cached  # type: ignore[return-value]
+        result = self._get("/shop/payments", params={"paginate": 100, "page": 1})
+        data = result.get("data", []) if isinstance(result, dict) else (result or [])
+        agg: dict[str, dict] = {}
+        for p in data:
+            if not isinstance(p, dict) or p.get("status") != 2:
+                continue
+            nick = p.get("customer")
+            if not nick:
+                continue
+            amount = float(p.get("cost") or p.get("enrolled") or 0)
+            row = agg.setdefault(nick, {"nickname": nick, "total": 0.0, "count": 0})
+            row["total"] += amount
+            row["count"] += 1
+        top = sorted(agg.values(), key=lambda r: r["total"], reverse=True)[:limit]
+        for r in top:
+            r["total"] = round(r["total"])
+        _cache_set("top_donors", top, ttl=300)
+        return top
 
     def get_payments_paginated(self, page: int = 1, per_page: int = 20) -> dict:
         result = self._get("/shop/payments", params={"paginate": per_page, "page": page})
@@ -175,11 +213,34 @@ class EasyDonateService:
         _cache_set("admin_overview", overview, ttl=300)
         return overview
 
-    def verify_callback_signature(self, payment_id: int, cost: float, customer: str, signature: str) -> bool:
-        message = f"{payment_id}@{cost}@{customer}"
-        expected = hmac.new(
-            self._key.encode(),
-            message.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        return hmac.compare_digest(expected, signature)
+    def verify_callback_signature(self, payment_id: int, cost, customer: str, signature: str) -> bool:
+        """EasyDonate signs the callback as HMAC-SHA256("{payment_id}@{cost}@{customer}",
+        shop_key). The cost's string form is ambiguous after JSON parsing (400 vs 400.0
+        vs 400.00), so we accept any of the common representations."""
+        if not signature or not self._key:
+            return False
+        for cost_str in self._cost_variants(cost):
+            message = f"{payment_id}@{cost_str}@{customer}"
+            expected = hmac.new(self._key.encode(), message.encode(), hashlib.sha256).hexdigest()
+            if hmac.compare_digest(expected, str(signature)):
+                return True
+        return False
+
+    @staticmethod
+    def _cost_variants(cost) -> set[str]:
+        variants = {str(cost)}
+        try:
+            f = float(cost)
+        except (TypeError, ValueError):
+            return variants
+        variants.add(str(f))            # 400.0
+        variants.add(f"{f:.2f}")        # 400.00
+        if f.is_integer():
+            variants.add(str(int(f)))   # 400
+        return variants
+
+    def invalidate_payment_caches(self) -> None:
+        """Drop cached payment views so a fresh purchase shows up right away
+        (donor wall, shop payments feed, admin overview)."""
+        for key in ("last_payments", "top_donors", "admin_overview"):
+            _cache.pop(key, None)

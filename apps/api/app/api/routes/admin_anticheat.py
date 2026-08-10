@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.rcon_client import send_rcon_command
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_admin_access
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.anticheat import (
     AnticheatInjectionReport,
@@ -26,7 +26,7 @@ from apps.api.app.models.user import User
 router = APIRouter(
     prefix="/admin/anticheat",
     tags=["admin", "anticheat"],
-    dependencies=[Depends(require_admin_access)],
+    dependencies=[Depends(require_permission("anticheat.view"))],
 )
 
 
@@ -286,7 +286,7 @@ def get_player_detail(
     )
 
 
-@router.post("/player/{player_uuid}/action")
+@router.post("/player/{player_uuid}/action", dependencies=[Depends(require_permission("anticheat.manage"))])
 def player_action(
     player_uuid: str,
     req: ActionRequest,
@@ -368,7 +368,7 @@ def list_mod_verdicts(
     ]
 
 
-@router.post("/mod-verdicts", response_model=ModVerdictOut, status_code=200)
+@router.post("/mod-verdicts", response_model=ModVerdictOut, status_code=200, dependencies=[Depends(require_permission("anticheat.manage"))])
 def set_mod_verdict(
     req: SetModVerdictRequest,
     session: Annotated[Session, Depends(get_db_session)],
@@ -406,7 +406,7 @@ def set_mod_verdict(
     )
 
 
-@router.delete("/mod-verdicts/{mod_id}", status_code=204)
+@router.delete("/mod-verdicts/{mod_id}", status_code=204, dependencies=[Depends(require_permission("anticheat.manage"))])
 def delete_mod_verdict(
     mod_id: str,
     session: Annotated[Session, Depends(get_db_session)],
@@ -491,7 +491,7 @@ def get_config(
     ]
 
 
-@router.put("/config", response_model=list[ThresholdConfigOut])
+@router.put("/config", response_model=list[ThresholdConfigOut], dependencies=[Depends(require_permission("anticheat.manage"))])
 def update_config(
     req: ThresholdUpdateRequest,
     session: Annotated[Session, Depends(get_db_session)],

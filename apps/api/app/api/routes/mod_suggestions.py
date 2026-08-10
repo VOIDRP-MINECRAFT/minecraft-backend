@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import get_current_admin_user
+from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.dependencies.auth import get_current_user
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
@@ -44,7 +44,7 @@ def create_suggestion(
 
 @router.get("/admin/mod-suggestions/")
 def list_suggestions(
-    _: Annotated[User, Depends(get_current_admin_user)],
+    _: Annotated[None, Depends(require_permission("mod_suggestions.view"))],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> ModSuggestionListResponse:
     rows = session.execute(
@@ -73,7 +73,7 @@ def list_suggestions(
 @router.delete("/admin/mod-suggestions/{suggestion_id}")
 def delete_suggestion(
     suggestion_id: UUID,
-    _: Annotated[User, Depends(get_current_admin_user)],
+    _: Annotated[None, Depends(require_permission("mod_suggestions.manage"))],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     suggestion = session.get(ModSuggestion, suggestion_id)
