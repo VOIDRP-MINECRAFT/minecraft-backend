@@ -43,10 +43,12 @@ def entities_to_markdown(text: str | None, entities: list | None) -> str:
         return ""
     if not entities:
         return text
-    units = text.encode("utf-16-le")
-    n = len(units) // 2
-    opens: dict[int, list[str]] = defaultdict(list)
-    closes: dict[int, list[str]] = defaultdict(list)
+    # Assemble in UTF-16-LE bytes and decode once at the end — decoding single
+    # code units would split surrogate pairs (emoji / non-BMP) and crash.
+    buf = text.encode("utf-16-le")
+    n = len(buf) // 2
+    opens: dict[int, list[bytes]] = defaultdict(list)
+    closes: dict[int, list[bytes]] = defaultdict(list)
     for e in entities:
         mk = _markers(e)
         if mk is None:
@@ -56,17 +58,17 @@ def entities_to_markdown(text: str | None, entities: list | None) -> str:
         end = start + int(e.length)
         if start < 0 or end > n:
             continue
-        opens[start].append(pre)
-        closes[end].append(suf)
-    out: list[str] = []
+        opens[start].append(pre.encode("utf-16-le"))
+        closes[end].append(suf.encode("utf-16-le"))
+    out = bytearray()
     for i in range(n + 1):
         for suf in reversed(closes.get(i, [])):
-            out.append(suf)
+            out += suf
         for pre in opens.get(i, []):
-            out.append(pre)
+            out += pre
         if i < n:
-            out.append(units[i * 2:i * 2 + 2].decode("utf-16-le"))
-    return "".join(out)
+            out += buf[i * 2:i * 2 + 2]
+    return out.decode("utf-16-le", errors="replace")
 
 
 def make_excerpt(text: str | None, limit: int = 300) -> str | None:
