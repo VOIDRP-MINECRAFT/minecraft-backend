@@ -53,11 +53,11 @@ def gamechat_kb(action: str, thread: int | None) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def rps_kb(stake: int) -> InlineKeyboardMarkup:
+def rps_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🪨 Камень", callback_data=f"rps:rock:{stake}")
-    kb.button(text="✂️ Ножницы", callback_data=f"rps:scissors:{stake}")
-    kb.button(text="📄 Бумага", callback_data=f"rps:paper:{stake}")
+    kb.button(text="🪨 Камень", callback_data="rps:rock")
+    kb.button(text="✂️ Ножницы", callback_data="rps:scissors")
+    kb.button(text="📄 Бумага", callback_data="rps:paper")
     kb.adjust(3)
     return kb.as_markup()
 

@@ -17,6 +17,11 @@ router = Router(name="games")
 
 # In-memory per-(chat, thread) round state.
 _active_guess: dict[tuple, dict] = {}
+# Pending PvP rock-paper-scissors games, keyed by (chat_id, prompt_message_id).
+_active_rps: dict[tuple, dict] = {}
+
+RPS_EMOJI = {"rock": "🪨", "scissors": "✂️", "paper": "📄"}
+RPS_BEATS = {"rock": "scissors", "scissors": "paper", "paper": "rock"}
 
 MIN_STAKE = 5
 DUEL_DEFAULT = 30
@@ -26,10 +31,11 @@ GAMES_LIST = (
     "Очки — <b>войды</b>. Их можно выиграть и проиграть (вплоть до 0). Стартовый доход — /daily.\n\n"
     "<b>На ставку (риск):</b>\n"
     "🎲 /dice &lt;ставка&gt; — кубик: 4–6 выигрыш, 1–3 проигрыш\n"
-    "🎰 /slots &lt;ставка&gt; — слоты: три в ряд ×4, джекпот ×10\n"
-    "✊ /rps &lt;ставка&gt; — камень-ножницы-бумага против бота\n\n"
-    "<b>Против игроков:</b>\n"
-    "⚔️ /duel &lt;ставка&gt; — ответом на игрока; победитель забирает войды\n\n"
+    "🎰 /slots &lt;ставка&gt; — слоты: три в ряд ×4, джекпот ×10\n\n"
+    "<b>Против игроков</b> (ответом на игрока):\n"
+    "⚔️ /duel &lt;ставка&gt; — дуэль на кубиках\n"
+    "✊ /rps &lt;ставка&gt; — камень-ножницы-бумага\n"
+    "Победитель забирает войды; проигравший отдаёт сколько есть (не в минус).\n\n"
     "<b>На умение / фан:</b>\n"
     "🔢 /guess — угадай число · 🎱 /8ball &lt;вопрос&gt;\n"
     "🎁 /daily — ежедневная награда · 🏆 /top · 💰 /me\n"
@@ -125,34 +131,78 @@ async def cmd_slots(message: Message, command: CommandObject, session: Session) 
 async def cmd_rps(message: Message, command: CommandObject, session: Session) -> None:
     if not await _guard(message, session):
         return
-    bal = g.get_score(session, message.from_user.id, message.chat.id)
-    stake, err = _parse_stake(command, bal)
-    if err:
-        await message.answer(err)
+    reply = message.reply_to_message
+    if reply is None or reply.from_user is None or reply.from_user.is_bot:
+        await message.answer("✊ Ответь этой командой на сообщение игрока. Ставка: <code>/rps 30</code>.")
         return
-    await message.answer(f"✊ Ставка {stake}. Твой ход:", reply_markup=rps_kb(stake))
+    if reply.from_user.id == message.from_user.id:
+        await message.answer("Сам с собой? 🙃")
+        return
+    reward = DUEL_DEFAULT
+    if command.args and command.args.strip().split()[0].isdigit():
+        reward = max(MIN_STAKE, int(command.args.strip().split()[0]))
+    challenger, opponent = message.from_user, reply.from_user
+    base = (
+        f"✊ <b>{challenger.full_name}</b> vs <b>{opponent.full_name}</b> — "
+        f"камень-ножницы-бумага на <b>{reward}</b> войдов!\n"
+        f"Оба жмите свой ход — соперник его не увидит. Победитель забирает войды."
+    )
+    prompt = await message.answer(base, reply_markup=rps_kb())
+    _active_rps[(message.chat.id, prompt.message_id)] = {
+        "challenger": challenger.id,
+        "opponent": opponent.id,
+        "reward": reward,
+        "base": base,
+        "choices": {},
+        "names": {challenger.id: challenger.full_name, opponent.id: opponent.full_name},
+        "unames": {
+            challenger.id: challenger.username or challenger.full_name,
+            opponent.id: opponent.username or opponent.full_name,
+        },
+    }
 
 
 @router.callback_query(F.data.startswith("rps:"))
 async def on_rps(cb: CallbackQuery, session: Session) -> None:
-    _, choice, raw_stake = cb.data.split(":")
-    stake = int(raw_stake)
-    uname = cb.from_user.username or cb.from_user.full_name
-    bot_choice = random.choice(["rock", "scissors", "paper"])
-    beats = {"rock": "scissors", "scissors": "paper", "paper": "rock"}
-    emoji = {"rock": "🪨", "scissors": "✂️", "paper": "📄"}
-    if choice == bot_choice:
-        gross, tail = stake, "Ничья — ставка возвращена."
-    elif beats[choice] == bot_choice:
-        gross, tail = stake * 2, f"Ты выиграл +{stake}! 🎉"
-    else:
-        gross, tail = 0, f"Я выиграл −{stake} 😎"
-    total = g.solo_wager(session, cb.message.chat.id, cb.from_user.id, uname, stake, gross)
-    if total is None:  # balance changed since the prompt
-        await cb.answer("Недостаточно войдов на ставку.", show_alert=True)
+    key = (cb.message.chat.id, cb.message.message_id)
+    game = _active_rps.get(key)
+    if game is None:
+        await cb.answer("Эта партия уже завершена.")
         return
-    await cb.message.edit_text(f"Ты: {emoji[choice]}  Я: {emoji[bot_choice]}\n{tail} Баланс: <b>{total}</b>.")
-    await cb.answer()
+    uid = cb.from_user.id
+    if uid not in (game["challenger"], game["opponent"]):
+        await cb.answer("Это не твоя партия 🙂", show_alert=True)
+        return
+    if uid in game["choices"]:
+        await cb.answer("Ты уже сделал ход.")
+        return
+    choice = cb.data.split(":", 1)[1]
+    game["choices"][uid] = choice
+    await cb.answer(f"Твой ход: {RPS_EMOJI[choice]}")
+
+    if len(game["choices"]) < 2:
+        await cb.message.edit_text(
+            game["base"] + f"\n\n✅ {game['names'][uid]} сделал ход. Ждём соперника…",
+            reply_markup=rps_kb(),
+        )
+        return
+
+    _active_rps.pop(key, None)
+    c_id, o_id = game["challenger"], game["opponent"]
+    cc, oc = game["choices"][c_id], game["choices"][o_id]
+    head = f"✊ {game['names'][c_id]}: {RPS_EMOJI[cc]}  ·  {game['names'][o_id]}: {RPS_EMOJI[oc]}"
+    if cc == oc:
+        await cb.message.edit_text(f"{head}\n🤝 Ничья! Переиграйте: /rps {game['reward']}")
+        return
+    winner_id, loser_id = (c_id, o_id) if RPS_BEATS[cc] == oc else (o_id, c_id)
+    gain, loss = g.pvp_settle(
+        session, cb.message.chat.id,
+        winner_id=winner_id, winner_name=game["unames"][winner_id],
+        loser_id=loser_id, loser_name=game["unames"][loser_id], reward=game["reward"],
+    )
+    w_total = g.get_score(session, winner_id, cb.message.chat.id)
+    note = f"забрал {loss}" if loss >= gain else (f"получил {gain} (у соперника было лишь {loss})" if loss else f"получил {gain} (у соперника пусто)")
+    await cb.message.edit_text(f"{head}\n🏆 Победил <b>{game['names'][winner_id]}</b>, {note}! Баланс: <b>{w_total}</b>.")
 
 
 # ── PvP: duel ────────────────────────────────────────────────────────────────
