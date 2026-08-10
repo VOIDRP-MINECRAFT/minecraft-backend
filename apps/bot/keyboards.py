@@ -43,6 +43,16 @@ def targets_kb(targets: dict[str, bool]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def gamechat_kb(action: str, thread: int | None) -> InlineKeyboardMarkup:
+    """Confirm button for game-chat management. The callback (button press)
+    always carries the real user — even for anonymous group admins — so the
+    permission check works where a plain message can't identify the sender."""
+    labels = {"on": "✅ Включить игры здесь", "off": "🚫 Выключить игры здесь", "list": "📋 Показать список"}
+    kb = InlineKeyboardBuilder()
+    kb.button(text=labels[action], callback_data=f"gc:{action}:{thread or 0}")
+    return kb.as_markup()
+
+
 def rps_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🪨 Камень", callback_data="rps:rock")

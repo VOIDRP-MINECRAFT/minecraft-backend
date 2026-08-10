@@ -1,79 +1,88 @@
 from __future__ import annotations
 
-from aiogram import Router
+from aiogram import F, Router
+from aiogram.enums import ChatType
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.user import User
-from apps.bot import texts
+from apps.bot.keyboards import gamechat_kb
 from apps.bot.permissions import can_manage_games
 from apps.bot.services import games as g
 
 router = Router(name="admin")
-
-# Telegram's built-in bot that "sends" messages from anonymous group admins.
-GROUP_ANONYMOUS_BOT_ID = 1087968824
 
 
 def _thread(message: Message) -> int | None:
     return message.message_thread_id if getattr(message, "is_topic_message", False) else None
 
 
-def _is_anonymous(message: Message) -> bool:
-    """True when the message is posted on behalf of a chat (anonymous admin /
-    channel), so we can't map it to a personal VoidRP account."""
-    if message.sender_chat is not None:
-        return True
-    u = message.from_user
-    return u is None or u.id == GROUP_ANONYMOUS_BOT_ID
-
-
-async def _deny_if_no_access(message: Message, user: User | None, perms: set[str]) -> bool:
-    """Returns True (and replies) if the caller may NOT manage games."""
-    if _is_anonymous(message):
-        await message.answer(texts.ANON_ADMIN)
-        return True
-    if user is None:
-        await message.answer(texts.NOT_LINKED_SHORT)
-        return True
-    if not can_manage_games(perms):
-        await message.answer(texts.NO_GAMES_PERM)
-        return True
-    return False
-
-
+# ── Commands just post a confirm button. The actual permission check happens on
+#    the button press, whose callback carries the REAL user even when the group
+#    admin posts anonymously (as GroupAnonymousBot / on behalf of the chat). ──
 @router.message(Command("allowgames"))
-async def cmd_allowgames(message: Message, user: User | None, perms: set[str], session: Session) -> None:
-    if await _deny_if_no_access(message, user, perms):
+async def cmd_allowgames(message: Message) -> None:
+    if message.chat.type == ChatType.PRIVATE:
+        await message.answer("Эту команду используй в нужном игровом чате/топике.")
         return
-    thread = _thread(message)
-    added = g.allow_game_chat(session, message.chat.id, thread, message.chat.title, user.id)
-    where = f" (топик {thread})" if thread else ""
     await message.answer(
-        f"✅ Игры включены в этом чате{where}." if added else f"ℹ️ Игры уже были включены здесь{where}."
+        "🎮 Включить мини-игры в этом чате/топике? Нажми кнопку (проверю твои права).",
+        reply_markup=gamechat_kb("on", _thread(message)),
     )
 
 
 @router.message(Command("disallowgames"))
-async def cmd_disallowgames(message: Message, user: User | None, perms: set[str], session: Session) -> None:
-    if await _deny_if_no_access(message, user, perms):
+async def cmd_disallowgames(message: Message) -> None:
+    if message.chat.type == ChatType.PRIVATE:
+        await message.answer("Эту команду используй в нужном игровом чате/топике.")
         return
-    removed = g.disallow_game_chat(session, message.chat.id, _thread(message))
-    await message.answer("🚫 Игры выключены здесь." if removed else "ℹ️ Игры тут и так не были включены.")
+    await message.answer(
+        "Выключить мини-игры в этом чате/топике?",
+        reply_markup=gamechat_kb("off", _thread(message)),
+    )
 
 
 @router.message(Command("gamechats"))
-async def cmd_gamechats(message: Message, user: User | None, perms: set[str], session: Session) -> None:
-    if await _deny_if_no_access(message, user, perms):
+async def cmd_gamechats(message: Message) -> None:
+    if message.chat.type == ChatType.PRIVATE:
+        await message.answer("Нажми кнопку, чтобы показать список (проверю права):", reply_markup=gamechat_kb("list", None))
         return
-    rows = g.list_game_chats(session)
-    if not rows:
-        await message.answer("Пока нет игровых чатов. Зайди в нужный чат/топик и напиши /allowgames.")
+    await message.answer("Показать список игровых чатов?", reply_markup=gamechat_kb("list", _thread(message)))
+
+
+@router.callback_query(F.data.startswith("gc:"))
+async def on_gamechat_action(cb: CallbackQuery, user: User | None, perms: set[str], session: Session) -> None:
+    if user is None:
+        await cb.answer("Сначала привяжи аккаунт в ЛС бота: /start", show_alert=True)
         return
-    lines = ["🎮 <b>Игровые чаты</b>\n"]
-    for r in rows:
-        title = r.title or str(r.chat_id)
-        topic = f" · топик {r.thread_id}" if r.thread_id else ""
-        lines.append(f"• {title}{topic}")
-    await message.answer("\n".join(lines))
+    if not can_manage_games(perms):
+        await cb.answer("У тебя нет прав на управление играми.", show_alert=True)
+        return
+
+    _, action, raw_thread = cb.data.split(":")
+    thread = int(raw_thread) or None
+    chat_id = cb.message.chat.id
+
+    if action == "on":
+        added = g.allow_game_chat(session, chat_id, thread, cb.message.chat.title, user.id)
+        where = f" (топик {thread})" if thread else ""
+        await cb.message.edit_text(
+            f"✅ Игры включены в этом чате{where}. Пишите /games." if added
+            else f"ℹ️ Игры уже были включены здесь{where}."
+        )
+    elif action == "off":
+        removed = g.disallow_game_chat(session, chat_id, thread)
+        await cb.message.edit_text("🚫 Игры выключены здесь." if removed else "ℹ️ Игры тут и так не были включены.")
+    elif action == "list":
+        rows = g.list_game_chats(session)
+        if not rows:
+            await cb.message.edit_text("Пока нет игровых чатов. Зайди в нужный чат/топик и напиши /allowgames.")
+        else:
+            lines = ["🎮 <b>Игровые чаты</b>\n"]
+            for r in rows:
+                title = r.title or str(r.chat_id)
+                topic = f" · топик {r.thread_id}" if r.thread_id else ""
+                lines.append(f"• {title}{topic}")
+            await cb.message.edit_text("\n".join(lines))
+    await cb.answer()
