@@ -21,6 +21,7 @@ from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_stat_cache import PlayerStatCache
 from apps.api.app.models.player_follow import PlayerFollow
 from apps.api.app.models.player_public_profile import PlayerPublicProfile
+from apps.api.app.models.player_skin import PlayerSkin
 from apps.api.app.models.referral_code import ReferralCode
 from apps.api.app.models.referral_link import ReferralLink
 from apps.api.app.models.referral_reward_period import ReferralRewardPeriod
@@ -70,6 +71,7 @@ __all__ = [
     "PlayerStatCache",
     "PlayerFollow",
     "PlayerPublicProfile",
+    "PlayerSkin",
     "ReferralCode",
     "ReferralLink",
     "ReferralRewardPeriod",

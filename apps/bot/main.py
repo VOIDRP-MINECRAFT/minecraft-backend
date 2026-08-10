@@ -8,15 +8,19 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from sqlalchemy.orm import configure_mappers
 from aiogram.types import (
     BotCommand,
     BotCommandScopeAllGroupChats,
     BotCommandScopeAllPrivateChats,
 )
 
+import apps.api.app.models  # noqa: F401  — register full ORM graph before any query
 from apps.api.app.config import get_settings
 from apps.bot.handlers import admin, games, news, start
 from apps.bot.middlewares import ContextMiddleware
+
+configure_mappers()
 
 logger = logging.getLogger("voidrp.bot")
 
