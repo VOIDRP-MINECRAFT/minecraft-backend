@@ -148,6 +148,30 @@ def _channel_flags(server: GameServer, category: str) -> dict:
     return {"tg": bool(ch["telegram"]), "dc": bool(ch["discord"])}
 
 
+def _broadcast_result(
+    server: GameServer, category: str, *, req_tg: bool, req_dc: bool, res: dict
+) -> NewsBroadcastResult:
+    """Turn a raw broadcast result into a user-facing result with a specific
+    reason per failed channel (not-configured vs delivery failure)."""
+    ch = server.channels_for(category)
+    parts: list[str] = []
+    if req_tg and res.get("telegram_ok") is False:
+        if not ch["telegram"]:
+            parts.append("Telegram-канал не задан для этой категории.")
+        else:
+            parts.append("Не удалось отправить в Telegram — проверь bot token и права бота в топике.")
+    if req_dc and res.get("discord_ok") is False:
+        if not ch["discord"]:
+            parts.append("Discord-webhook не задан для этой категории.")
+        else:
+            parts.append("Не удалось отправить в Discord — webhook недоступен.")
+    return NewsBroadcastResult(
+        telegram_ok=res.get("telegram_ok"),
+        discord_ok=res.get("discord_ok"),
+        detail=" ".join(parts) or None,
+    )
+
+
 @router.get("/servers")
 def list_news_servers(session: Annotated[Session, Depends(get_db_session)]) -> list[dict]:
     """Server dropdown for the news editor (any news perm). Channel config is
@@ -225,11 +249,17 @@ def create_news(
         is_published=payload.is_published,
         author=admin,
     )
+    bcast: NewsBroadcastResult | None = None
     if post.is_published and (payload.post_telegram or payload.post_discord):
-        service.broadcast(post, to_telegram=payload.post_telegram, to_discord=payload.post_discord)
+        res = service.broadcast(post, to_telegram=payload.post_telegram, to_discord=payload.post_discord)
+        bcast = _broadcast_result(
+            server, post.category, req_tg=payload.post_telegram, req_dc=payload.post_discord, res=res
+        )
     session.commit()
     session.refresh(post)
-    return _admin(post)
+    out = _admin(post)
+    out.broadcast = bcast
+    return out
 
 
 @router.patch("/{post_id}", response_model=NewsPostAdmin)
@@ -285,11 +315,6 @@ def broadcast_news(
     _require_cat(perms, post.category, "manage")
     res = service.broadcast(post, to_telegram=payload.post_telegram, to_discord=payload.post_discord)
     session.commit()
-    detail = None
-    if payload.post_telegram and res.get("telegram_ok") is False:
-        detail = "Telegram не настроен или отправка не удалась (проверь bot token и chat_id)."
-    if payload.post_discord and res.get("discord_ok") is False:
-        detail = (detail + " " if detail else "") + "Discord webhook не настроен или недоступен."
-    return NewsBroadcastResult(
-        telegram_ok=res.get("telegram_ok"), discord_ok=res.get("discord_ok"), detail=detail
+    return _broadcast_result(
+        server, post.category, req_tg=payload.post_telegram, req_dc=payload.post_discord, res=res
     )

@@ -46,6 +46,12 @@ class NewsPostPublic(BaseModel):
     author_name: str | None
 
 
+class NewsBroadcastResult(BaseModel):
+    telegram_ok: bool | None = None
+    discord_ok: bool | None = None
+    detail: str | None = None
+
+
 class NewsPostAdmin(NewsPostPublic):
     model_config = ConfigDict(from_attributes=True)
 
@@ -54,6 +60,9 @@ class NewsPostAdmin(NewsPostPublic):
     posted_telegram: bool
     posted_discord: bool
     created_at: datetime
+    # Populated only on create when auto-broadcast was requested, so the
+    # sender learns immediately if delivery to a channel failed.
+    broadcast: NewsBroadcastResult | None = None
 
 
 class NewsListResponse(BaseModel):
@@ -71,9 +80,3 @@ class NewsBroadcastRequest(BaseModel):
 
     post_telegram: bool = False
     post_discord: bool = False
-
-
-class NewsBroadcastResult(BaseModel):
-    telegram_ok: bool | None = None
-    discord_ok: bool | None = None
-    detail: str | None = None

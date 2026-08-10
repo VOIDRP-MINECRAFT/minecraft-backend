@@ -44,6 +44,7 @@ from apps.api.app.api.routes.tiktok_public import router as tiktok_public_router
 from apps.api.app.api.routes.news import router as news_router
 from apps.api.app.api.routes.admin_news import router as admin_news_router
 from apps.api.app.api.routes.admin_moderators import router as admin_moderators_router
+from apps.api.app.api.routes.admin_notifications import router as admin_notifications_router
 from apps.api.app.api.routes.game_sync_stats import router as game_sync_stats_router
 from apps.api.app.api.routes.game_sync_killfeed import router as game_sync_killfeed_router
 from apps.api.app.api.routes.killfeed import router as killfeed_router
@@ -107,6 +108,7 @@ api_router.include_router(tiktok_public_router)
 api_router.include_router(news_router)
 api_router.include_router(admin_news_router)
 api_router.include_router(admin_moderators_router)
+api_router.include_router(admin_notifications_router)
 api_router.include_router(game_sync_stats_router)
 api_router.include_router(game_sync_killfeed_router)
 api_router.include_router(killfeed_router)
