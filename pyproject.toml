@@ -31,6 +31,7 @@ dev = [
 ]
 bot = [
   "aiogram>=3.13.0",
+  "aiohttp-socks>=0.9.0",
 ]
 
 [tool.pytest.ini_options]
