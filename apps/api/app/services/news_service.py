@@ -54,7 +54,16 @@ def _build_opener() -> urllib.request.OpenerDirector:
 
 def _http_post_json(url: str, payload: dict, timeout: float = 8.0) -> bool:
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    # Discord sits behind Cloudflare, which 403s the default "Python-urllib/x.y"
+    # User-Agent. Any real UA passes (Telegram doesn't care), so always send one.
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "VoidRP-News/1.0 (+https://void-rp.ru)",
+        },
+    )
     try:
         with _build_opener().open(req, timeout=timeout) as resp:
             return 200 <= resp.status < 300
