@@ -52,6 +52,7 @@ from apps.api.app.api.routes.game_sync_killfeed import router as game_sync_killf
 from apps.api.app.api.routes.killfeed import router as killfeed_router
 from apps.api.app.api.routes.launcher_crash import router as launcher_crash_router
 from apps.api.app.api.routes.admin_launcher_crashes import router as admin_launcher_crashes_router
+from apps.api.app.api.routes.admin_launcher import router as admin_launcher_router
 from apps.api.app.api.routes.game_sync_alliances import router as game_sync_alliances_router
 from apps.api.app.api.routes.admin_landing import router as admin_landing_router
 from apps.api.app.api.routes.landing import router as landing_router
@@ -117,6 +118,7 @@ api_router.include_router(game_sync_killfeed_router)
 api_router.include_router(killfeed_router)
 api_router.include_router(launcher_crash_router)
 api_router.include_router(admin_launcher_crashes_router)
+api_router.include_router(admin_launcher_router)
 api_router.include_router(game_sync_alliances_router)
 api_router.include_router(admin_landing_router)
 api_router.include_router(landing_router)

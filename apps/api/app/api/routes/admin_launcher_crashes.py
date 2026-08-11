@@ -43,16 +43,19 @@ class CrashReportListResponse(BaseModel):
 def list_crashes(
     session: Annotated[Session, Depends(get_db_session)],
     player: str | None = Query(default=None),
+    version: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> CrashReportListResponse:
-    q = select(LauncherCrashReport).order_by(desc(LauncherCrashReport.created_at))
-    if player:
-        q = q.where(LauncherCrashReport.player_nickname.ilike(f"%{player}%"))
+    def _apply(stmt):
+        if player:
+            stmt = stmt.where(LauncherCrashReport.player_nickname.ilike(f"%{player}%"))
+        if version:
+            stmt = stmt.where(LauncherCrashReport.launcher_version == version)
+        return stmt
 
-    count_q = select(func.count()).select_from(LauncherCrashReport)
-    if player:
-        count_q = count_q.where(LauncherCrashReport.player_nickname.ilike(f"%{player}%"))
+    q = _apply(select(LauncherCrashReport).order_by(desc(LauncherCrashReport.created_at)))
+    count_q = _apply(select(func.count()).select_from(LauncherCrashReport))
     total = session.scalar(count_q) or 0
 
     rows = session.scalars(q.limit(limit).offset(offset)).all()

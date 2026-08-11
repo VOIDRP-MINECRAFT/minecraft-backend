@@ -67,6 +67,13 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
     {
+        "group": "Лаунчер",
+        "permissions": [
+            {"key": "launcher.view", "label": "Лаунчер: статус релиза (версия, манифест)"},
+            {"key": "launcher.deploy", "label": "Лаунчер: менять версию, собирать и деплоить", "sensitive": True},
+        ],
+    },
+    {
         "group": "Telegram",
         "permissions": [
             {"key": "telegram.games.manage", "label": "TG-бот: управление игровыми чатами", "sensitive": True},

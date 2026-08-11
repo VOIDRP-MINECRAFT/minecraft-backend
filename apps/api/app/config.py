@@ -121,6 +121,16 @@ class Settings(BaseSettings):
     yandex_metrika_token: str = ""
     yandex_metrika_counter_id: str = ""
 
+    # Launcher build & deploy (admin "Лаунчер" tab). The backend runs as the same
+    # user that owns the launcher repo and the web deploy dir, so it can build and
+    # publish releases directly (no sudo). See core/launcher_ops.py.
+    launcher_repo_dir: str = "/home/mironoouv/minecraft/voidrp_launcher_vue"
+    launcher_deploy_dir: str = "/var/www/void-rp/launcher/self-update"
+    launcher_public_manifest_url: str = (
+        "https://void-rp.ru/launcher/self-update/manifest.json"
+    )
+    launcher_job_dir: str = "/home/mironoouv/minecraft/voidrp_launcher_vue/.launcher-job"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
