@@ -23,6 +23,12 @@ class CrashReportItem(BaseModel):
     player_nickname: str
     exit_code: int
     crash_report: str | None
+    log_tail: str | None = None
+    launcher_version: str | None = None
+    os_name: str | None = None
+    java_version: str | None = None
+    ram_mb: int | None = None
+    server_slug: str | None = None
     created_at: str
 
     model_config = {"from_attributes": True}
@@ -58,6 +64,12 @@ def list_crashes(
                 player_nickname=r.player_nickname,
                 exit_code=r.exit_code,
                 crash_report=r.crash_report,
+                log_tail=r.log_tail,
+                launcher_version=r.launcher_version,
+                os_name=r.os_name,
+                java_version=r.java_version,
+                ram_mb=r.ram_mb,
+                server_slug=r.server_slug,
                 created_at=r.created_at.isoformat(),
             )
             for r in rows
@@ -79,3 +91,28 @@ def delete_crash(
     if row:
         session.delete(row)
         session.commit()
+
+
+class DeleteCrashesRequest(BaseModel):
+    ids: list[str]
+
+
+@router.post(
+    "/delete",
+    dependencies=[Depends(require_permission("crashes.manage"))],
+)
+def delete_crashes(
+    req: DeleteCrashesRequest,
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict[str, int]:
+    """Bulk-delete crash reports by id."""
+    ids = [i for i in dict.fromkeys(req.ids) if i]  # dedupe, drop blanks
+    if not ids:
+        return {"deleted": 0}
+    deleted = (
+        session.query(LauncherCrashReport)
+        .filter(LauncherCrashReport.id.in_(ids))
+        .delete(synchronize_session=False)
+    )
+    session.commit()
+    return {"deleted": deleted}

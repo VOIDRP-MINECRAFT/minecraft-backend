@@ -139,3 +139,18 @@ def get_logs(
         return {"source": source, "path": None, "lines": [], "available": False}
     content = server_ops.tail_log(path, lines=lines)
     return {"source": source, "path": path, "lines": content, "available": True}
+
+
+# ── Recent hangs / watchdog stalls ──────────────────────────────────────────
+@router.get("/hangs")
+def get_hangs(
+    server: Annotated[GameServer, Depends(resolve_server)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> dict:
+    """Summary lines of recent watchdog/HUNG_TICK stalls in the server log —
+    timestamp + tick duration, newest last. Skips the stack-frame noise."""
+    path = server_ops.resolve_log_path(server)
+    if not path:
+        return {"path": None, "hangs": [], "available": False}
+    hangs = server_ops.scan_hangs(path, limit=limit)
+    return {"path": path, "hangs": hangs, "available": True}

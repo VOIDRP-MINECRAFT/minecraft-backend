@@ -340,6 +340,48 @@ def player_action(
     return {"ok": "true", "action": req.action, "nick": nick}
 
 
+class DeletePlayersRequest(BaseModel):
+    player_uuids: list[str]
+
+
+@router.post("/players/delete", dependencies=[Depends(require_permission("anticheat.manage"))])
+def delete_players(
+    req: DeletePlayersRequest,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict[str, int]:
+    """Permanently remove all anticheat records (violations, mod snapshots,
+    injection reports) for the given players on the current server. This is what
+    drops them off the players list — ``clear_violations`` only marks them
+    reviewed. Scoped to ``server.id`` so it never touches other servers' data."""
+    uuids = [u for u in dict.fromkeys(req.player_uuids) if u]  # dedupe, drop blanks
+    if not uuids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No players specified")
+
+    violations = (
+        session.query(AnticheatViolation)
+        .filter(AnticheatViolation.server_id == server.id, AnticheatViolation.player_uuid.in_(uuids))
+        .delete(synchronize_session=False)
+    )
+    snapshots = (
+        session.query(AnticheatModSnapshot)
+        .filter(AnticheatModSnapshot.server_id == server.id, AnticheatModSnapshot.player_uuid.in_(uuids))
+        .delete(synchronize_session=False)
+    )
+    injections = (
+        session.query(AnticheatInjectionReport)
+        .filter(AnticheatInjectionReport.server_id == server.id, AnticheatInjectionReport.player_uuid.in_(uuids))
+        .delete(synchronize_session=False)
+    )
+    session.commit()
+    return {
+        "players": len(uuids),
+        "violations": violations,
+        "snapshots": snapshots,
+        "injection_reports": injections,
+    }
+
+
 def _parse_json_list(text: str) -> list[str]:
     try:
         result = json.loads(text)

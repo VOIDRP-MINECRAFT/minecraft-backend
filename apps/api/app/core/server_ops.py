@@ -147,6 +147,7 @@ def _disk_for(path: str) -> DiskMetrics | None:
 def _prune_proc_cache() -> None:
     for pid in [p for p, proc in _proc_cache.items() if not proc.is_running()]:
         _proc_cache.pop(pid, None)
+        _jcmd_maxheap_cache.pop(pid, None)
 
 
 def collect_metrics(server: "GameServer") -> dict:
@@ -211,6 +212,7 @@ def collect_metrics(server: "GameServer") -> dict:
             process = None
 
     disk = _disk_for(data_dir) if data_dir else None
+    jvm = collect_jvm(proc) if proc is not None else None
 
     return {
         "unit": unit,
@@ -219,6 +221,83 @@ def collect_metrics(server: "GameServer") -> dict:
         "host": host.__dict__ if host else None,
         "process": process.__dict__ if process else None,
         "disk": disk.__dict__ if disk else None,
+        "jvm": jvm,
+    }
+
+
+# ── JVM heap (via jcmd — same OS user, no elevated privileges) ───────────────
+# jcmd ships in the JDK next to the ``java`` binary and talks to the target VM
+# over its attach socket, so it works even when the server is launched with
+# ``-XX:+PerfDisableSharedMem`` (which our servers are — that flag kills the
+# hsperfdata file jstat/jstat-style tools rely on, but not the attach channel).
+# GC.heap_info gives live heap used + committed; VM.flags gives MaxHeapSize (the
+# effective -Xmx), cached since it never changes for a running VM. GC pause
+# counters aren't reachable without perfdata, so we omit them rather than lie.
+# Everything is best-effort: no jcmd, a failed attach, or a parse miss → ``None``.
+_jcmd_maxheap_cache: dict[int, int] = {}
+_HEAP_INFO_RE = re.compile(r"total\s+(\d+)K,\s*used\s+(\d+)K")
+_META_INFO_RE = re.compile(r"Metaspace\s+used\s+(\d+)K,\s*committed\s+(\d+)K")
+_MAXHEAP_RE = re.compile(r"MaxHeapSize=(\d+)")
+
+
+def _jcmd_bin(proc: psutil.Process) -> str | None:
+    try:
+        exe = proc.exe()  # …/jdk/bin/java  → jcmd sits alongside it
+        cand = os.path.join(os.path.dirname(exe), "jcmd")
+        if os.path.exists(cand):
+            return cand
+    except (psutil.Error, OSError):
+        pass
+    if os.path.exists("/usr/bin/jcmd"):
+        return "/usr/bin/jcmd"
+    return shutil.which("jcmd")
+
+
+def _run_jcmd(jcmd: str, pid: int, cmd: str) -> str | None:
+    try:
+        res = subprocess.run([jcmd, str(pid), cmd], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = res.stdout or ""
+    if not out or "Could not attach" in out or "Exception" in out:
+        return None
+    return out
+
+
+def _jvm_max_heap(jcmd: str, pid: int) -> int | None:
+    cached = _jcmd_maxheap_cache.get(pid)
+    if cached is not None:
+        return cached
+    flags = _run_jcmd(jcmd, pid, "VM.flags")
+    m = _MAXHEAP_RE.search(flags or "")
+    if m:
+        val = int(m.group(1))
+        _jcmd_maxheap_cache[pid] = val
+        return val
+    return None
+
+
+def collect_jvm(proc: psutil.Process) -> dict | None:
+    jcmd = _jcmd_bin(proc)
+    if not jcmd:
+        return None
+    pid = proc.pid
+    info = _run_jcmd(jcmd, pid, "GC.heap_info")
+    if not info:
+        return None
+    heap = _HEAP_INFO_RE.search(info)
+    if not heap:
+        return None
+    committed = int(heap.group(1)) * 1024  # "total" for G1 = current committed heap
+    heap_used = int(heap.group(2)) * 1024
+    heap_max = _jvm_max_heap(jcmd, pid) or committed
+    meta = _META_INFO_RE.search(info)
+    return {
+        "heap_used": heap_used,
+        "heap_committed": committed,
+        "heap_max": heap_max,
+        "heap_percent": round(heap_used / heap_max * 100, 1) if heap_max else None,
+        "meta_used": int(meta.group(1)) * 1024 if meta else None,
     }
 
 
@@ -426,6 +505,23 @@ def query_tps(server: "GameServer", timeout: float = 3.0) -> dict | None:
     return None
 
 
+def _tps_pair(line: str) -> dict | None:
+    """Pull (tps, mspt) from one NeoForge tps line. The localized/overall form
+    is ``… 20.0 тактов/сек (25.4 мс/такт)`` → first number is TPS, second MSPT.
+    Anything before the first ':' is a label and is dropped so a ``minecraft:``
+    dimension token in the name never leaks into the numbers."""
+    nums = _floats(line.split(":", 1)[-1] if ":" in line else line)
+    if not nums:
+        return None
+    return {"tps": round(min(nums[0], 20.0), 1),
+            "mspt": round(nums[1], 2) if len(nums) > 1 else None}
+
+
+_DIM_RE = re.compile(r"([a-z0-9_.-]+:[a-z0-9_./-]+)")
+# Overall/summary line keyword (EN + RU) — distinguishes it from per-dim lines.
+_OVERALL_RE = re.compile(r"overall|в целом|итог", re.IGNORECASE)
+
+
 def _parse_tps(raw: str) -> dict | None:
     # Paper/Purpur: "TPS from last 5s, 1m, 5m, 15m: 20.0, 19.2, ..."
     if "TPS from last" in raw:
@@ -433,15 +529,38 @@ def _parse_tps(raw: str) -> dict | None:
         if nums:
             labels = ["5s", "1m", "5m", "15m"]
             windows = {labels[i]: round(nums[i], 1) for i in range(min(len(nums), 4))}
-            return {"tps": round(nums[0], 1), "mspt": None, "windows": windows, "source": "paper"}
-    # NeoForge: per-dimension lines + overall (last line): "... 20.0 …/сек (25.4 …/такт)"
+            return {"tps": round(nums[0], 1), "mspt": None, "windows": windows,
+                    "dimensions": None, "source": "paper"}
+    # NeoForge: one line per loaded dimension + an overall line. The overall line
+    # carries no ``namespace:path`` token; each dimension line does. We keep the
+    # full per-dimension breakdown so the panel can point at *which* dimension lags.
     lines = [ln for ln in raw.splitlines() if ln.strip()]
     if lines and ("тактов" in raw or "TPS" in raw or "tick" in raw.lower()):
-        nums = _floats(lines[-1].split(":", 1)[-1])
-        if nums:
-            return {"tps": round(min(nums[0], 20.0), 1),
-                    "mspt": round(nums[1], 2) if len(nums) > 1 else None,
-                    "windows": None, "source": "neoforge"}
+        dims: list[dict] = []
+        overall: dict | None = None
+        last_total: dict | None = None  # last numeric line that was NOT a dimension
+        for ln in lines:
+            pair = _tps_pair(ln)
+            if not pair:
+                continue
+            dim = _DIM_RE.search(ln)
+            if dim and not _OVERALL_RE.search(ln):
+                dims.append({"dim": dim.group(1), **pair})
+                continue
+            last_total = pair
+            if _OVERALL_RE.search(ln):
+                overall = pair  # explicit "Overall"/"В целом" line wins
+        # No explicit overall keyword → last non-dimension line (original
+        # behaviour), else the worst dimension so the headline still shows lag.
+        if overall is None:
+            if last_total is not None:
+                overall = last_total
+            elif dims:
+                worst = min(dims, key=lambda d: d["tps"])
+                overall = {"tps": worst["tps"], "mspt": worst["mspt"]}
+        if overall:
+            return {"tps": overall["tps"], "mspt": overall["mspt"],
+                    "windows": None, "dimensions": dims or None, "source": "neoforge"}
     return None
 
 
@@ -482,3 +601,36 @@ def tail_log(path: str, lines: int = 200, max_bytes: int = 512 * 1024) -> list[s
     text = data.decode("utf-8", errors="replace")
     out = text.splitlines()
     return out[-lines:]
+
+
+# ── Hang / Watchdog scanner ─────────────────────────────────────────────────
+# Surfaces the headline lines of watchdog stalls (HUNG_TICK) so they don't have
+# to be hunted for by scrolling the log. We match only the *summary* lines a
+# stall emits — not the hundreds of stack frames that follow — and pull out the
+# timestamp and, where present, the tick duration in seconds.
+_HANG_LINE_RE = re.compile(
+    r"single server tick took|appears to be hung|Considering it to be crashed"
+    r"|HUNG_TICK|HUNG TICK|Watchdog",
+    re.IGNORECASE,
+)
+# A stack dump has thousands of these; keep them out of the summary list.
+_HANG_NOISE_RE = re.compile(r"\bat [\w.$]+\(|java\.|\tat |Thread\.State|Daemon Thread")
+_TS_RE = re.compile(r"\[(\d{2}:\d{2}:\d{2})\]")
+_HANG_SECS_RE = re.compile(r"took ([\d.]+)\s*sec", re.IGNORECASE)
+
+
+def scan_hangs(path: str, scan_lines: int = 6000, limit: int = 50) -> list[dict]:
+    """Scan the tail of a log for watchdog/hang summary lines, newest last.
+    Returns ``[{time, seconds, text}]``. Empty list if the file is unreadable."""
+    hits: list[dict] = []
+    for ln in tail_log(path, lines=scan_lines, max_bytes=3 * 1024 * 1024):
+        if not _HANG_LINE_RE.search(ln) or _HANG_NOISE_RE.search(ln):
+            continue
+        ts = _TS_RE.search(ln)
+        secs = _HANG_SECS_RE.search(ln)
+        hits.append({
+            "time": ts.group(1) if ts else None,
+            "seconds": float(secs.group(1)) if secs else None,
+            "text": strip_color_codes(ln).strip(),
+        })
+    return hits[-limit:]

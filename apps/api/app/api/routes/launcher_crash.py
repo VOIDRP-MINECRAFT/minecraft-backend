@@ -14,11 +14,25 @@ from apps.api.app.models.user import User
 router = APIRouter(prefix="/launcher", tags=["launcher-crash"])
 
 MAX_CRASH_REPORT_LEN = 65_536
+MAX_LOG_TAIL_LEN = 65_536
+
+
+def _clip(text: str | None, limit: int) -> str | None:
+    if text and len(text) > limit:
+        return text[:limit] + "\n... [truncated]"
+    return text or None
 
 
 class CrashReportRequest(BaseModel):
     exit_code: int
     crash_report: str | None = None
+    # Enriched diagnostics (all optional so older launchers keep working).
+    log_tail: str | None = None
+    launcher_version: str | None = None
+    os_name: str | None = None
+    java_version: str | None = None
+    ram_mb: int | None = None
+    server_slug: str | None = None
 
 
 @router.post("/me/crash-report", status_code=204)
@@ -31,14 +45,16 @@ def submit_crash_report(
     if not nickname:
         return
 
-    crash_report = body.crash_report
-    if crash_report and len(crash_report) > MAX_CRASH_REPORT_LEN:
-        crash_report = crash_report[:MAX_CRASH_REPORT_LEN] + "\n... [truncated]"
-
     record = LauncherCrashReport(
         player_nickname=nickname,
         exit_code=body.exit_code,
-        crash_report=crash_report,
+        crash_report=_clip(body.crash_report, MAX_CRASH_REPORT_LEN),
+        log_tail=_clip(body.log_tail, MAX_LOG_TAIL_LEN),
+        launcher_version=body.launcher_version,
+        os_name=body.os_name,
+        java_version=body.java_version,
+        ram_mb=body.ram_mb,
+        server_slug=body.server_slug,
     )
     session.add(record)
     session.commit()
