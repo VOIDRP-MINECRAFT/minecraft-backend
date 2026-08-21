@@ -26,6 +26,7 @@ from apps.api.app.models.referral_link import ReferralLink
 from apps.api.app.models.referral_reward_period import ReferralRewardPeriod
 from apps.api.app.models.refresh_session import RefreshSession
 from apps.api.app.models.user import User
+from apps.api.app.models.voxel_game import VoxelGame
 
 config = context.config
 

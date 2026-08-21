@@ -79,6 +79,13 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "telegram.games.manage", "label": "TG-бот: управление игровыми чатами", "sensitive": True},
         ],
     },
+    {
+        "group": "Voxel Engine",
+        "permissions": [
+            {"key": "voxel.view", "label": "Voxel Engine: игры (просмотр)"},
+            {"key": "voxel.manage", "label": "Voxel Engine: создавать/править игры", "sensitive": True},
+        ],
+    },
 ]
 
 ALL_KEYS: frozenset[str] = frozenset(
