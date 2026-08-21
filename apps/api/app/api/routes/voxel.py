@@ -6,9 +6,10 @@ channel of Этап 1. Everything is scoped to the authenticated server.
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
@@ -44,4 +45,37 @@ def report_status(
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found")
     repo.record_status(game, payload.status, payload.version, payload.message)
+    session.commit()
+
+
+class ZoneBody(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    dimension: str = "minecraft:overworld"
+    min: list[int] = Field(min_length=3, max_length=3)
+    max: list[int] = Field(min_length=3, max_length=3)
+
+
+@router.post("/games/{game_id}/zone", status_code=status.HTTP_204_NO_CONTENT)
+def upsert_zone(
+    game_id: str,
+    payload: ZoneBody,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> None:
+    """Записать зону в definition игры из мира (мод, /engine zone set). Бампает version."""
+    repo = VoxelGameRepository(session)
+    game = repo.get(server.id, game_id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found")
+    definition: dict[str, Any] = dict(game.definition or {})
+    zones = dict(definition.get("zones") or {})
+    zones[payload.name] = {
+        "type": "box",
+        "dimension": payload.dimension,
+        "min": payload.min,
+        "max": payload.max,
+    }
+    definition["zones"] = zones
+    game.definition = definition
+    game.version += 1
     session.commit()

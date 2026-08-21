@@ -72,6 +72,7 @@ from apps.api.app.api.routes.game_ui_battlepass import router as game_ui_battlep
 from apps.api.app.api.routes.game_ui_alliance import router as game_ui_alliance_router
 from apps.api.app.api.routes.voxel import router as voxel_router
 from apps.api.app.api.routes.admin_voxel import router as admin_voxel_router
+from apps.api.app.api.routes.game_ui_voxel import router as game_ui_voxel_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -142,3 +143,4 @@ api_router.include_router(admin_server_ops_router)
 api_router.include_router(admin_mods_router)
 api_router.include_router(voxel_router)
 api_router.include_router(admin_voxel_router)
+api_router.include_router(game_ui_voxel_router)
