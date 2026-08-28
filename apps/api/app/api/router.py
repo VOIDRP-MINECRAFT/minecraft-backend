@@ -74,6 +74,8 @@ from apps.api.app.api.routes.game_ui_nation_market import router as game_ui_nati
 from apps.api.app.api.routes.game_ui_treasury import router as game_ui_treasury_router
 from apps.api.app.api.routes.game_ui_research import router as game_ui_research_router
 from apps.api.app.api.routes.game_ui_research import plugin_router as nation_research_plugin_router
+from apps.api.app.api.routes.game_ui_notifications import router as game_ui_notifications_router
+from apps.api.app.api.routes.game_ui_notifications import plugin_router as notifications_plugin_router
 from apps.api.app.api.routes.game_sync_season import plugin_router as season_plugin_router
 from apps.api.app.api.routes.game_ui_quests import router as game_ui_quests_router
 from apps.api.app.api.routes.game_ui_quests import plugin_router as game_ui_quests_plugin_router
@@ -148,6 +150,8 @@ api_router.include_router(game_ui_nation_market_router)
 api_router.include_router(game_ui_treasury_router)
 api_router.include_router(game_ui_research_router)
 api_router.include_router(nation_research_plugin_router)
+api_router.include_router(game_ui_notifications_router)
+api_router.include_router(notifications_plugin_router)
 api_router.include_router(season_plugin_router)
 api_router.include_router(game_ui_quests_router)
 api_router.include_router(game_ui_quests_plugin_router)

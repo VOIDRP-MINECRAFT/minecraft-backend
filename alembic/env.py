@@ -16,6 +16,7 @@ from apps.api.app.models.nation_join_request import NationJoinRequest
 from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.nation_member_stat_snapshot import NationMemberStatSnapshot
 from apps.api.app.models.nation_research import NationResearch
+from apps.api.app.models.player_notification import PlayerNotification
 from apps.api.app.models.nation_stat import NationStat
 from apps.api.app.models.nation_treasury_transaction import NationTreasuryTransaction
 from apps.api.app.models.player_account import PlayerAccount
