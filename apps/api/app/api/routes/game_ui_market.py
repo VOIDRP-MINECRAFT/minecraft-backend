@@ -116,6 +116,8 @@ import re as _re
 # plugin runs them AS THE PLAYER (permission-checked). Bases with no args just open
 # an in-game GUI; the two with args are validated strictly here.
 _NOARG_WEB_COMMANDS = {"dailyquest", "bossquest", "delivery", "shop", "nmarket", "battlepass"}
+# WebGUI pages the plugin can open in-game via an "open_gui" web action (e.g. from a notification).
+_WEBGUI_PAGES = {"menu", "market", "nmarket", "treasury", "research", "alliance", "battlepass", "quests"}
 _NATIONDONATE_RE = _re.compile(r"^nationdonate \d{1,15}(\.\d{1,2})?$")
 _NMARKET_BUY_RE = _re.compile(r"^nmarket buy [A-Za-z0-9\-]{1,64} \d{1,4}$")
 _DAILYQUEST_CLAIM_RE = _re.compile(r"^dailyquest claim \d{1,2}$")
@@ -140,12 +142,17 @@ def create_pending_action(
     db: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],
 ):
-    allowed = {"buy", "sell", "cancel_buy", "cancel_sell", "pickup", "command"}
+    allowed = {"buy", "sell", "cancel_buy", "cancel_sell", "pickup", "command", "open_gui"}
     if req.action_type not in allowed:
         raise HTTPException(status_code=400, detail=f"Unknown action_type: {req.action_type}")
 
     if req.action_type == "command":
         req.payload = {"command": _validate_web_command(req.payload.get("command", ""))}
+    elif req.action_type == "open_gui":
+        page = str(req.payload.get("page", "")).lower()
+        if page not in _WEBGUI_PAGES:
+            raise HTTPException(status_code=400, detail="Page not allowed")
+        req.payload = {"page": page}
 
     action = PlayerMarketWebAction(
         server_id=server.id,
