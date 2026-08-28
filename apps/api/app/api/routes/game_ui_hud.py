@@ -17,6 +17,7 @@ from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_market import PlayerMarketPendingDelivery
 from apps.api.app.models.player_stat_cache import PlayerStatCache
+from apps.api.app.services.battlepass_service import BattlePassService
 
 router = APIRouter(prefix="/game-ui/hud", tags=["game-ui", "hud"])
 
@@ -27,6 +28,9 @@ class HudSnapshot(BaseModel):
     nation_role: str | None
     pending_deliveries: int
     completed_quests: int
+    bp_level: int = 0
+    bp_xp: int = 0
+    bp_has_premium: bool = False
 
 
 @router.get("/snapshot", response_model=HudSnapshot)
@@ -74,10 +78,17 @@ def get_hud_snapshot(
         )
     ).scalar_one()
 
+    bp = BattlePassService(session=db, server_id=server.id).get_public_profile_by_nick(
+        player.minecraft_nickname
+    )
+
     return HudSnapshot(
         balance=balance,
         nation_name=nation_name,
         nation_role=nation_role,
         pending_deliveries=int(pending_deliveries),
         completed_quests=completed_quests,
+        bp_level=bp.level if bp else 0,
+        bp_xp=bp.xp if bp else 0,
+        bp_has_premium=bp.has_premium if bp else False,
     )
