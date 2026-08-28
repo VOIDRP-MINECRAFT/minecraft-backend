@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
@@ -28,7 +29,7 @@ from apps.api.app.schemas.news import (
     NewsPostCreate,
     NewsPostUpdate,
 )
-from apps.api.app.services.news_service import NewsService
+from apps.api.app.services.news_service import NewsService, as_utc
 
 _NEWS_KEYS = (
     "news.updates.view", "news.updates.manage",
@@ -65,15 +66,25 @@ _MAX_IMAGE_BYTES = 8 * 1024 * 1024
 _COVER_TARGET = (1600, 600)  # 16:6
 _COVER_MIN_WIDTH = 1000
 _COVER_MIN_HEIGHT = 375
+# Inline (in-body) images keep their own aspect ratio — a screenshot must not be
+# cropped to a banner. Only downscaled if wider than the article column.
+_INLINE_MAX_WIDTH = 1600
 
 
 @router.post(
     "/upload-image",
     dependencies=[Depends(require_any_permission("news.updates.manage", "news.media.manage"))],
 )
-async def upload_cover_image(file: UploadFile = File(...)) -> dict:
-    """Upload a news cover image → returns a public URL. Center-cropped to a
-    1600×600 (16:6) banner and saved as WebP."""
+async def upload_cover_image(
+    file: UploadFile = File(...),
+    mode: Annotated[str, Query(pattern=r"^(cover|inline)$")] = "cover",
+) -> dict:
+    """Upload a news image → returns a public URL.
+
+    ``mode=cover`` center-crops to a 1600×600 (16:6) banner (card + page hero).
+    ``mode=inline`` keeps the aspect ratio for screenshots pasted into the body,
+    downscaling only if wider than the article column. Both are saved as WebP.
+    """
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="empty file")
@@ -84,33 +95,42 @@ async def upload_cover_image(file: UploadFile = File(...)) -> dict:
             img.load()
             if (img.format or "").upper() not in _ALLOWED_IMAGE_FORMATS:
                 raise HTTPException(status_code=400, detail="Только PNG, JPEG или WEBP.")
-            if img.width < _COVER_MIN_WIDTH or img.height < _COVER_MIN_HEIGHT:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Изображение слишком маленькое ({img.width}×{img.height}). "
-                        f"Нужно минимум {_COVER_MIN_WIDTH}×{_COVER_MIN_HEIGHT}. "
-                        "Рекомендуется 1600×600 (соотношение 16:6)."
-                    ),
-                )
-            working = img.convert("RGB")
-            target_ratio = _COVER_TARGET[0] / _COVER_TARGET[1]
-            w, h = working.width, working.height
-            if w / h > target_ratio:
-                new_w = int(h * target_ratio)
-                left = (w - new_w) // 2
-                working = working.crop((left, 0, left + new_w, h))
+            if mode == "inline":
+                working = img.convert("RGB")
+                if working.width > _INLINE_MAX_WIDTH:
+                    ratio = _INLINE_MAX_WIDTH / working.width
+                    working = working.resize(
+                        (_INLINE_MAX_WIDTH, max(1, int(working.height * ratio))),
+                        Image.Resampling.LANCZOS,
+                    )
             else:
-                new_h = int(w / target_ratio)
-                top = (h - new_h) // 2
-                working = working.crop((0, top, w, top + new_h))
-            working = working.resize(_COVER_TARGET, Image.Resampling.LANCZOS)
+                if img.width < _COVER_MIN_WIDTH or img.height < _COVER_MIN_HEIGHT:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Изображение слишком маленькое ({img.width}×{img.height}). "
+                            f"Нужно минимум {_COVER_MIN_WIDTH}×{_COVER_MIN_HEIGHT}. "
+                            "Рекомендуется 1600×600 (соотношение 16:6)."
+                        ),
+                    )
+                working = img.convert("RGB")
+                target_ratio = _COVER_TARGET[0] / _COVER_TARGET[1]
+                w, h = working.width, working.height
+                if w / h > target_ratio:
+                    new_w = int(h * target_ratio)
+                    left = (w - new_w) // 2
+                    working = working.crop((left, 0, left + new_w, h))
+                else:
+                    new_h = int(w / target_ratio)
+                    top = (h - new_h) // 2
+                    working = working.crop((0, top, w, top + new_h))
+                working = working.resize(_COVER_TARGET, Image.Resampling.LANCZOS)
     except UnidentifiedImageError:
         raise HTTPException(status_code=400, detail="Файл не является корректным изображением.")
 
     settings = get_settings()
     rel_dir = Path("news")
-    filename = f"cover-{uuid4().hex}.webp"
+    filename = f"{'inline' if mode == 'inline' else 'cover'}-{uuid4().hex}.webp"
     abs_dir = Path(settings.media_storage_root) / rel_dir
     abs_dir.mkdir(parents=True, exist_ok=True)
     working.save(abs_dir / filename, format="WEBP", quality=88, method=4)
@@ -139,7 +159,16 @@ def _admin(post: NewsPost) -> NewsPostAdmin:
         is_published=post.is_published,
         posted_telegram=post.posted_telegram,
         posted_discord=post.posted_discord,
+        posted_telegram_at=post.posted_telegram_at,
+        posted_discord_at=post.posted_discord_at,
         created_at=post.created_at,
+        # as_utc(): the column is timezone-aware, but a value that came back
+        # naive (or was written naive) must not blow up the whole listing.
+        is_scheduled=bool(
+            post.is_published
+            and post.published_at is not None
+            and as_utc(post.published_at) > datetime.now(timezone.utc)
+        ),
     )
 
 
@@ -206,11 +235,17 @@ def list_news(
     category: Annotated[str, Query(...)],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    status_filter: Annotated[
+        str | None, Query(alias="status", pattern=r"^(published|draft|scheduled)$")
+    ] = None,
 ) -> NewsAdminListResponse:
     _validate_category(category)
     _require_cat(perms, category, "view")
     server = _server(session, server_id)
-    items, total = NewsService(session, server).list_admin(limit, offset, category=category)
+    items, total = NewsService(session, server).list_admin(
+        limit, offset, category=category, query=q, status=status_filter
+    )
     return NewsAdminListResponse(items=[_admin(p) for p in items], total=total)
 
 
@@ -247,10 +282,28 @@ def create_news(
         body=payload.body,
         cover_image_url=payload.cover_image_url,
         is_published=payload.is_published,
+        published_at=payload.published_at,
         author=admin,
     )
     bcast: NewsBroadcastResult | None = None
-    if post.is_published and (payload.post_telegram or payload.post_discord):
+    requested = payload.post_telegram or payload.post_discord
+    scheduled = (
+        post.published_at is not None
+        and as_utc(post.published_at) > datetime.now(timezone.utc)
+    )
+    if requested and (not post.is_published or scheduled):
+        # Don't silently swallow the request: a draft (or a post scheduled for
+        # later) has nothing to link to yet, so say so instead of pretending.
+        bcast = NewsBroadcastResult(
+            telegram_ok=False if payload.post_telegram else None,
+            discord_ok=False if payload.post_discord else None,
+            detail=(
+                "Отложенный пост не рассылается сразу — отправь вручную после публикации."
+                if scheduled
+                else "Черновик не рассылается — сначала опубликуй, потом отправь кнопкой в списке."
+            ),
+        )
+    elif requested:
         res = service.broadcast(post, to_telegram=payload.post_telegram, to_discord=payload.post_discord)
         bcast = _broadcast_result(
             server, post.category, req_tg=payload.post_telegram, req_dc=payload.post_discord, res=res
@@ -276,7 +329,14 @@ def update_news(
     if post is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="News post not found")
     _require_cat(perms, post.category, "manage")
-    service.update(post, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    # Moving a post between categories needs manage rights on the destination
+    # too — otherwise «Обновления»-only staff could push into «Новости».
+    new_cat = data.get("category")
+    if new_cat and new_cat != post.category:
+        _validate_category(new_cat)
+        _require_cat(perms, new_cat, "manage")
+    service.update(post, data)
     session.commit()
     session.refresh(post)
     return _admin(post)

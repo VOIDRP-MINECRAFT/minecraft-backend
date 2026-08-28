@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from apps.api.app.api.routes import servers as servers_route
 from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
+from apps.api.app.dependencies.server_context import can_view_staff_only_servers
 from apps.api.app.main import create_app
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.schemas.game_server import GameServerStatus
@@ -96,6 +98,75 @@ def test_public_list_only_visible(env) -> None:
     assert "beta" not in slugs
     # Public payload must not leak the secret.
     assert all("game_auth_secret" not in s for s in resp.json())
+
+
+def test_staff_only_hidden_from_public_catalogue(env) -> None:
+    client, admin_secret, _ = env
+    _create(client, admin_secret, "alpha")
+    _create(client, admin_secret, "secret", staff_only=True)
+
+    listed = client.get("/api/v1/servers")
+    assert listed.status_code == 200
+    assert {s["slug"] for s in listed.json()} == {"alpha"}
+    assert client.get("/api/v1/servers/secret").status_code == 404
+
+    # A caller allowed to see hidden servers gets it in both endpoints.
+    client.app.dependency_overrides[can_view_staff_only_servers] = lambda: True
+    try:
+        listed = client.get("/api/v1/servers")
+        assert {s["slug"] for s in listed.json()} == {"alpha", "secret"}
+        detail = client.get("/api/v1/servers/secret")
+        assert detail.status_code == 200
+        assert detail.json()["staff_only"] is True
+    finally:
+        client.app.dependency_overrides.pop(can_view_staff_only_servers, None)
+
+
+def test_staff_only_still_obeys_is_visible(env) -> None:
+    """`is_visible=False` hides the server from everyone, staff included."""
+    client, admin_secret, _ = env
+    _create(client, admin_secret, "alpha")
+    _create(client, admin_secret, "gone", is_visible=False, staff_only=True)
+
+    client.app.dependency_overrides[can_view_staff_only_servers] = lambda: True
+    try:
+        assert {s["slug"] for s in client.get("/api/v1/servers").json()} == {"alpha"}
+        assert client.get("/api/v1/servers/gone").status_code == 404
+    finally:
+        client.app.dependency_overrides.pop(can_view_staff_only_servers, None)
+
+
+@pytest.mark.parametrize(
+    ("user", "expected"),
+    [
+        (None, False),
+        (SimpleNamespace(is_active=True, is_admin=True, is_moderator=False, staff_permissions=[]), True),
+        (
+            SimpleNamespace(
+                is_active=True, is_admin=False, is_moderator=True,
+                staff_permissions=["servers.hidden.view"],
+            ),
+            True,
+        ),
+        (
+            SimpleNamespace(
+                is_active=True, is_admin=False, is_moderator=True,
+                staff_permissions=["servers.manage"],
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                is_active=False, is_admin=True, is_moderator=False,
+                staff_permissions=["servers.hidden.view"],
+            ),
+            False,
+        ),
+        (SimpleNamespace(is_active=True, is_admin=False, is_moderator=False, staff_permissions=[]), False),
+    ],
+)
+def test_can_view_staff_only_servers(user, expected) -> None:
+    assert can_view_staff_only_servers(user) is expected
 
 
 def test_secret_resolves_server(env) -> None:

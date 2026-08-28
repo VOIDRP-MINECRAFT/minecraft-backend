@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.server_context import can_view_staff_only_servers
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.repositories.game_server_repository import GameServerRepository
 from apps.api.app.schemas.game_server import GameServerPublic, GameServerStatus
@@ -65,8 +66,13 @@ def _to_public(server: GameServer, with_status: bool = True) -> GameServerPublic
 
 
 @router.get("", response_model=list[GameServerPublic])
-def list_servers(session: Annotated[Session, Depends(get_db_session)]) -> list[GameServerPublic]:
+def list_servers(
+    session: Annotated[Session, Depends(get_db_session)],
+    with_staff_only: Annotated[bool, Depends(can_view_staff_only_servers)],
+) -> list[GameServerPublic]:
     servers = GameServerRepository(session).list_visible()
+    if not with_staff_only:
+        servers = [s for s in servers if not s.staff_only]
     return [_to_public(s) for s in servers]
 
 
@@ -74,8 +80,9 @@ def list_servers(session: Annotated[Session, Depends(get_db_session)]) -> list[G
 def get_server(
     slug: str,
     session: Annotated[Session, Depends(get_db_session)],
+    with_staff_only: Annotated[bool, Depends(can_view_staff_only_servers)],
 ) -> GameServerPublic:
     server = GameServerRepository(session).get_by_slug(slug)
-    if server is None or not server.is_visible:
+    if server is None or not server.is_visible or (server.staff_only and not with_staff_only):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
     return _to_public(server)

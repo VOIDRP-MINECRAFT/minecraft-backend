@@ -5,11 +5,16 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from sqlalchemy.orm import Session
+
 from apps.api.app.config import get_settings
 from apps.api.app.core import server_ops
-from apps.api.app.dependencies.admin import caller_permissions, require_permission
+from apps.api.app.core.audit import record_audit
+from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.admin import caller_permissions, get_current_staff_user, require_permission
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
+from apps.api.app.models.user import User
 
 router = APIRouter(
     prefix="/admin/server-ops",
@@ -65,6 +70,8 @@ class ModerateRequest(BaseModel):
 @router.post("/moderate", dependencies=[Depends(require_permission("players.online.moderate"))])
 def moderate_player(
     server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
     payload: ModerateRequest,
 ) -> dict:
     """Kick/ban/op an online player. Decoupled from the full RCON console so a
@@ -80,6 +87,8 @@ def moderate_player(
         raise HTTPException(status_code=409, detail="RCON is not configured for this server")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"RCON error: {exc}")
+    record_audit(session, actor=actor, category="monitoring", action=f"moderate_{payload.action}",
+                 target_type="player", target_id=name, target_label=name, server_id=server.id)
     return {"action": payload.action, "player": name, "output": server_ops.strip_color_codes(output)}
 
 
@@ -91,6 +100,8 @@ class PowerRequest(BaseModel):
 @router.post("/power", dependencies=[Depends(require_permission("monitoring.restart"))])
 def power_control(
     server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
     payload: PowerRequest,
 ) -> dict:
     """Запуск / перезапуск / остановка systemd-юнита сервера. Требует прав
@@ -102,6 +113,8 @@ def power_control(
         raise HTTPException(status_code=409, detail=str(exc))
     except server_ops.PowerError as exc:
         raise HTTPException(status_code=502, detail=f"Не удалось выполнить: {exc}")
+    record_audit(session, actor=actor, category="monitoring", action=f"power_{payload.action}",
+                 target_type="server", target_id=server.slug, target_label=server.name, server_id=server.id)
     return {"action": payload.action, "output": output or "ok"}
 
 
@@ -113,6 +126,8 @@ class RconRequest(BaseModel):
 @router.post("/rcon", dependencies=[Depends(require_permission("monitoring.rcon"))])
 def run_rcon(
     server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
     payload: RconRequest,
 ) -> dict:
     try:
@@ -121,6 +136,9 @@ def run_rcon(
         raise HTTPException(status_code=409, detail="RCON is not configured for this server")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"RCON error: {exc}")
+    record_audit(session, actor=actor, category="monitoring", action="rcon",
+                 target_type="server", target_id=server.slug, target_label=server.name,
+                 server_id=server.id, meta={"command": payload.command.strip()[:512]})
     return {"command": payload.command, "output": server_ops.strip_color_codes(output)}
 
 
@@ -154,3 +172,18 @@ def get_hangs(
         return {"path": None, "hangs": [], "available": False}
     hangs = server_ops.scan_hangs(path, limit=limit)
     return {"path": path, "hangs": hangs, "available": True}
+
+
+# ── In-game chat feed ───────────────────────────────────────────────────────
+@router.get("/chat")
+def get_chat(
+    server: Annotated[GameServer, Depends(resolve_server)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> dict:
+    """The server's in-game chat parsed out of the log (player chat +
+    join/leave/death), newest last. Cleaner than scrolling the raw log."""
+    path = server_ops.resolve_log_path(server)
+    if not path:
+        return {"path": None, "messages": [], "available": False}
+    messages = server_ops.parse_chat(path, limit=limit)
+    return {"path": path, "messages": messages, "available": True}

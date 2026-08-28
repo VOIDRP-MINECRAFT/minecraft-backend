@@ -52,6 +52,11 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    # Staff-only server: present in the public catalogue (site + launcher) only
+    # for full admins and staff holding ``servers.hidden.view``. Orthogonal to
+    # ``is_visible``, which hides the server from absolutely everyone — use this
+    # one to soft-launch / test a server with the team before opening it up.
+    staff_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # ── Connection / runtime ──────────────────────────────────────────────
     host: Mapped[str] = mapped_column(String(255), nullable=False)

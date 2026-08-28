@@ -9,7 +9,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.nation import Nation
 from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.player_account import PlayerAccount
@@ -31,12 +33,16 @@ class HudSnapshot(BaseModel):
 def get_hud_snapshot(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> HudSnapshot:
     nickname_norm = player.minecraft_nickname.strip().lower()
 
+    # All of these tables are server-scoped; filter by the resolved server so a player
+    # with data on multiple servers doesn't blow up scalar_one_or_none (MultipleResultsFound).
     stat = db.execute(
         select(PlayerStatCache).where(
-            PlayerStatCache.minecraft_nickname_normalized == nickname_norm
+            PlayerStatCache.server_id == server.id,
+            PlayerStatCache.minecraft_nickname_normalized == nickname_norm,
         )
     ).scalar_one_or_none()
 
@@ -44,7 +50,10 @@ def get_hud_snapshot(
     completed_quests: int = int(stat.completed_quests) if stat else 0
 
     member = db.execute(
-        select(NationMember).where(NationMember.user_id == player.user_id)
+        select(NationMember).where(
+            NationMember.user_id == player.user_id,
+            NationMember.server_id == server.id,
+        )
     ).scalar_one_or_none()
 
     nation_name: str | None = None
@@ -59,6 +68,7 @@ def get_hud_snapshot(
 
     pending_deliveries: int = db.execute(
         select(func.count(PlayerMarketPendingDelivery.id)).where(
+            PlayerMarketPendingDelivery.server_id == server.id,
             PlayerMarketPendingDelivery.player_name == player.minecraft_nickname,
             PlayerMarketPendingDelivery.delivered == False,  # noqa: E712
         )

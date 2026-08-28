@@ -121,6 +121,15 @@ class Settings(BaseSettings):
     yandex_metrika_token: str = ""
     yandex_metrika_counter_id: str = ""
 
+    # Prometheus exposition endpoint (GET {api_v1_prefix}/monitoring/prometheus).
+    # Scraped by the shared Grafana/Prometheus stack. When set, callers must send
+    # `Authorization: Bearer <token>` (Prometheus `authorization.credentials`);
+    # when empty the endpoint is disabled (404) so metrics never leak by default.
+    prometheus_scrape_token: str = ""
+    # Cache TTL for the rendered exposition — a burst of scrapes reuses one
+    # collection pass instead of hammering RCON/mcstatus per server.
+    prometheus_cache_ttl_seconds: int = 15
+
     # Launcher build & deploy (admin "Лаунчер" tab). The backend runs as the same
     # user that owns the launcher repo and the web deploy dir, so it can build and
     # publish releases directly (no sudo). See core/launcher_ops.py.

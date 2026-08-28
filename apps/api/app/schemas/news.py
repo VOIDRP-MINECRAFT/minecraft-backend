@@ -19,17 +19,28 @@ class NewsPostBase(BaseModel):
 class NewsPostCreate(NewsPostBase):
     category: NewsCategory = "update"
     is_published: bool = True
+    # Future value = scheduled publish: the post stays out of the public feed
+    # until this moment. None → "now" when published.
+    published_at: datetime | None = None
     # Auto-broadcast on create/publish.
     post_telegram: bool = False
     post_discord: bool = False
 
 
 class NewsPostUpdate(BaseModel):
+    """PATCH body. Fields are distinguished by *presence*, not by value — an
+    explicit ``null`` clears ``summary`` / ``cover_image_url`` (fixes covers
+    that could never be removed), while omitting a field leaves it untouched."""
+
     title: str | None = Field(default=None, min_length=1, max_length=200)
     summary: str | None = Field(default=None, max_length=500)
     body: str | None = Field(default=None, max_length=40000)
     cover_image_url: str | None = Field(default=None, max_length=512)
     is_published: bool | None = None
+    published_at: datetime | None = None
+    # Lets a post be moved between «Обновления» and «Новости» after the fact.
+    # Requires manage permission on BOTH the old and the new category.
+    category: NewsCategory | None = None
 
 
 class NewsPostPublic(BaseModel):
@@ -59,7 +70,12 @@ class NewsPostAdmin(NewsPostPublic):
     is_published: bool
     posted_telegram: bool
     posted_discord: bool
+    posted_telegram_at: datetime | None = None
+    posted_discord_at: datetime | None = None
     created_at: datetime
+    # True while `published_at` is still in the future: published, but not yet
+    # visible in the public feed.
+    is_scheduled: bool = False
     # Populated only on create when auto-broadcast was requested, so the
     # sender learns immediately if delivery to a channel failed.
     broadcast: NewsBroadcastResult | None = None

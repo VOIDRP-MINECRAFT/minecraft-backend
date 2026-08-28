@@ -43,6 +43,15 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "players.view", "label": "Игроки (поиск, просмотр)", "sensitive": True},
             {"key": "players.manage", "label": "Игроки: правки (legacy-вход и т.п.)", "sensitive": True},
             {"key": "servers.manage", "label": "Серверы (создание/редактирование)", "sensitive": True},
+            {"key": "servers.hidden.view", "label": "Скрытые серверы: видеть на сайте и в лаунчере", "sensitive": True},
+        ],
+    },
+    {
+        "group": "Безопасность",
+        "permissions": [
+            {"key": "punishments.view", "label": "Наказания (список банов/мутов)"},
+            {"key": "punishments.manage", "label": "Наказания: выдавать/снимать баны и муты", "sensitive": True},
+            {"key": "audit.view", "label": "Журнал действий персонала", "sensitive": True},
         ],
     },
     {
@@ -87,6 +96,10 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
 ]
+
+# Grants sight of ``game_servers.staff_only`` servers in the public catalogue
+# (/servers) that feeds the site and the launcher. Full admins bypass it.
+HIDDEN_SERVERS_PERMISSION = "servers.hidden.view"
 
 ALL_KEYS: frozenset[str] = frozenset(
     p["key"] for group in PERMISSION_CATALOG for p in group["permissions"]

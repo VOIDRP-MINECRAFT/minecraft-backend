@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.security import utc_now
 from apps.api.app.models.economy_market import EconomyMarketItem
 from apps.api.app.models.nation_member import NationMember
+from apps.api.app.models.nation_research import NationResearch
 from apps.api.app.models.nation_treasury_transaction import NationTreasuryTransaction
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_market import (
@@ -23,6 +24,7 @@ from apps.api.app.models.player_market import (
     PlayerMarketTrade,
 )
 from apps.api.app.models.user import User
+from apps.api.app.services.nation_research_catalog import resolve_effects as resolve_research_effects
 from apps.api.app.schemas.player_market import (
     PlayerMarketBuyOrderCreate,
     PlayerMarketBuyOrderRead,
@@ -76,6 +78,46 @@ class PlayerMarketService:
     def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
         self.server_id = server_id
+        self._fee_discount_cache: dict[str, Decimal] = {}
+
+    def _seller_fee_discount(self, seller_player_name: str) -> Decimal:
+        """Fee-percent reduction from the seller's nation research (memoized).
+
+        Consumes the ``market_fee_discount_percent`` effect from the nation tech
+        tree (:mod:`nation_research_catalog`). Returned value is subtracted from
+        the base fee percentage, clamped so the fee never goes negative.
+        """
+        key = seller_player_name.lower()
+        cached = self._fee_discount_cache.get(key)
+        if cached is not None:
+            return cached
+
+        discount = Decimal("0")
+        try:
+            nation_id = self.session.execute(
+                select(NationMember.nation_id)
+                .join(User, User.id == NationMember.user_id)
+                .join(PlayerAccount, PlayerAccount.user_id == User.id)
+                .where(PlayerAccount.minecraft_nickname_normalized == key)
+                .limit(1)
+            ).scalar_one_or_none()
+            if nation_id is not None:
+                levels = dict(
+                    self.session.execute(
+                        select(NationResearch.research_key, NationResearch.level).where(
+                            NationResearch.nation_id == nation_id,
+                            NationResearch.server_id == self.server_id,
+                        )
+                    ).all()
+                )
+                value = resolve_research_effects(levels).get("market_fee_discount_percent", 0.0)
+                discount = Decimal(str(value))
+        except Exception:
+            logger.exception("Failed to resolve fee discount for seller=%s", seller_player_name)
+            discount = Decimal("0")
+
+        self._fee_discount_cache[key] = discount
+        return discount
 
     # ── Create orders ──────────────────────────────────────────────────────────
 
@@ -731,7 +773,10 @@ class PlayerMarketService:
         #   duplicate item_delivery / buy_refund pending deliveries.
         gross_total = self._money(execution_price * Decimal(fill_amount))
         is_premium = bool((sell_order.metadata_json or {}).get("is_premium"))
-        applied_fee = FEE_PERCENT_PREMIUM if is_premium else FEE_PERCENT
+        base_fee = FEE_PERCENT_PREMIUM if is_premium else FEE_PERCENT
+        # Nation tech-tree "Торговые гильдии" reduces the seller's market fee.
+        research_discount = self._seller_fee_discount(sell_order.seller_player_name)
+        applied_fee = max(Decimal("0"), base_fee - research_discount)
         fee_amount = self._money(gross_total * applied_fee / Decimal("100"))
         net_seller_proceeds = self._money(gross_total - fee_amount)
 

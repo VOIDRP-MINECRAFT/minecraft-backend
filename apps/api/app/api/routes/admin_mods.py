@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from apps.api.app.core import mod_ops
+from apps.api.app.core import manifest_ops, mod_ops
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import get_current_staff_user, require_permission
 from apps.api.app.dependencies.server_context import resolve_server
@@ -156,12 +156,19 @@ def remove_mod(
         raise _fail(exc)
 
 
-# ── Regenerate the launcher manifest for this server ─────────────────────────
+# ── Regenerate the launcher manifest for this server (async job) ─────────────
+# Starts a detached rebuild and streams progress; the admin modal polls
+# GET /regenerate/status for the live console + %-bar.
 @router.post("/regenerate", dependencies=[_MANAGE])
 def regenerate(
     server: Annotated[GameServer, Depends(resolve_server)],
 ) -> dict:
     try:
-        return mod_ops.regenerate_manifest(server)
+        return manifest_ops.start(server)
     except mod_ops.ModOpsError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.get("/regenerate/status", dependencies=[_MANAGE])
+def regenerate_status() -> dict:
+    return manifest_ops.get_status()

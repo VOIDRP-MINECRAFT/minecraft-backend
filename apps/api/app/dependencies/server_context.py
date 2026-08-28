@@ -5,9 +5,27 @@ from typing import Annotated
 from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.permissions import HIDDEN_SERVERS_PERMISSION, resolve_user_permissions
 from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.auth import get_optional_current_user
 from apps.api.app.models.game_server import GameServer
+from apps.api.app.models.user import User
 from apps.api.app.repositories.game_server_repository import GameServerRepository
+
+
+def can_view_staff_only_servers(
+    user: Annotated[User | None, Depends(get_optional_current_user)],
+) -> bool:
+    """Whether the caller may see ``staff_only`` servers in the public catalogue.
+
+    Optional auth on purpose: anonymous visitors (and anyone whose token is
+    stale) simply don't get the hidden servers — no 401, no error. Full admins
+    pass through ``resolve_user_permissions``; moderators need
+    ``servers.hidden.view``.
+    """
+    if user is None:
+        return False
+    return HIDDEN_SERVERS_PERMISSION in resolve_user_permissions(user)
 
 
 def resolve_server(

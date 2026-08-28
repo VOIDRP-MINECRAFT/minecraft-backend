@@ -9,3 +9,7 @@ assets/
 data/
 mekanism/
 META-INF/
+# env backups (never commit secrets)
+.env.*
+!.env.example
+*.bak

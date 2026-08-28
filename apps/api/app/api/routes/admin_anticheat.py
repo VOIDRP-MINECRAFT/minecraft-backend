@@ -8,9 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.audit import record_audit
 from apps.api.app.core.rcon_client import send_rcon_command
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_permission
+from apps.api.app.dependencies.admin import get_current_staff_user, require_permission
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.anticheat import (
     AnticheatInjectionReport,
@@ -292,6 +293,7 @@ def player_action(
     req: ActionRequest,
     session: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
 ) -> dict[str, str]:
     violations = (
         session.query(AnticheatViolation)
@@ -337,6 +339,9 @@ def player_action(
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown action: {req.action}")
 
+    record_audit(session, actor=actor, category="anticheat", action=req.action,
+                 target_type="player", target_id=player_uuid, target_label=nick,
+                 server_id=server.id, meta={"reason": req.reason})
     return {"ok": "true", "action": req.action, "nick": nick}
 
 

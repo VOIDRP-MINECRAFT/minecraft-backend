@@ -634,3 +634,42 @@ def scan_hangs(path: str, scan_lines: int = 6000, limit: int = 50) -> list[dict]
             "text": strip_color_codes(ln).strip(),
         })
     return hits[-limit:]
+
+
+# ── In-game chat feed ───────────────────────────────────────────────────────
+# The vanilla server logs every broadcast message through the
+# `net.minecraft.server.MinecraftServer` logger: player chat comes off an
+# "Async Chat Thread", while join/leave/death/say come off the "Server thread".
+# Mod/plugin spam uses its own loggers, so filtering on this one logger gives a
+# clean chat feed without scrolling the raw log.
+_CHAT_RE = re.compile(
+    r"\[\d{2}\w{3}\d{4}\s+(\d{2}:\d{2}:\d{2})\.\d+\]\s*"   # [27Aug2026 00:59:07.649]
+    r"\[([^\]]+?)/\w+\]\s*"                                  # [Async Chat Thread - #33/INFO]
+    r"\[net\.minecraft\.server\.MinecraftServer/\]:\s*(.*)$"
+)
+_NOT_SECURE_RE = re.compile(r"^\[Not Secure\]\s*")
+
+
+def parse_chat(path: str, scan_lines: int = 4000, limit: int = 200) -> list[dict]:
+    """Extract the in-game chat feed from the tail of a log, oldest→newest.
+    Returns ``[{time, type, text}]`` where ``type`` is one of
+    ``chat`` | ``join`` | ``leave`` | ``system``."""
+    out: list[dict] = []
+    for ln in tail_log(path, lines=scan_lines, max_bytes=2 * 1024 * 1024):
+        m = _CHAT_RE.search(ln)
+        if not m:
+            continue
+        time_s, thread, msg = m.group(1), m.group(2), m.group(3)
+        msg = strip_color_codes(_NOT_SECURE_RE.sub("", msg)).strip()
+        if not msg:
+            continue
+        if thread.startswith("Async Chat Thread"):
+            kind = "chat"
+        elif "joined the game" in msg:
+            kind = "join"
+        elif "left the game" in msg:
+            kind = "leave"
+        else:
+            kind = "system"
+        out.append({"time": time_s, "type": kind, "text": msg})
+    return out[-limit:]

@@ -73,10 +73,20 @@ def list_notifications(
             ))
 
     if "anticheat.view" in perms:
-        # Injection reports are the sharp "possible cheater" signal — surfaced.
-        # The raw unreviewed-violations backlog is intentionally NOT a banner
-        # (it's a large standing number, not an actionable alert).
-        injections = _count_since(session, AnticheatInjectionReport, since)
+        # Only *meaningful* injection reports are the "possible cheater" signal.
+        # The mod also POSTs an empty "all clear" report on every login
+        # (agents_detected=false, empty agent/library lists) — counting those
+        # produced a false "50 possible cheaters" banner with nothing to see in
+        # the tab. So require an actual detection: a JVM agent, or a non-empty
+        # suspicious-library list. The raw unreviewed-violations backlog is
+        # intentionally NOT a banner (large standing number, not actionable).
+        injections = int(session.scalar(
+            select(func.count()).select_from(AnticheatInjectionReport).where(
+                AnticheatInjectionReport.created_at >= since,
+                (AnticheatInjectionReport.agents_detected.is_(True))
+                | (AnticheatInjectionReport.suspicious_libraries.notin_(["[]", ""])),
+            )
+        ) or 0)
         if injections:
             items.append(AdminNotification(
                 id="anticheat-injections", level="error", count=injections,

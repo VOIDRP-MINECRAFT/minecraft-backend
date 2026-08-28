@@ -8,7 +8,7 @@ import urllib.request
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
@@ -92,9 +92,22 @@ class NewsService:
         return slug
 
     # ── queries ─────────────────────────────────────────────────────────────
+    def _live_clause(self):
+        """Published *and* not scheduled for later.
+
+        A `published_at` in the future means "publish then" — the row is already
+        `is_published` so the author can prepare it, but readers must not see it
+        until the moment arrives. No worker needed: the feed filters on time.
+        """
+        now = datetime.now(timezone.utc)
+        return and_(
+            NewsPost.is_published.is_(True),
+            or_(NewsPost.published_at.is_(None), NewsPost.published_at <= now),
+        )
+
     def list_public(self, limit: int, offset: int, category: str | None = None) -> tuple[list[NewsPost], int]:
         base = select(NewsPost).where(
-            NewsPost.server_id == self.server_id, NewsPost.is_published.is_(True)
+            NewsPost.server_id == self.server_id, self._live_clause()
         )
         if category:
             base = base.where(NewsPost.category == category)
@@ -112,14 +125,38 @@ class NewsService:
             select(NewsPost).where(
                 NewsPost.server_id == self.server_id,
                 NewsPost.slug == slug,
-                NewsPost.is_published.is_(True),
+                self._live_clause(),
             )
         )
 
-    def list_admin(self, limit: int, offset: int, category: str | None = None) -> tuple[list[NewsPost], int]:
+    def list_admin(
+        self,
+        limit: int,
+        offset: int,
+        category: str | None = None,
+        query: str | None = None,
+        status: str | None = None,
+    ) -> tuple[list[NewsPost], int]:
+        """Admin listing. ``query`` matches title/summary (case-insensitive);
+        ``status`` filters published | draft | scheduled."""
         base = select(NewsPost).where(NewsPost.server_id == self.server_id)
         if category:
             base = base.where(NewsPost.category == category)
+        if query:
+            like = f"%{query.strip()}%"
+            base = base.where(
+                or_(NewsPost.title.ilike(like), NewsPost.summary.ilike(like))
+            )
+        if status == "draft":
+            base = base.where(NewsPost.is_published.is_(False))
+        elif status == "published":
+            base = base.where(self._live_clause())
+        elif status == "scheduled":
+            base = base.where(
+                NewsPost.is_published.is_(True),
+                NewsPost.published_at.is_not(None),
+                NewsPost.published_at > datetime.now(timezone.utc),
+            )
         total = self.session.scalar(select(func.count()).select_from(base.subquery())) or 0
         rows = self.session.scalars(
             base.order_by(NewsPost.created_at.desc()).limit(limit).offset(offset)
@@ -133,7 +170,11 @@ class NewsService:
         return post
 
     # ── mutations ─────────────────────────────────────────────────────────────
-    def create(self, *, category, title, summary, body, cover_image_url, is_published, author) -> NewsPost:
+    def create(
+        self, *, category, title, summary, body, cover_image_url, is_published, author,
+        published_at=None,
+    ) -> NewsPost:
+        when = as_utc(published_at)
         post = NewsPost(
             server_id=self.server_id,
             category=category,
@@ -143,7 +184,8 @@ class NewsService:
             body=body or "",
             cover_image_url=cover_image_url,
             is_published=is_published,
-            published_at=datetime.now(timezone.utc) if is_published else None,
+            # An explicit date wins (scheduling); otherwise publish-now stamps now.
+            published_at=when or (datetime.now(timezone.utc) if is_published else None),
             author_id=getattr(author, "id", None),
             author_name=getattr(author, "site_login", None) or getattr(author, "email", None),
         )
@@ -151,10 +193,26 @@ class NewsService:
         self.session.flush()
         return post
 
+    # Nullable columns: an explicit `null` in the PATCH clears them. Presence in
+    # the payload is what counts — `exclude_unset=True` upstream means a key is
+    # here only if the client actually sent it.
+    _CLEARABLE = ("summary", "cover_image_url")
+    # NOT NULL columns: a null is meaningless, so it is ignored.
+    _REQUIRED_TEXT = ("title", "body")
+
     def update(self, post: NewsPost, data: dict) -> NewsPost:
-        for field in ("title", "summary", "body", "cover_image_url"):
+        for field in self._REQUIRED_TEXT:
             if field in data and data[field] is not None:
                 setattr(post, field, data[field])
+        for field in self._CLEARABLE:
+            if field in data:
+                setattr(post, field, data[field])
+        if data.get("category") in ("update", "media"):
+            post.category = data["category"]
+        # Scheduling: handled before is_published so an explicit date is never
+        # clobbered by the publish-now stamp below.
+        if "published_at" in data:
+            post.published_at = as_utc(data["published_at"])
         if "is_published" in data and data["is_published"] is not None:
             newly = data["is_published"] and not post.is_published
             post.is_published = data["is_published"]
@@ -204,6 +262,7 @@ class NewsService:
                 result["telegram_ok"] = any_ok
                 if any_ok:
                     post.posted_telegram = True
+                    post.posted_telegram_at = datetime.now(timezone.utc)
             else:
                 result["telegram_ok"] = False
 
@@ -222,6 +281,7 @@ class NewsService:
                 result["discord_ok"] = any_ok
                 if any_ok:
                     post.posted_discord = True
+                    post.posted_discord_at = datetime.now(timezone.utc)
             else:
                 result["discord_ok"] = False
 
@@ -231,3 +291,17 @@ class NewsService:
 
 def _esc(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def as_utc(value: datetime | None) -> datetime | None:
+    """Normalize an incoming datetime to aware UTC.
+
+    `published_at` is a timezone-aware column and it is compared against
+    `now(timezone.utc)` in the feed filter — a naive value coming from a client
+    that dropped the offset would raise on comparison, so assume UTC for it.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

@@ -44,6 +44,14 @@ class NewsPost(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     )
     author_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    # Auto-broadcast tracking.
+    # Auto-broadcast tracking. The booleans say "was ever delivered"; the
+    # timestamps say when the last successful delivery happened, so the admin
+    # panel can warn before re-sending the same post into a channel again.
     posted_telegram: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     posted_discord: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    posted_telegram_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    posted_discord_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

@@ -109,6 +109,30 @@ class WebActionResponse(BaseModel):
     status: str
 
 
+import re as _re
+
+# Commands the WebGUI may run server-side via a "command" web action (the client
+# run_command bridge doesn't execute plugin commands on this hybrid server). The
+# plugin runs them AS THE PLAYER (permission-checked). Bases with no args just open
+# an in-game GUI; the two with args are validated strictly here.
+_NOARG_WEB_COMMANDS = {"dailyquest", "bossquest", "delivery", "shop", "nmarket", "battlepass"}
+_NATIONDONATE_RE = _re.compile(r"^nationdonate \d{1,15}(\.\d{1,2})?$")
+_NMARKET_BUY_RE = _re.compile(r"^nmarket buy [A-Za-z0-9\-]{1,64} \d{1,4}$")
+_DAILYQUEST_CLAIM_RE = _re.compile(r"^dailyquest claim \d{1,2}$")
+_BP_CLAIM_RE = _re.compile(r"^bp claim (free|premium) \d{1,3}$")
+
+
+def _validate_web_command(raw: str) -> str:
+    cmd = str(raw or "").lstrip("/").strip()
+    base = cmd.split(" ")[0].lower()
+    if " " not in cmd and base in _NOARG_WEB_COMMANDS:
+        return base
+    if (_NATIONDONATE_RE.match(cmd) or _NMARKET_BUY_RE.match(cmd)
+            or _DAILYQUEST_CLAIM_RE.match(cmd) or _BP_CLAIM_RE.match(cmd)):
+        return cmd
+    raise HTTPException(status_code=400, detail="Command not allowed")
+
+
 @router.post("/pending-action", response_model=WebActionResponse, status_code=status.HTTP_201_CREATED)
 def create_pending_action(
     req: WebActionRequest,
@@ -116,9 +140,12 @@ def create_pending_action(
     db: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],
 ):
-    allowed = {"buy", "sell", "cancel_buy", "cancel_sell", "pickup"}
+    allowed = {"buy", "sell", "cancel_buy", "cancel_sell", "pickup", "command"}
     if req.action_type not in allowed:
         raise HTTPException(status_code=400, detail=f"Unknown action_type: {req.action_type}")
+
+    if req.action_type == "command":
+        req.payload = {"command": _validate_web_command(req.payload.get("command", ""))}
 
     action = PlayerMarketWebAction(
         server_id=server.id,

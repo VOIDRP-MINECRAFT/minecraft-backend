@@ -24,6 +24,10 @@ from apps.api.app.api.routes.server_auth import router as server_auth_router
 from apps.api.app.api.routes.servers import router as servers_router
 from apps.api.app.api.routes.admin_servers import router as admin_servers_router
 from apps.api.app.api.routes.admin_server_ops import router as admin_server_ops_router
+from apps.api.app.api.routes.admin_audit import router as admin_audit_router
+from apps.api.app.api.routes.admin_punishments import router as admin_punishments_router
+from apps.api.app.api.routes.admin_player_overview import router as admin_player_overview_router
+from apps.api.app.api.routes.monitoring_prometheus import router as monitoring_prometheus_router
 from apps.api.app.api.routes.admin_mods import router as admin_mods_router
 from apps.api.app.api.routes.social import router as social_router
 from apps.api.app.api.routes.alliances import router as alliances_router
@@ -68,7 +72,14 @@ from apps.api.app.api.routes.game_ui_market import router_plugin as game_ui_mark
 from apps.api.app.api.routes.game_ui_hud import router as game_ui_hud_router
 from apps.api.app.api.routes.game_ui_nation_market import router as game_ui_nation_market_router
 from apps.api.app.api.routes.game_ui_treasury import router as game_ui_treasury_router
+from apps.api.app.api.routes.game_ui_research import router as game_ui_research_router
+from apps.api.app.api.routes.game_ui_research import plugin_router as nation_research_plugin_router
+from apps.api.app.api.routes.game_sync_season import plugin_router as season_plugin_router
+from apps.api.app.api.routes.game_ui_quests import router as game_ui_quests_router
+from apps.api.app.api.routes.game_ui_quests import plugin_router as game_ui_quests_plugin_router
+from apps.api.app.api.routes.game_ui_home import router as game_ui_home_router
 from apps.api.app.api.routes.game_ui_battlepass import router as game_ui_battlepass_router
+from apps.api.app.api.routes.game_ui_battlepass import plugin_router as game_ui_battlepass_plugin_router
 from apps.api.app.api.routes.game_ui_alliance import router as game_ui_alliance_router
 from apps.api.app.api.routes.voxel import router as voxel_router
 from apps.api.app.api.routes.admin_voxel import router as admin_voxel_router
@@ -135,11 +146,22 @@ api_router.include_router(game_ui_market_plugin_router)
 api_router.include_router(game_ui_hud_router)
 api_router.include_router(game_ui_nation_market_router)
 api_router.include_router(game_ui_treasury_router)
+api_router.include_router(game_ui_research_router)
+api_router.include_router(nation_research_plugin_router)
+api_router.include_router(season_plugin_router)
+api_router.include_router(game_ui_quests_router)
+api_router.include_router(game_ui_quests_plugin_router)
+api_router.include_router(game_ui_home_router)
 api_router.include_router(game_ui_battlepass_router)
+api_router.include_router(game_ui_battlepass_plugin_router)
 api_router.include_router(game_ui_alliance_router)
 api_router.include_router(servers_router)
 api_router.include_router(admin_servers_router)
 api_router.include_router(admin_server_ops_router)
+api_router.include_router(admin_audit_router)
+api_router.include_router(admin_punishments_router)
+api_router.include_router(admin_player_overview_router)
+api_router.include_router(monitoring_prometheus_router)
 api_router.include_router(admin_mods_router)
 api_router.include_router(voxel_router)
 api_router.include_router(admin_voxel_router)

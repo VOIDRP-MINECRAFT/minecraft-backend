@@ -13,6 +13,7 @@ from apps.api.app.models.nation_join_request import NationJoinRequest
 from apps.api.app.models.nation_market import NationMarketListing, NationMarketOrder
 from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.nation_member_stat_snapshot import NationMemberStatSnapshot
+from apps.api.app.models.nation_research import NationResearch
 from apps.api.app.models.nation_stat import NationStat
 from apps.api.app.models.nation_treasury_transaction import NationTreasuryTransaction
 from apps.api.app.models.play_ticket import PlayTicket
@@ -39,8 +40,12 @@ from apps.api.app.models.tiktok import TikTokCampaign, TikTokClickReward
 from apps.api.app.models.news import NewsPost
 from apps.api.app.models.telegram import TelegramGameChat, TelegramGameScore, TelegramLinkToken
 from apps.api.app.models.voxel_game import VoxelGame
+from apps.api.app.models.admin_audit_log import AdminAuditLog
+from apps.api.app.models.punishment import Punishment
 
 __all__ = [
+    "AdminAuditLog",
+    "Punishment",
     "VoxelGame",
     "Alliance",
     "BattlePassPremium",
@@ -66,6 +71,7 @@ __all__ = [
     "NationMarketOrder",
     "NationMember",
     "NationMemberStatSnapshot",
+    "NationResearch",
     "NationStat",
     "NationTreasuryTransaction",
     "PlayTicket",
