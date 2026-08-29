@@ -170,7 +170,7 @@ import re as _re
 # an in-game GUI; the two with args are validated strictly here.
 _NOARG_WEB_COMMANDS = {"dailyquest", "bossquest", "delivery", "shop", "nmarket", "battlepass"}
 # WebGUI pages the plugin can open in-game via an "open_gui" web action (e.g. from a notification).
-_WEBGUI_PAGES = {"menu", "market", "nmarket", "treasury", "research", "alliance", "battlepass", "quests"}
+_WEBGUI_PAGES = {"menu", "market", "nmarket", "treasury", "research", "alliance", "battlepass", "quests", "leaderboards", "notifications"}
 _NATIONDONATE_RE = _re.compile(r"^nationdonate \d{1,15}(\.\d{1,2})?$")
 _NMARKET_BUY_RE = _re.compile(r"^nmarket buy [A-Za-z0-9\-]{1,64} \d{1,4}$")
 _DAILYQUEST_CLAIM_RE = _re.compile(r"^dailyquest claim \d{1,2}$")
