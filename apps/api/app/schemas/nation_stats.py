@@ -174,6 +174,7 @@ class PlayerStatCacheItemRequest(BaseModel):
     blocks_broken: int = 0
     current_balance: MoneyBalance = Decimal("0.00")
     completed_quests: int = 0
+    best_kill_streak: int = 0
     source: str = Field(default="live", max_length=32)
     last_seen_at: datetime | None = None
 

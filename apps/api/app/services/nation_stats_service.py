@@ -261,6 +261,11 @@ class NationStatsService:
             _apply_stat_snapshot(cache_entry, item, is_new=is_new)
             if is_new or (item.source or "").strip() != "missing":
                 cache_entry.current_balance = self._as_money(item.current_balance)
+                # best_kill_streak is cache-only (no column on member snapshots), so it is
+                # merged here rather than in the shared helper. Monotonic like the rest.
+                incoming_streak = max(0, int(getattr(item, "best_kill_streak", 0) or 0))
+                current_streak = 0 if is_new else int(cache_entry.best_kill_streak or 0)
+                cache_entry.best_kill_streak = max(current_streak, incoming_streak)
 
         self.session.commit()
         return PlayerStatCacheSyncResponse(synced=len(payload.players))
