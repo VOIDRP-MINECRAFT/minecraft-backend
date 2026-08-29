@@ -124,7 +124,9 @@ class EconomyMarketService:
             )
         )
         now = utc_now()
-        if last_recorded is not None and (now - last_recorded).total_seconds() < 55 * 60:
+        # Record at most one snapshot per ~15 min so the game-ui price sparklines gather
+        # points within an hour or two (the plugin drives recalculation on its own timer).
+        if last_recorded is not None and (now - last_recorded).total_seconds() < 15 * 60:
             return
         for item in items:
             self.session.add(PriceHistorySnapshot(

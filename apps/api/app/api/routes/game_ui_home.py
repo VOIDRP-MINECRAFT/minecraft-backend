@@ -52,6 +52,58 @@ class HomeStats(BaseModel):
     last_seen_at: datetime | None = None
 
 
+class Achievement(BaseModel):
+    key: str
+    title: str
+    desc: str
+    icon: str
+    unlocked: bool
+    progress: int
+    goal: int
+
+
+# Derived from existing counters — no separate award table, always recomputed.
+# (title, desc, icon, goal, metric-key). metric-key indexes into the values dict below.
+_ACHIEVEMENTS: list[tuple[str, str, str, str, int, str]] = [
+    ("citizen", "Гражданин", "Вступи в государство", "users", 1, "in_nation"),
+    ("first_blood", "Первая кровь", "Убей игрока", "shield", 1, "pvp_kills"),
+    ("warrior", "Воин", "25 убийств игроков", "shield", 25, "pvp_kills"),
+    ("streak5", "На волне", "Серия из 5 убийств", "crown", 5, "best_kill_streak"),
+    ("streak10", "Неудержимый", "Серия из 10 убийств", "crown", 10, "best_kill_streak"),
+    ("hunter", "Охотник", "Убей 100 мобов", "quest", 100, "mob_kills"),
+    ("slayer", "Истребитель", "Убей 500 мобов", "quest", 500, "mob_kills"),
+    ("miner", "Шахтёр", "Добудь 1000 блоков", "tech", 1000, "blocks_broken"),
+    ("builder", "Строитель", "Поставь 1000 блоков", "tech", 1000, "blocks_placed"),
+    ("veteran", "Ветеран", "10 часов в игре", "trophy", 600, "playtime_minutes"),
+    ("quester", "Квестор", "Заверши 25 квестов", "quest", 25, "completed_quests"),
+    ("tycoon", "Магнат", "Накопи 100 000 монет", "coins", 100000, "balance"),
+]
+
+
+def _compute_achievements(stats: "HomeStats", has_nation: bool) -> list[Achievement]:
+    values = {
+        "in_nation": 1 if has_nation else 0,
+        "pvp_kills": stats.pvp_kills,
+        "best_kill_streak": stats.best_kill_streak,
+        "mob_kills": stats.mob_kills,
+        "blocks_broken": stats.blocks_broken,
+        "blocks_placed": stats.blocks_placed,
+        "playtime_minutes": stats.playtime_minutes,
+        "completed_quests": stats.completed_quests,
+        "balance": int(stats.balance),
+    }
+    out: list[Achievement] = []
+    for key, title, desc, icon, goal, metric in _ACHIEVEMENTS:
+        cur = int(values.get(metric, 0))
+        out.append(Achievement(
+            key=key, title=title, desc=desc, icon=icon, goal=goal,
+            progress=min(cur, goal), unlocked=cur >= goal,
+        ))
+    # Unlocked first, then closest-to-done, so the card leads with earned/near badges.
+    out.sort(key=lambda a: (not a.unlocked, -(a.progress / a.goal if a.goal else 0)))
+    return out
+
+
 class HomeProfile(BaseModel):
     nickname: str
     skin_url: str
@@ -60,6 +112,7 @@ class HomeProfile(BaseModel):
     nation: HomeNation | None
     battlepass: HomeBattlePass | None
     stats: HomeStats
+    achievements: list[Achievement] = []
 
 
 class TopBar(BaseModel):
@@ -181,4 +234,5 @@ def get_home(
         nation=nation_out,
         battlepass=bp_out,
         stats=stats,
+        achievements=_compute_achievements(stats, nation_out is not None),
     )
