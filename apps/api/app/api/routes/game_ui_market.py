@@ -54,6 +54,59 @@ def get_order_book(
     return svc.get_order_book(item_key, exclude_player=player.minecraft_nickname)
 
 
+class PriceHistoryPoint(BaseModel):
+    t: str
+    buy: float
+    sell: float
+
+
+class PriceHistoryOut(BaseModel):
+    item_key: str
+    points: list[PriceHistoryPoint]
+
+
+@router.get("/history/{item_key:path}", response_model=PriceHistoryOut)
+def get_price_history(
+    item_key: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    _player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    days: int = 14,
+):
+    """Compact dynamic-price series for an item, for the in-game sparkline."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import func, select
+
+    from apps.api.app.models.economy_market import PriceHistorySnapshot
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 60)))
+    # Player-market keys are lowercase namespace:item; the economy-shop history is
+    # stored uppercase (e.g. AVARITIA:INFINITY_INGOT). Match case-insensitively so
+    # modded items line up.
+    rows = db.execute(
+        select(PriceHistorySnapshot)
+        .where(
+            PriceHistorySnapshot.server_id == server.id,
+            func.upper(PriceHistorySnapshot.material) == item_key.upper(),
+            PriceHistorySnapshot.recorded_at >= cutoff,
+        )
+        .order_by(PriceHistorySnapshot.recorded_at.asc())
+    ).scalars().all()
+
+    # Downsample to at most 40 points so the payload/sparkline stays light.
+    step = max(1, len(rows) // 40)
+    points = [
+        PriceHistoryPoint(
+            t=r.recorded_at.isoformat(),
+            buy=float(r.buy_price or 0),
+            sell=float(r.sell_price or 0),
+        )
+        for r in rows[::step]
+    ]
+    return PriceHistoryOut(item_key=item_key, points=points)
+
+
 @router.get("/my-sell-orders", response_model=PlayerMarketSellOrderListResponse)
 def get_my_sell_orders(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
