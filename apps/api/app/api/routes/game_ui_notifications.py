@@ -38,6 +38,7 @@ class NotificationOut(BaseModel):
     action_type: str | None
     action_payload: str | None
     action_label: str | None
+    seen_at: datetime | None
     created_at: datetime
 
 
@@ -73,6 +74,18 @@ def get_feed(
         svc.mark_seen(player.user_id, [n.id for n in items])
         db.commit()
     return NotificationFeed(items=out)
+
+
+@router.get("/history", response_model=NotificationFeed)
+def get_history(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> NotificationFeed:
+    """The in-game notification center: recent undismissed notifications, does not mark seen."""
+    svc = NotificationService(db, server.id)
+    items = svc.history(player.user_id)
+    return NotificationFeed(items=[NotificationOut.model_validate(n) for n in items])
 
 
 @router.post("/{notification_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)

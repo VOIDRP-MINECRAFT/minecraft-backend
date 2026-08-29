@@ -76,6 +76,22 @@ class NotificationService:
             ).scalars()
         )
 
+    def history(self, user_id: UUID, limit: int = 40) -> list[PlayerNotification]:
+        """Recent undismissed notifications (seen or unseen), newest first — the in-game
+        notification center. Unlike :meth:`feed`, this does NOT mark anything seen."""
+        return list(
+            self.session.execute(
+                select(PlayerNotification)
+                .where(
+                    PlayerNotification.server_id == self.server_id,
+                    PlayerNotification.user_id == user_id,
+                    PlayerNotification.dismissed_at.is_(None),
+                )
+                .order_by(PlayerNotification.created_at.desc())
+                .limit(max(1, min(limit, 100)))
+            ).scalars()
+        )
+
     def dismiss(self, notification_id: UUID, user_id: UUID) -> bool:
         res = self.session.execute(
             update(PlayerNotification)
