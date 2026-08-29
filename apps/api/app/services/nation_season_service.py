@@ -57,7 +57,7 @@ class NationSeasonService:
         ranked = self.session.execute(
             select(NationStat, Nation)
             .join(Nation, Nation.id == NationStat.nation_id)
-            .where(Nation.server_id == self.server_id)
+            .where(Nation.server_id == self.server_id, Nation.is_technical.is_(False))
             .order_by(
                 NationStat.prestige_score.desc(),
                 NationStat.total_playtime_minutes.desc(),

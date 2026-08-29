@@ -34,6 +34,8 @@ class Nation(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
     accent_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     recruitment_policy: Mapped[str] = mapped_column(String(16), nullable=False, default="request")
     is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Technical/system nation (e.g. staff "void"): hidden from public rankings, feeds, rewards.
+    is_technical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     leader_user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),
