@@ -104,6 +104,26 @@ def _compute_achievements(stats: "HomeStats", has_nation: bool) -> list[Achievem
     return out
 
 
+class OnboardingStep(BaseModel):
+    key: str
+    label: str
+    hint: str
+    done: bool
+
+
+def _compute_onboarding(stats: "HomeStats", has_nation: bool, bp_level: int) -> list[OnboardingStep]:
+    """First-session checklist for new players; drops off as steps complete."""
+    steps = [
+        ("nation", "Вступи в государство", "Открой вкладку «Нации» на сайте или /nation", has_nation),
+        ("play", "Наиграй 30 минут", "Просто играй — прогресс идёт сам", stats.playtime_minutes >= 30),
+        ("blocks", "Поставь или сломай блок", "Начни осваиваться в мире", (stats.blocks_placed + stats.blocks_broken) > 0),
+        ("quest", "Выполни первый квест", "Загляни во вкладку «Квесты» (F6)", stats.completed_quests >= 1),
+        ("earn", "Заработай монеты", "Продавай ресурсы на рынке", stats.balance > 1000),
+        ("level", "Достигни 5 уровня пропуска", "Активность даёт опыт баттлпасса", bp_level >= 5),
+    ]
+    return [OnboardingStep(key=k, label=l, hint=h, done=d) for k, l, h, d in steps]
+
+
 class HomeProfile(BaseModel):
     nickname: str
     skin_url: str
@@ -113,6 +133,7 @@ class HomeProfile(BaseModel):
     battlepass: HomeBattlePass | None
     stats: HomeStats
     achievements: list[Achievement] = []
+    onboarding: list[OnboardingStep] = []
 
 
 class TopBar(BaseModel):
@@ -282,4 +303,5 @@ def get_home(
         battlepass=bp_out,
         stats=stats,
         achievements=_compute_achievements(stats, nation_out is not None),
+        onboarding=_compute_onboarding(stats, nation_out is not None, bp_out.level if bp_out else 0),
     )
