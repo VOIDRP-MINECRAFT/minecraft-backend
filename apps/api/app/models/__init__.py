@@ -22,6 +22,7 @@ from apps.api.app.models.player_feedback import PlayerFeedback
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_stat_cache import PlayerStatCache
 from apps.api.app.models.player_playtime_daily import PlayerPlaytimeDaily
+from apps.api.app.models.player_weekly_challenges import PlayerWeeklyChallenges
 from apps.api.app.models.player_follow import PlayerFollow
 from apps.api.app.models.player_public_profile import PlayerPublicProfile
 from apps.api.app.models.player_skin import PlayerSkin
@@ -82,6 +83,7 @@ __all__ = [
     "PlayerAccount",
     "PlayerStatCache",
     "PlayerPlaytimeDaily",
+    "PlayerWeeklyChallenges",
     "PlayerFollow",
     "PlayerPublicProfile",
     "PlayerSkin",
