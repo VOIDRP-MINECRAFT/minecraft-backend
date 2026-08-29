@@ -39,6 +39,46 @@ from apps.api.app.services.nation_service import NationNotFoundError
 MONEY_QUANT = Decimal("0.01")
 MAX_TREASURY_ACTION_AMOUNT = Decimal("9999999999999999.99")
 
+# Bukkit lifetime statistics are cumulative (never decrease for a live player).
+# Only ever raise these when a snapshot arrives so a stale/zero snapshot — e.g. an
+# offline member the plugin has no data for (source="missing"), or a post-restart
+# cache miss — can never wipe a player's real numbers back to 0 and drag the whole
+# nation total down with it. Balance is not cumulative and is always taken as-is.
+_CUMULATIVE_STAT_FIELDS = (
+    "total_playtime_minutes",
+    "pvp_kills",
+    "mob_kills",
+    "deaths",
+    "blocks_placed",
+    "blocks_broken",
+    "completed_quests",
+)
+
+
+def _apply_stat_snapshot(entry, item, *, is_new: bool) -> None:
+    """Update ``entry`` from an incoming plugin ``item`` snapshot.
+
+    A ``source == "missing"`` snapshot carries no real information (the plugin
+    could not read the player), so for an existing row it is a no-op: keep the
+    stored values instead of zeroing them. For real snapshots, cumulative
+    counters only ever move up, while balance/last-seen reflect the latest read.
+    """
+    source = (getattr(item, "source", None) or "live")
+    entry.minecraft_nickname = item.minecraft_nickname.strip()
+
+    if source == "missing" and not is_new:
+        # Nothing trustworthy to write; preserve existing stats.
+        return
+
+    for field in _CUMULATIVE_STAT_FIELDS:
+        incoming = max(0, int(getattr(item, field)))
+        current = 0 if is_new else int(getattr(entry, field) or 0)
+        setattr(entry, field, max(current, incoming))
+
+    entry.source = source[:32]
+    entry.last_seen_at = item.last_seen_at
+    entry.last_synced_at = datetime.now(timezone.utc)
+
 
 class NationStatsPermissionError(Exception):
     pass
@@ -147,7 +187,8 @@ class NationStatsService:
             incoming_norms.add(normalized)
 
             snapshot = existing_by_norm.get(normalized)
-            if snapshot is None:
+            is_new = snapshot is None
+            if is_new:
                 snapshot = NationMemberStatSnapshot(
                     server_id=self.server_id,
                     nation_id=nation.id,
@@ -163,18 +204,9 @@ class NationStatsService:
             ).scalar_one_or_none()
 
             snapshot.user_id = account.user_id if account is not None else None
-            snapshot.minecraft_nickname = item.minecraft_nickname.strip()
-            snapshot.total_playtime_minutes = max(0, int(item.total_playtime_minutes))
-            snapshot.pvp_kills = max(0, int(item.pvp_kills))
-            snapshot.mob_kills = max(0, int(item.mob_kills))
-            snapshot.deaths = max(0, int(item.deaths))
-            snapshot.blocks_placed = max(0, int(item.blocks_placed))
-            snapshot.blocks_broken = max(0, int(item.blocks_broken))
-            snapshot.current_balance = self._as_money(item.current_balance)
-            snapshot.completed_quests = max(0, int(item.completed_quests))
-            snapshot.source = (item.source or "cached")[:32]
-            snapshot.last_seen_at = item.last_seen_at
-            snapshot.last_synced_at = datetime.now(timezone.utc)
+            _apply_stat_snapshot(snapshot, item, is_new=is_new)
+            if is_new or (item.source or "").strip() != "missing":
+                snapshot.current_balance = self._as_money(item.current_balance)
 
         for item in existing:
             if item.minecraft_nickname_normalized not in incoming_norms:
@@ -210,7 +242,8 @@ class NationStatsService:
                 )
             ).scalar_one_or_none()
 
-            if cache_entry is None:
+            is_new = cache_entry is None
+            if is_new:
                 cache_entry = PlayerStatCache(
                     server_id=self.server_id,
                     minecraft_nickname=item.minecraft_nickname.strip(),
@@ -225,18 +258,9 @@ class NationStatsService:
             ).scalar_one_or_none()
 
             cache_entry.user_id = account.user_id if account is not None else None
-            cache_entry.minecraft_nickname = item.minecraft_nickname.strip()
-            cache_entry.total_playtime_minutes = max(0, int(item.total_playtime_minutes))
-            cache_entry.pvp_kills = max(0, int(item.pvp_kills))
-            cache_entry.mob_kills = max(0, int(item.mob_kills))
-            cache_entry.deaths = max(0, int(item.deaths))
-            cache_entry.blocks_placed = max(0, int(item.blocks_placed))
-            cache_entry.blocks_broken = max(0, int(item.blocks_broken))
-            cache_entry.current_balance = self._as_money(item.current_balance)
-            cache_entry.completed_quests = max(0, int(item.completed_quests))
-            cache_entry.source = (item.source or "live")[:32]
-            cache_entry.last_seen_at = item.last_seen_at
-            cache_entry.last_synced_at = datetime.now(timezone.utc)
+            _apply_stat_snapshot(cache_entry, item, is_new=is_new)
+            if is_new or (item.source or "").strip() != "missing":
+                cache_entry.current_balance = self._as_money(item.current_balance)
 
         self.session.commit()
         return PlayerStatCacheSyncResponse(synced=len(payload.players))
