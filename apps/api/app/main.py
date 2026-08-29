@@ -34,6 +34,26 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    _media_prefix = settings.media_public_mount_path
+
+    @app.middleware("http")
+    async def media_vary_origin(request: Request, call_next):
+        """Ensure every /media response varies on Origin.
+
+        StaticFiles + CORSMiddleware only add ``Vary: Origin`` when an Origin is present,
+        so a response cached from a no-Origin request (no ACAO header) could be reused for
+        a later cross-origin request (e.g. the 3D skin viewer), producing a CORS error.
+        Always advertising Vary: Origin makes browser/CDN caches key on the Origin instead.
+        """
+        response = await call_next(request)
+        if request.url.path.startswith(_media_prefix):
+            vary = response.headers.get("vary")
+            if not vary:
+                response.headers["vary"] = "Origin"
+            elif "origin" not in vary.lower():
+                response.headers["vary"] = f"{vary}, Origin"
+        return response
+
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(
         request: Request,
