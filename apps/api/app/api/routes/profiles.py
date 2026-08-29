@@ -75,6 +75,92 @@ def get_public_profile(
         ) from exc
 
 
+@router.get("/{slug}/game")
+def get_public_profile_game_stats(
+    slug: str,
+    viewer: Annotated[User | None, Depends(get_optional_current_user)],
+    session: Annotated[Session, Depends(get_db_session)],
+):
+    """Public game stats + achievements for a profile (default server), for the shareable page."""
+    from sqlalchemy import func, select
+
+    from apps.api.app.api.routes.game_ui_home import (
+        Achievement,
+        HomeStats,
+        _compute_achievements,
+    )
+    from apps.api.app.models.game_server import GameServer
+    from apps.api.app.models.nation_member import NationMember
+    from apps.api.app.models.player_account import PlayerAccount
+    from apps.api.app.models.player_public_profile import PlayerPublicProfile
+    from apps.api.app.models.player_stat_cache import PlayerStatCache
+
+    profile = session.execute(
+        select(PlayerPublicProfile)
+        .join(PlayerPublicProfile.user)
+        .join(User.player_account)
+        .where(PlayerPublicProfile.slug == slug)
+    ).scalar_one_or_none()
+    if profile is None:
+        profile = session.execute(
+            select(PlayerPublicProfile)
+            .join(PlayerPublicProfile.user)
+            .join(User.player_account)
+            .where(func.lower(PlayerAccount.minecraft_nickname) == slug.lower())
+        ).scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Профиль не найден.")
+    if not profile.is_public and (viewer is None or viewer.id != profile.user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Профиль не найден.")
+
+    account = session.execute(
+        select(PlayerAccount).where(PlayerAccount.user_id == profile.user_id)
+    ).scalar_one_or_none()
+    nick = account.minecraft_nickname if account else None
+    if not nick:
+        return {"nickname": None, "stats": HomeStats().model_dump(), "achievements": []}
+
+    server = session.execute(
+        select(GameServer).where(GameServer.is_default.is_(True))
+    ).scalar_one_or_none()
+
+    stats = HomeStats()
+    if server is not None:
+        stat = session.execute(
+            select(PlayerStatCache).where(
+                PlayerStatCache.server_id == server.id,
+                PlayerStatCache.minecraft_nickname_normalized == nick.lower(),
+            )
+        ).scalar_one_or_none()
+        if stat is not None:
+            stats = HomeStats(
+                playtime_minutes=stat.total_playtime_minutes,
+                balance=float(stat.current_balance or 0),
+                pvp_kills=stat.pvp_kills,
+                mob_kills=stat.mob_kills,
+                deaths=stat.deaths,
+                best_kill_streak=stat.best_kill_streak,
+                blocks_placed=stat.blocks_placed,
+                blocks_broken=stat.blocks_broken,
+                completed_quests=stat.completed_quests,
+            )
+
+    has_nation = False
+    if server is not None:
+        has_nation = session.execute(
+            select(NationMember.id).where(
+                NationMember.user_id == profile.user_id, NationMember.server_id == server.id
+            )
+        ).scalar_one_or_none() is not None
+
+    achievements = _compute_achievements(stats, has_nation)
+    return {
+        "nickname": nick,
+        "stats": stats.model_dump(),
+        "achievements": [a.model_dump() for a in achievements],
+    }
+
+
 @router.post("/me/avatar", response_model=ProfileAssetUploadResponse)
 async def upload_avatar(
     file: UploadFile = File(...),
