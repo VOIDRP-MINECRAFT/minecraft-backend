@@ -15,9 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.nation import Nation
+from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.nation_stat import NationStat
 from apps.api.app.models.nation_treasury_transaction import NationTreasuryTransaction
 from apps.api.app.services.nation_activity_service import NationActivityService
+from apps.api.app.services.notification_service import NotificationService
 
 MONEY_QUANT = Decimal("0.01")
 SEASON_PERIOD_DAYS = 7
@@ -35,6 +37,7 @@ class NationSeasonService:
         self.session = session
         self.server_id = server_id
         self.activity = NationActivityService(session, server_id)
+        self.notifications = NotificationService(session, server_id)
 
     def _as_money(self, value) -> Decimal:
         return Decimal(str(value or 0)).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
@@ -100,6 +103,22 @@ class NationSeasonService:
                 message=f"Государство заняло {rank}-е место сезона и получило +{prize} в казну.",
                 metadata={"rank": rank, "prize": str(prize)},
             )
+
+            member_ids = self.session.execute(
+                select(NationMember.user_id).where(NationMember.nation_id == nation.id)
+            ).scalars().all()
+            for uid in member_ids:
+                self.notifications.create(
+                    user_id=uid,
+                    type="nation_season_reward",
+                    title=f"Награда сезона · {rank} место",
+                    body=f"{nation.title} заняло {rank}-е место и получило +{prize} в казну!",
+                    icon="trophy",
+                    accent="#fbbf24",
+                    action_type="route",
+                    action_payload="treasury",
+                    action_label="Открыть казну",
+                )
             winners.append(
                 {
                     "rank": rank,

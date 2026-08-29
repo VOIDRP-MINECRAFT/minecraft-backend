@@ -12,8 +12,10 @@ from apps.api.app.models.nation import Nation
 from apps.api.app.models.nation_join_request import NationJoinRequest
 from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.nation_member_stat_snapshot import NationMemberStatSnapshot
+from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_stat_cache import PlayerStatCache
 from apps.api.app.models.user import User
+from apps.api.app.services.notification_service import NotificationService
 from apps.api.app.schemas.nation import (
     NationActionResponse,
     NationAllianceMemberSummaryRead,
@@ -277,6 +279,15 @@ class NationService:
             metadata={"nation_slug": nation.slug, "message": join_request.message},
         )
 
+        self._notify_nation_managers(
+            nation,
+            type="nation_join_request",
+            title="Новая заявка в государство",
+            body=f"{self._nick_of(current_user.id) or 'Игрок'} хочет вступить в {nation.title}.",
+            icon="users",
+            accent="#8b7bff",
+        )
+
         self.session.commit()
         nation = self._get_nation_by_slug(nation.slug)
         return NationJoinActionResponse(
@@ -323,6 +334,18 @@ class NationService:
             target_user_id=join_request.user_id,
             message="Заявка на вступление одобрена.",
             metadata={"nation_slug": nation.slug},
+        )
+
+        NotificationService(self.session, self.server_id).create(
+            user_id=join_request.user_id,
+            type="nation_join_approved",
+            title="Заявка одобрена",
+            body=f"Ты принят в государство {nation.title}!",
+            icon="shield",
+            accent="#34d399",
+            action_type="route",
+            action_payload="treasury",
+            action_label="Открыть государство",
         )
 
         self.session.commit()
@@ -681,6 +704,25 @@ class NationService:
             viewer_nation_is_founder=viewer_nation_id is not None and founder_member is not None and founder_member.nation_id == viewer_nation_id,
             members=serialized_members,
         )
+
+    def _nick_of(self, user_id: UUID) -> str | None:
+        return self.session.execute(
+            select(PlayerAccount.minecraft_nickname).where(PlayerAccount.user_id == user_id)
+        ).scalar_one_or_none()
+
+    def _notify_nation_managers(self, nation: Nation, **kwargs) -> None:
+        """Push an in-game notification to every leader/officer of the nation."""
+        manager_ids = self.session.execute(
+            select(NationMember.user_id).where(
+                NationMember.nation_id == nation.id,
+                NationMember.role.in_(("leader", "officer")),
+            )
+        ).scalars().all()
+        if not manager_ids:
+            return
+        notifications = NotificationService(self.session, self.server_id)
+        for uid in manager_ids:
+            notifications.create(user_id=uid, **kwargs)
 
     def _find_nation_for_user(self, user_id: UUID) -> Nation | None:
         return (

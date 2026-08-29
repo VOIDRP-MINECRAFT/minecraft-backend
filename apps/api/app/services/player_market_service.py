@@ -25,6 +25,7 @@ from apps.api.app.models.player_market import (
 )
 from apps.api.app.models.user import User
 from apps.api.app.services.nation_research_catalog import resolve_effects as resolve_research_effects
+from apps.api.app.services.notification_service import NotificationService
 from apps.api.app.schemas.player_market import (
     PlayerMarketBuyOrderCreate,
     PlayerMarketBuyOrderRead,
@@ -809,6 +810,20 @@ class PlayerMarketService:
         )
         self.session.add(trade)
         self.session.flush()
+
+        # Notify the seller that their listing sold (they placed it and walked away).
+        item_label = sell_order.display_name or sell_order.item_key
+        NotificationService(self.session, self.server_id).create_for_nick(
+            sell_order.seller_player_name,
+            type="market_sold",
+            title="Товар продан",
+            body=f"{fill_amount}× {item_label} за {self._money(net_seller_proceeds)} монет",
+            icon="market",
+            accent="#34d399",
+            action_type="route",
+            action_payload="market",
+            action_label="Открыть рынок",
+        )
 
         # Update sell order
         sell_order.remaining_amount -= fill_amount

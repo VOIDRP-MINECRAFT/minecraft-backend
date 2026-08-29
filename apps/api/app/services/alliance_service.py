@@ -24,6 +24,7 @@ from apps.api.app.models.nation_stat import NationStat
 from apps.api.app.models.nation_treasury_transaction import NationTreasuryTransaction
 from apps.api.app.models.user import User
 from apps.api.app.services.nation_activity_service import NationActivityService
+from apps.api.app.services.notification_service import NotificationService
 
 MIN_ALLIANCE_POWER_TO_CREATE = 50000
 DEFAULT_TRANSFER_FEE_PERCENT = Decimal("5.00")
@@ -232,6 +233,31 @@ class AllianceService:
             message=f"Создано предложение альянса: {proposal.title}.",
             metadata={"alliance_slug": alliance.slug, "proposal_type": normalized_type},
         )
+
+        # Notify the leaders of every other member nation that a vote is open.
+        leader_ids = self.session.execute(
+            select(Nation.leader_user_id)
+            .join(AllianceMember, AllianceMember.nation_id == Nation.id)
+            .where(
+                AllianceMember.alliance_id == alliance.id,
+                Nation.id != source_nation.id,
+                Nation.leader_user_id.is_not(None),
+            )
+        ).scalars().all()
+        notifications = NotificationService(self.session, self.server_id)
+        for uid in leader_ids:
+            notifications.create(
+                user_id=uid,
+                type="alliance_proposal",
+                title="Голосование в альянсе",
+                body=f"{source_nation.title}: {proposal.title}. Требуется твой голос.",
+                icon="alliance",
+                accent="#60a5fa",
+                action_type="route",
+                action_payload="alliance",
+                action_label="К голосованию",
+            )
+
         self.session.commit()
         self.session.refresh(proposal)
         return proposal
