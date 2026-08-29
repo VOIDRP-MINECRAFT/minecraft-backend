@@ -160,6 +160,53 @@ def get_topbar(
     )
 
 
+class NationEvent(BaseModel):
+    event_type: str
+    message: str | None
+    actor: str | None
+    created_at: datetime
+
+
+@router.get("/nation-activity", response_model=list[NationEvent])
+def get_nation_activity(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    limit: int = 12,
+) -> list[NationEvent]:
+    """Recent activity of the player's own nation, for the home feed."""
+    member = db.execute(
+        select(NationMember).where(
+            NationMember.user_id == player.user_id, NationMember.server_id == server.id
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        return []
+    from apps.api.app.models.nation_activity_log import NationActivityLog
+    from apps.api.app.models.user import User
+
+    rows = db.execute(
+        select(NationActivityLog, PlayerAccount.minecraft_nickname)
+        .outerjoin(User, User.id == NationActivityLog.actor_user_id)
+        .outerjoin(PlayerAccount, PlayerAccount.user_id == User.id)
+        .where(
+            NationActivityLog.nation_id == member.nation_id,
+            NationActivityLog.server_id == server.id,
+        )
+        .order_by(NationActivityLog.created_at.desc())
+        .limit(max(1, min(limit, 30)))
+    ).all()
+    return [
+        NationEvent(
+            event_type=log.event_type,
+            message=log.message,
+            actor=nick,
+            created_at=log.created_at,
+        )
+        for log, nick in rows
+    ]
+
+
 @router.get("", response_model=HomeProfile)
 def get_home(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],

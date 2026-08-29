@@ -65,6 +65,60 @@ class PriceHistoryOut(BaseModel):
     points: list[PriceHistoryPoint]
 
 
+class MoverItem(BaseModel):
+    item_key: str
+    current_sell: float
+    change_pct: float
+
+
+class MoversOut(BaseModel):
+    gainers: list[MoverItem]
+    losers: list[MoverItem]
+
+
+@router.get("/movers", response_model=MoversOut)
+def get_movers(
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    _player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    days: int = 7,
+    limit: int = 5,
+):
+    """Biggest sell-price movers over the window, from the dynamic price history."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import text
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 30)))
+    rows = db.execute(
+        text(
+            """
+            SELECT lower(material) AS item_key,
+                   (array_agg(sell_price ORDER BY recorded_at ASC))[1]  AS first_price,
+                   (array_agg(sell_price ORDER BY recorded_at DESC))[1] AS last_price
+            FROM price_history_snapshots
+            WHERE server_id = :sid AND recorded_at >= :cutoff
+            GROUP BY lower(material)
+            HAVING count(*) >= 2
+            """
+        ),
+        {"sid": str(server.id), "cutoff": cutoff},
+    ).all()
+
+    movers: list[MoverItem] = []
+    for item_key, first_price, last_price in rows:
+        first = float(first_price or 0)
+        last = float(last_price or 0)
+        if first <= 0 or last == first:
+            continue
+        movers.append(MoverItem(item_key=item_key, current_sell=last, change_pct=(last - first) / first * 100.0))
+
+    cap = max(1, min(limit, 10))
+    gainers = sorted((m for m in movers if m.change_pct > 0), key=lambda m: m.change_pct, reverse=True)[:cap]
+    losers = sorted((m for m in movers if m.change_pct < 0), key=lambda m: m.change_pct)[:cap]
+    return MoversOut(gainers=gainers, losers=losers)
+
+
 @router.get("/history/{item_key:path}", response_model=PriceHistoryOut)
 def get_price_history(
     item_key: str,
