@@ -11,7 +11,7 @@ import hmac
 import secrets
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.player_account import PlayerAccount
@@ -116,8 +116,19 @@ class VoidUpgraderService:
         roll = int(digest[:15], 16) / float(16 ** 15)   # uniform in [0, 1)
         won = roll < win_chance
 
-        # Stake is always spent up front.
-        account.void_coins = balance - stake
+        # Stake is always spent up front. Atomic conditional decrement so two concurrent
+        # spins can't double-spend the same balance (the WHERE re-checks under a row lock).
+        row = self.session.execute(
+            update(PlayerAccount)
+            .where(PlayerAccount.user_id == account.user_id, PlayerAccount.void_coins >= stake)
+            .values(void_coins=PlayerAccount.void_coins - stake)
+            .returning(PlayerAccount.void_coins)
+        ).first()
+        if row is None:
+            self.session.rollback()
+            raise VoidUpgraderError("Недостаточно Void Coin.")
+        new_balance = int(row[0])
+        self.session.expire(account, ["void_coins"])   # ORM value is now stale
 
         self.session.add(
             VoidUpgraderSpin(
@@ -149,7 +160,7 @@ class VoidUpgraderService:
             "win_chance": round(win_chance, 6),
             "multiplier": round(multiplier, 4),
             "stake": stake,
-            "new_void_coins": int(account.void_coins),
+            "new_void_coins": new_balance,
             "reward": {
                 "id": str(reward.id),
                 "item_key": reward.item_key,
