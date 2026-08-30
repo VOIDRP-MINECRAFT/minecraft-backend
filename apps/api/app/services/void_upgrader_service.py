@@ -164,6 +164,20 @@ class VoidUpgraderService:
             "nonce": nonce,
         }
 
+    def recent_wins(self, limit: int = 15) -> list[VoidUpgraderSpin]:
+        """Latest winning spins on this server (public 'recent drops' feed)."""
+        return list(
+            self.session.execute(
+                select(VoidUpgraderSpin)
+                .where(
+                    VoidUpgraderSpin.server_id == self.server_id,
+                    VoidUpgraderSpin.won.is_(True),
+                )
+                .order_by(VoidUpgraderSpin.created_at.desc())
+                .limit(limit)
+            ).scalars().all()
+        )
+
     def history(self, user_id: UUID, limit: int = 20) -> list[VoidUpgraderSpin]:
         return list(
             self.session.execute(

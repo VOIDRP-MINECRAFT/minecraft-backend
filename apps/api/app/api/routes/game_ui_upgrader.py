@@ -66,6 +66,15 @@ class HistoryItem(BaseModel):
     created_at: str
 
 
+class RecentWin(BaseModel):
+    nickname: str
+    reward_display: str
+    reward_item_key: str
+    stake: int
+    multiplier: float
+    created_at: str
+
+
 @router.get("/rewards", response_model=RewardsResponse)
 def get_rewards(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
@@ -103,6 +112,24 @@ def spin(
         return svc.spin(player, req.reward_id, req.stake, req.client_seed)
     except VoidUpgraderError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/recent-wins", response_model=list[RecentWin])
+def recent_wins(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> list[RecentWin]:
+    _require_feature(server)
+    svc = VoidUpgraderService(db, server.id)
+    return [
+        RecentWin(
+            nickname=s.minecraft_nickname, reward_display=s.reward_display,
+            reward_item_key=s.reward_item_key, stake=int(s.stake),
+            multiplier=round(float(s.multiplier), 2), created_at=s.created_at.isoformat(),
+        )
+        for s in svc.recent_wins()
+    ]
 
 
 @router.get("/history", response_model=list[HistoryItem])
