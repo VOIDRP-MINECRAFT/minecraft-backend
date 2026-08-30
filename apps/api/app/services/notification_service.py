@@ -8,10 +8,15 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.player_account import PlayerAccount
+from apps.api.app.models.player_game_settings import PlayerGameSettings
 from apps.api.app.models.player_notification import PlayerNotification
 
 # Recent, undismissed notifications shown in the HUD feed.
 FEED_LIMIT = 12
+
+# Notification types a player may opt out of (chatty ones). Important types
+# (join requests, approvals, season rewards, alliance votes) are always delivered.
+MUTABLE_NOTIFICATION_TYPES = {"market_sold", "achievement", "weekly_challenge", "login_streak", "battlepass"}
 
 
 class NotificationService:
@@ -31,7 +36,9 @@ class NotificationService:
         action_type: str | None = None,
         action_payload: str | None = None,
         action_label: str | None = None,
-    ) -> PlayerNotification:
+    ) -> PlayerNotification | None:
+        if self._is_muted(user_id, type):
+            return None
         note = PlayerNotification(
             server_id=self.server_id,
             user_id=user_id,
@@ -47,6 +54,19 @@ class NotificationService:
         self.session.add(note)
         self.session.flush()
         return note
+
+    def _is_muted(self, user_id: UUID, notif_type: str) -> bool:
+        if notif_type not in MUTABLE_NOTIFICATION_TYPES:
+            return False
+        stored = self.session.execute(
+            select(PlayerGameSettings.settings).where(
+                PlayerGameSettings.server_id == self.server_id,
+                PlayerGameSettings.user_id == user_id,
+            )
+        ).scalar_one_or_none()
+        if not isinstance(stored, dict):
+            return False
+        return notif_type in (stored.get("muted_notifications") or [])
 
     def create_for_nick(self, nickname: str, **kwargs) -> PlayerNotification | None:
         """Create a notification addressed by minecraft nickname. Returns None if no such account."""
