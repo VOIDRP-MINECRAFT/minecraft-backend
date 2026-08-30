@@ -71,6 +71,7 @@ from apps.api.app.api.routes.player_market import (
 from apps.api.app.api.routes.game_ui_market import router as game_ui_market_router
 from apps.api.app.api.routes.game_ui_market import router_plugin as game_ui_market_plugin_router
 from apps.api.app.api.routes.game_ui_hud import router as game_ui_hud_router
+from apps.api.app.api.routes.game_ui_upgrader import router as game_ui_upgrader_router
 from apps.api.app.api.routes.game_ui_nation_market import router as game_ui_nation_market_router
 from apps.api.app.api.routes.game_ui_treasury import router as game_ui_treasury_router
 from apps.api.app.api.routes.game_ui_research import router as game_ui_research_router
@@ -155,6 +156,7 @@ api_router.include_router(player_market_player_router)
 api_router.include_router(game_ui_market_router)
 api_router.include_router(game_ui_market_plugin_router)
 api_router.include_router(game_ui_hud_router)
+api_router.include_router(game_ui_upgrader_router)
 api_router.include_router(game_ui_nation_market_router)
 api_router.include_router(game_ui_treasury_router)
 api_router.include_router(game_ui_research_router)
