@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import require_permission
 from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.economy_market import EconomyMarketItem
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.void_upgrader import VoidUpgraderReward
 from apps.api.app.services.void_upgrader_service import COINS_PER_VC, MAX_MULTIPLIER, RTP
@@ -163,6 +164,51 @@ def update_reward(
     db.commit()
     db.refresh(row)
     return _out(row)
+
+
+class ImportResult(BaseModel):
+    added: int
+    skipped: int
+
+
+@router.post("/import-market", response_model=ImportResult,
+             dependencies=[Depends(require_permission("upgrader.manage"))])
+def import_from_market(
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> ImportResult:
+    """Pull enabled market items into the pool as DISABLED drafts (for review).
+
+    vc_value = market price / COINS_PER_VC (min 10). Items already in the pool are skipped,
+    so re-running only adds newly-listed market items.
+    """
+    existing = set(db.execute(
+        select(VoidUpgraderReward.item_key).where(VoidUpgraderReward.server_id == server.id)
+    ).scalars().all())
+    market = db.execute(
+        select(EconomyMarketItem).where(
+            EconomyMarketItem.server_id == server.id,
+            EconomyMarketItem.enabled.is_(True),
+        )
+    ).scalars().all()
+
+    added = skipped = 0
+    for m in market:
+        item_key = str(m.material or "").strip().lower()
+        if not item_key or ":" not in item_key or item_key in existing:
+            skipped += 1
+            continue
+        price = float(m.current_buy_price or m.base_buy_price or 0)
+        vc = max(10, round(price / COINS_PER_VC))
+        display = m.display_name or item_key.split(":")[-1].replace("_", " ").title()
+        db.add(VoidUpgraderReward(
+            server_id=server.id, item_key=item_key, display_name=display,
+            vc_value=vc, amount=1, tier=_tier_for(vc), enabled=False,  # draft: review before enabling
+        ))
+        existing.add(item_key)
+        added += 1
+    db.commit()
+    return ImportResult(added=added, skipped=skipped)
 
 
 @router.delete("/rewards/{reward_id}", status_code=status.HTTP_204_NO_CONTENT,
