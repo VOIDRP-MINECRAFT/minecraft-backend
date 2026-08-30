@@ -58,6 +58,7 @@ from apps.api.app.api.routes.launcher_crash import router as launcher_crash_rout
 from apps.api.app.api.routes.admin_launcher_crashes import router as admin_launcher_crashes_router
 from apps.api.app.api.routes.admin_launcher import router as admin_launcher_router
 from apps.api.app.api.routes.game_sync_alliances import router as game_sync_alliances_router
+from apps.api.app.api.routes.game_sync_void_coins import router as game_sync_void_coins_router
 from apps.api.app.api.routes.admin_landing import router as admin_landing_router
 from apps.api.app.api.routes.landing import router as landing_router
 from apps.api.app.api.routes.player_heads import router as player_heads_router
@@ -113,6 +114,7 @@ api_router.include_router(referrals_router)
 api_router.include_router(nations_router)
 api_router.include_router(nation_stats_router)
 api_router.include_router(game_sync_router)
+api_router.include_router(game_sync_void_coins_router)
 api_router.include_router(economy_market_router)
 api_router.include_router(market_public_router)
 api_router.include_router(alliances_router)

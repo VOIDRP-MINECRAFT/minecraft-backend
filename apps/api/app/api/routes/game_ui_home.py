@@ -140,6 +140,7 @@ class TopBar(BaseModel):
     nickname: str
     skin_url: str
     balance: float = 0
+    void_coins: int = 0
     level: int = 0
     nation_tag: str | None = None
     accent_color: str | None = None
@@ -176,7 +177,7 @@ def get_topbar(
 
     bp = BattlePassService(session=db, server_id=server.id).get_public_profile_by_nick(nick)
     return TopBar(
-        nickname=nick, skin_url=skin_url, balance=balance,
+        nickname=nick, skin_url=skin_url, balance=balance, void_coins=int(player.void_coins or 0),
         level=bp.level if bp else 0, nation_tag=tag, accent_color=accent,
     )
 

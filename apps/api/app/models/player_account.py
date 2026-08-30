@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import BigInteger, Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
@@ -20,6 +20,9 @@ class PlayerAccount(UuidPrimaryKeyMixin, TimestampMixin, Base):
     minecraft_nickname_normalized: Mapped[str] = mapped_column(
         String(16), nullable=False, unique=True, index=True
     )
+
+    # Premium currency (account-wide), bought via donation / granted by admins. Starts at 0.
+    void_coins: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
 
     nickname_locked: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     legacy_auth_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

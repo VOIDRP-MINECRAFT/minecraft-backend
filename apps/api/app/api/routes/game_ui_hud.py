@@ -24,6 +24,7 @@ router = APIRouter(prefix="/game-ui/hud", tags=["game-ui", "hud"])
 
 class HudSnapshot(BaseModel):
     balance: float
+    void_coins: int = 0
     nation_name: str | None
     nation_role: str | None
     pending_deliveries: int
@@ -84,6 +85,7 @@ def get_hud_snapshot(
 
     return HudSnapshot(
         balance=balance,
+        void_coins=int(player.void_coins or 0),
         nation_name=nation_name,
         nation_role=nation_role,
         pending_deliveries=int(pending_deliveries),
