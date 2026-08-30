@@ -14,9 +14,6 @@ from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.services.void_upgrader_service import (
-    MAX_MULTIPLIER,
-    MIN_STAKE,
-    RTP,
     VoidUpgraderError,
     VoidUpgraderService,
 )
@@ -47,6 +44,7 @@ class RewardsResponse(BaseModel):
     rtp: float
     min_stake: int
     max_multiplier: float
+    max_chance: float
     rewards: list[RewardOut]
 
 
@@ -84,11 +82,13 @@ def get_rewards(
     _require_feature(server)
     svc = VoidUpgraderService(db, server.id)
     rewards = svc.rewards()
+    cfg = svc.settings()
     return RewardsResponse(
         void_coins=int(player.void_coins or 0),
-        rtp=RTP,
-        min_stake=MIN_STAKE,
-        max_multiplier=MAX_MULTIPLIER,
+        rtp=cfg["rtp"],
+        min_stake=cfg["min_stake"],
+        max_multiplier=cfg["max_multiplier"],
+        max_chance=cfg["max_chance"],
         rewards=[
             RewardOut(
                 id=str(r.id), item_key=r.item_key, display_name=r.display_name,

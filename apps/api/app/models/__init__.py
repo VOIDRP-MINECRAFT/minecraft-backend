@@ -23,6 +23,7 @@ from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_stat_cache import PlayerStatCache
 from apps.api.app.models.player_playtime_daily import PlayerPlaytimeDaily
 from apps.api.app.models.void_upgrader import VoidUpgraderReward, VoidUpgraderSpin
+from apps.api.app.models.void_upgrader_settings import VoidUpgraderSettings
 from apps.api.app.models.player_weekly_challenges import PlayerWeeklyChallenges
 from apps.api.app.models.player_game_settings import PlayerGameSettings
 from apps.api.app.models.player_follow import PlayerFollow
@@ -87,6 +88,7 @@ __all__ = [
     "PlayerPlaytimeDaily",
     "VoidUpgraderReward",
     "VoidUpgraderSpin",
+    "VoidUpgraderSettings",
     "PlayerWeeklyChallenges",
     "PlayerGameSettings",
     "PlayerFollow",

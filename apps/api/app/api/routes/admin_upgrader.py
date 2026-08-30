@@ -15,7 +15,8 @@ from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.economy_market import EconomyMarketItem
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.void_upgrader import VoidUpgraderReward
-from apps.api.app.services.void_upgrader_service import COINS_PER_VC, MAX_MULTIPLIER, RTP
+from apps.api.app.models.void_upgrader_settings import VoidUpgraderSettings
+from apps.api.app.services.void_upgrader_service import VoidUpgraderService
 
 router = APIRouter(
     prefix="/admin/upgrader",
@@ -70,7 +71,17 @@ class RewardUpdate(BaseModel):
 class ConfigOut(BaseModel):
     rtp: float
     coins_per_vc: int
+    min_stake: int
     max_multiplier: float
+    max_chance: float
+
+
+class ConfigUpdate(BaseModel):
+    rtp: float | None = Field(default=None, ge=0.5, le=1.0)
+    coins_per_vc: int | None = Field(default=None, ge=1, le=100_000_000)
+    min_stake: int | None = Field(default=None, ge=1, le=1_000_000)
+    max_multiplier: float | None = Field(default=None, ge=1.5, le=10_000)
+    max_chance: float | None = Field(default=None, ge=0.05, le=0.99)
 
 
 def _out(r: VoidUpgraderReward) -> RewardOut:
@@ -82,8 +93,39 @@ def _out(r: VoidUpgraderReward) -> RewardOut:
 
 
 @router.get("/config", response_model=ConfigOut)
-def get_config() -> ConfigOut:
-    return ConfigOut(rtp=RTP, coins_per_vc=COINS_PER_VC, max_multiplier=MAX_MULTIPLIER)
+def get_config(
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> ConfigOut:
+    cfg = VoidUpgraderService(db, server.id).settings()
+    return ConfigOut(**cfg)
+
+
+@router.patch("/config", response_model=ConfigOut,
+              dependencies=[Depends(require_permission("upgrader.manage"))])
+def update_config(
+    payload: ConfigUpdate,
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> ConfigOut:
+    row = db.execute(
+        select(VoidUpgraderSettings).where(VoidUpgraderSettings.server_id == server.id)
+    ).scalar_one_or_none()
+    if row is None:
+        # seed the row from the current effective values, then apply the patch
+        cur = VoidUpgraderService(db, server.id).settings()
+        row = VoidUpgraderSettings(server_id=server.id, **cur)
+        db.add(row)
+    data = payload.model_dump(exclude_unset=True)
+    for key, val in data.items():
+        if val is not None:
+            setattr(row, key, val)
+    db.commit()
+    db.refresh(row)
+    return ConfigOut(
+        rtp=float(row.rtp), coins_per_vc=int(row.coins_per_vc), min_stake=int(row.min_stake),
+        max_multiplier=float(row.max_multiplier), max_chance=float(row.max_chance),
+    )
 
 
 @router.get("/rewards", response_model=list[RewardOut])
@@ -182,6 +224,7 @@ def import_from_market(
     vc_value = market price / COINS_PER_VC (min 10). Items already in the pool are skipped,
     so re-running only adds newly-listed market items.
     """
+    coins_per_vc = VoidUpgraderService(db, server.id).settings()["coins_per_vc"]
     existing = set(db.execute(
         select(VoidUpgraderReward.item_key).where(VoidUpgraderReward.server_id == server.id)
     ).scalars().all())
@@ -199,7 +242,7 @@ def import_from_market(
             skipped += 1
             continue
         price = float(m.current_buy_price or m.base_buy_price or 0)
-        vc = max(10, round(price / COINS_PER_VC))
+        vc = max(10, round(price / coins_per_vc))
         display = m.display_name or item_key.split(":")[-1].replace("_", " ").title()
         db.add(VoidUpgraderReward(
             server_id=server.id, item_key=item_key, display_name=display,

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_market import PlayerMarketWebAction
 from apps.api.app.models.void_upgrader import VoidUpgraderReward, VoidUpgraderSpin
+from apps.api.app.models.void_upgrader_settings import VoidUpgraderSettings
 
 # Tunables (v1 constants; move to config later if needed).
 COINS_PER_VC = 1000       # 1 Void Coin == this many in-game coins (used only by the seeder)
@@ -34,6 +35,26 @@ class VoidUpgraderService:
     def __init__(self, session: Session, server_id: UUID) -> None:
         self.session = session
         self.server_id = server_id
+        self._settings_cache: dict | None = None
+
+    def settings(self) -> dict:
+        """Per-server tunables; falls back to the module defaults when no row exists."""
+        if self._settings_cache is None:
+            row = self.session.execute(
+                select(VoidUpgraderSettings).where(VoidUpgraderSettings.server_id == self.server_id)
+            ).scalar_one_or_none()
+            if row is None:
+                self._settings_cache = {
+                    "rtp": RTP, "coins_per_vc": COINS_PER_VC, "min_stake": MIN_STAKE,
+                    "max_multiplier": MAX_MULTIPLIER, "max_chance": MAX_CHANCE,
+                }
+            else:
+                self._settings_cache = {
+                    "rtp": float(row.rtp), "coins_per_vc": int(row.coins_per_vc),
+                    "min_stake": int(row.min_stake), "max_multiplier": float(row.max_multiplier),
+                    "max_chance": float(row.max_chance),
+                }
+        return self._settings_cache
 
     def rewards(self) -> list[VoidUpgraderReward]:
         return list(
@@ -84,22 +105,23 @@ class VoidUpgraderService:
         client_seed: str | None = None,
     ) -> dict:
         reward = self._reward(reward_id)
+        cfg = self.settings()
         stake = int(stake)
         balance = int(account.void_coins or 0)
 
-        if stake < MIN_STAKE:
-            raise VoidUpgraderError(f"Минимальная ставка — {MIN_STAKE} Void Coin.")
+        if stake < cfg["min_stake"]:
+            raise VoidUpgraderError(f"Минимальная ставка — {cfg['min_stake']} Void Coin.")
         if stake > balance:
             raise VoidUpgraderError("Недостаточно Void Coin.")
         if stake >= int(reward.vc_value):
             raise VoidUpgraderError("Ставка должна быть меньше ценности награды — это апгрейд вверх.")
 
         multiplier = float(reward.vc_value) / float(stake)
-        if multiplier > MAX_MULTIPLIER:
+        if multiplier > cfg["max_multiplier"]:
             raise VoidUpgraderError(
-                f"Слишком большой множитель (макс ×{int(MAX_MULTIPLIER)}). Повысь ставку или выбери награду дешевле."
+                f"Слишком большой множитель (макс ×{int(cfg['max_multiplier'])}). Повысь ставку или выбери награду дешевле."
             )
-        win_chance = min(MAX_CHANCE, RTP / multiplier)
+        win_chance = min(cfg["max_chance"], cfg["rtp"] / multiplier)
 
         # Server-authoritative RNG (provably-fair-lite: seeds stored per spin).
         server_seed = secrets.token_hex(16)
