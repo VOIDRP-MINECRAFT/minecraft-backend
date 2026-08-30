@@ -8,12 +8,23 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from uuid import UUID
+
 from apps.api.app.db import get_db_session
+from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.alliance import Alliance, AllianceMember, AllianceProposal
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.nation import Nation
 from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.player_account import PlayerAccount
+from apps.api.app.models.user import User
+from apps.api.app.services.alliance_service import (
+    AllianceNotFoundError,
+    AlliancePermissionError,
+    AllianceService,
+    AllianceValidationError,
+)
 
 router = APIRouter(prefix="/game-ui/alliance", tags=["game-ui", "alliance"])
 
@@ -140,3 +151,49 @@ def get_my_alliance(
         player_nation_slug=nation.slug,
         player_role=alliance_membership.role,
     )
+
+
+class AllianceVoteInput(BaseModel):
+    proposal_id: UUID
+    vote: str            # yes | no | veto
+    comment: str | None = None
+
+
+@router.post("/vote", status_code=status.HTTP_200_OK)
+def vote_on_proposal(
+    payload: AllianceVoteInput,
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    """Vote on an alliance proposal directly from the WebGUI (by proposal_id).
+
+    The in-game ``/alliance vote <№>`` command is index-based and stateful, so the
+    browser can't drive it — this votes by id through the same service the command
+    uses. The service enforces the leader/officer permission check.
+    """
+    result = _find_player_nation(player, db)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Игрок не состоит в государстве.")
+    nation, _ = result
+    user = db.get(User, player.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден.")
+
+    service = AllianceService(db, server.id)
+    try:
+        proposal = service.vote_on_proposal(
+            current_user=user,
+            source_nation=nation,
+            proposal_id=payload.proposal_id,
+            vote=payload.vote,
+            comment=payload.comment,
+        )
+    except AllianceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AlliancePermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except AllianceValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    return {"status": proposal.status}
