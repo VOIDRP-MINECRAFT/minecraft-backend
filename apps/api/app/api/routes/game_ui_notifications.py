@@ -107,8 +107,22 @@ def push_notification(
     db: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(require_game_server)],
 ) -> dict:
-    note = NotificationService(db, server.id).create_for_nick(
-        payload.minecraft_nickname,
+    # Resolve the account first so we can tell "no such player" (404) apart from
+    # "player muted this type" (create returns None → skipped, not an error).
+    from sqlalchemy import select
+
+    from apps.api.app.models.player_account import PlayerAccount
+
+    account = db.execute(
+        select(PlayerAccount).where(
+            PlayerAccount.minecraft_nickname_normalized == payload.minecraft_nickname.strip().lower()
+        )
+    ).scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Player account not found")
+
+    note = NotificationService(db, server.id).create(
+        user_id=account.user_id,
         type=payload.type,
         title=payload.title,
         body=payload.body,
@@ -119,6 +133,6 @@ def push_notification(
         action_label=payload.action_label,
     )
     if note is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Player account not found")
+        return {"skipped": True}  # muted by the player's settings
     db.commit()
     return {"id": str(note.id)}
