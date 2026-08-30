@@ -95,6 +95,13 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "voxel.manage", "label": "Voxel Engine: создавать/править игры", "sensitive": True},
         ],
     },
+    {
+        "group": "Апгрейдер",
+        "permissions": [
+            {"key": "upgrader.view", "label": "Апгрейдер: пул наград (просмотр)"},
+            {"key": "upgrader.manage", "label": "Апгрейдер: править награды/настройки", "sensitive": True},
+        ],
+    },
 ]
 
 # Grants sight of ``game_servers.staff_only`` servers in the public catalogue

@@ -146,6 +146,13 @@ class TopBar(BaseModel):
     accent_color: str | None = None
 
 
+@router.get("/features")
+def get_features(server: Annotated[GameServer, Depends(resolve_server)]) -> dict:
+    """Per-server feature toggles (game_servers.features) so the WebGUI can hide
+    disabled tabs. Absent/unknown key ⇒ enabled."""
+    return {"features": getattr(server, "features", None) or {}}
+
+
 @router.get("/topbar", response_model=TopBar)
 def get_topbar(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],

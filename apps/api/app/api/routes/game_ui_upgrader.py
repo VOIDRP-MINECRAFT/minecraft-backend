@@ -24,6 +24,14 @@ from apps.api.app.services.void_upgrader_service import (
 router = APIRouter(prefix="/game-ui/upgrader", tags=["game-ui", "upgrader"])
 
 
+def _require_feature(server: GameServer) -> None:
+    """The upgrader is a per-server feature (game_servers.features['upgrader']).
+    Absent/unknown key ⇒ enabled (matches the rest of the features contract)."""
+    features = getattr(server, "features", None) or {}
+    if features.get("upgrader") is False:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Апгрейдер отключён на этом сервере.")
+
+
 class RewardOut(BaseModel):
     id: str
     item_key: str
@@ -64,6 +72,7 @@ def get_rewards(
     db: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],
 ) -> RewardsResponse:
+    _require_feature(server)
     svc = VoidUpgraderService(db, server.id)
     rewards = svc.rewards()
     return RewardsResponse(
@@ -88,6 +97,7 @@ def spin(
     db: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],
 ) -> dict:
+    _require_feature(server)
     svc = VoidUpgraderService(db, server.id)
     try:
         return svc.spin(player, req.reward_id, req.stake, req.client_seed)
