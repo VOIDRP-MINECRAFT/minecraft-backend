@@ -47,6 +47,7 @@ class BpTrackLevel(BaseModel):
 class BpTrack(BaseModel):
     season: str | None = None
     level: int = 0
+    prestige: int = 0
     xp: int = 0
     xp_per_level: int = 10000
     has_premium: bool = False
