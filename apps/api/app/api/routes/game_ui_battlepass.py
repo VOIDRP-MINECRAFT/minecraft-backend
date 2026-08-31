@@ -28,11 +28,12 @@ def _track_key(server_id, nick: str) -> str:
 
 
 class BpReward(BaseModel):
-    type: str | None = None          # money | exp | item
+    type: str | None = None          # money | exp | item | command | voidcoin
     display_name: str | None = None
     amount: float = 0
     material: str | None = None
     count: int = 0
+    icon: str | None = None          # item id for the WebGUI texture
 
 
 class BpTrackLevel(BaseModel):
