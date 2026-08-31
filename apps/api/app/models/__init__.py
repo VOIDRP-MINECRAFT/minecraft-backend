@@ -27,6 +27,7 @@ from apps.api.app.models.void_upgrader_settings import VoidUpgraderSettings
 from apps.api.app.models.void_upgrader_winning import VoidUpgraderWinning
 from apps.api.app.models.void_upgrader_jackpot import VoidUpgraderJackpot
 from apps.api.app.models.void_upgrader_daily import VoidUpgraderDaily
+from apps.api.app.models.void_upgrader_seed import VoidUpgraderSeed
 from apps.api.app.models.player_weekly_challenges import PlayerWeeklyChallenges
 from apps.api.app.models.player_game_settings import PlayerGameSettings
 from apps.api.app.models.player_follow import PlayerFollow
@@ -95,6 +96,7 @@ __all__ = [
     "VoidUpgraderWinning",
     "VoidUpgraderJackpot",
     "VoidUpgraderDaily",
+    "VoidUpgraderSeed",
     "PlayerWeeklyChallenges",
     "PlayerGameSettings",
     "PlayerFollow",

@@ -1,6 +1,7 @@
 """Void Upgrader — WebGUI endpoints (spend Void Coins to gamble toward an item)."""
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated
 from uuid import UUID
 
@@ -54,6 +55,12 @@ class DailyOut(BaseModel):
     bp_level: int = 0
 
 
+class FairnessOut(BaseModel):
+    commit_hash: str
+    nonce: int
+    rotated_at: str | None = None
+
+
 class RewardsResponse(BaseModel):
     void_coins: int
     rtp: float
@@ -63,6 +70,7 @@ class RewardsResponse(BaseModel):
     rewards: list[RewardOut]
     jackpot: JackpotOut
     daily: DailyOut
+    fairness: FairnessOut
 
 
 class SpinRequest(BaseModel):
@@ -96,8 +104,10 @@ class HistoryItem(BaseModel):
     win_chance: float
     won: bool
     created_at: str
-    # provably-fair (revealed after the spin resolved)
+    # provably-fair — server_seed_hash is the commit (always); server_seed is revealed only
+    # once the player rotates the seed it belongs to.
     server_seed: str | None = None
+    server_seed_hash: str | None = None
     client_seed: str | None = None
     nonce: int | None = None
     roll: float | None = None
@@ -145,6 +155,7 @@ def get_rewards(
         ],
         jackpot=JackpotOut(**svc.jackpot()),
         daily=DailyOut(**svc.daily_status(player)),
+        fairness=FairnessOut(**svc.fairness(player)),
     )
 
 
@@ -306,13 +317,41 @@ def get_history(
     server: Annotated[GameServer, Depends(resolve_server)],
 ) -> list[HistoryItem]:
     svc = VoidUpgraderService(db, server.id)
+    active_seed = svc.active_seed_value(player)   # spins under the STILL-active seed stay committed-only
     return [
         HistoryItem(
             reward_display=s.reward_display, reward_item_key=s.reward_item_key, stake=int(s.stake),
             multiplier=round(float(s.multiplier), 2), win_chance=round(float(s.win_chance), 4),
             won=s.won, created_at=s.created_at.isoformat(),
-            server_seed=s.server_seed, client_seed=s.client_seed, nonce=s.nonce,
+            server_seed=(None if s.server_seed == active_seed else s.server_seed),
+            server_seed_hash=hashlib.sha256(s.server_seed.encode()).hexdigest() if s.server_seed else None,
+            client_seed=s.client_seed, nonce=s.nonce,
             roll=round(float(s.roll), 6) if s.roll is not None else None,
         )
         for s in svc.history(player.user_id)
     ]
+
+
+class RotateOut(BaseModel):
+    revealed_seed: str
+    revealed_hash: str
+    revealed_spins: int
+    commit_hash: str
+
+
+@router.get("/fairness", response_model=FairnessOut)
+def get_fairness(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> FairnessOut:
+    return FairnessOut(**VoidUpgraderService(db, server.id).fairness(player))
+
+
+@router.post("/fairness/rotate", response_model=RotateOut)
+def rotate_fairness(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> RotateOut:
+    return RotateOut(**VoidUpgraderService(db, server.id).rotate_seed(player))

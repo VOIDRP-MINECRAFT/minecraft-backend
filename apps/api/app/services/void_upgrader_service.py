@@ -23,6 +23,7 @@ from apps.api.app.models.void_upgrader import VoidUpgraderReward, VoidUpgraderSp
 from apps.api.app.models.void_upgrader_daily import VoidUpgraderDaily
 from apps.api.app.models.void_upgrader_jackpot import VoidUpgraderJackpot
 from apps.api.app.models.void_upgrader_winning import VoidUpgraderWinning
+from apps.api.app.models.void_upgrader_seed import VoidUpgraderSeed
 from apps.api.app.models.void_upgrader_settings import VoidUpgraderSettings
 
 # Tunables (v1 constants; move to config later if needed).
@@ -152,17 +153,13 @@ class VoidUpgraderService:
             )
         win_chance = min(cfg["max_chance"], cfg["rtp"] / multiplier)
 
-        # Server-authoritative RNG (provably-fair-lite: seeds stored per spin).
-        server_seed = secrets.token_hex(16)
+        # Commit-reveal RNG: roll from the player's committed active seed + its running nonce.
+        # The seed's SHA-256 is shown to the player before spinning; the raw seed is revealed
+        # only on rotation, at which point every spin under it becomes verifiable.
+        seed_row = self._active_seed_for_update(account)
+        server_seed = seed_row.server_seed
         client_seed = (client_seed or secrets.token_hex(8))[:64]
-        nonce = int(
-            self.session.execute(
-                select(func.count(VoidUpgraderSpin.id)).where(
-                    VoidUpgraderSpin.server_id == self.server_id,
-                    VoidUpgraderSpin.user_id == account.user_id,
-                )
-            ).scalar_one()
-        )
+        nonce = int(seed_row.nonce)
         digest = hmac.new(server_seed.encode(), f"{client_seed}:{nonce}".encode(), hashlib.sha256).hexdigest()
         roll = int(digest[:15], 16) / float(16 ** 15)   # uniform in [0, 1)
         won = roll < win_chance
@@ -203,6 +200,7 @@ class VoidUpgraderService:
                 nonce=nonce,
             )
         )
+        seed_row.nonce = nonce + 1   # advance the commit-reveal counter for this seed
 
         if won:
             # Item goes to the player's Upgrader inventory — they later CLAIM it in-game or SELL it for VC.
@@ -242,7 +240,7 @@ class VoidUpgraderService:
                 "amount": int(reward.amount or 1),
                 "tier": reward.tier,
             },
-            "server_seed": server_seed,
+            # Commit only — the raw active seed stays secret until the player rotates it.
             "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
             "client_seed": client_seed,
             "nonce": nonce,
@@ -521,3 +519,68 @@ class VoidUpgraderService:
                 .limit(limit)
             ).scalars().all()
         )
+
+    # ── commit-reveal fairness ───────────────────────────────────────────────────
+    def _active_seed_for_update(self, account: PlayerAccount) -> VoidUpgraderSeed:
+        """Row-locked active seed for this player, created on first use."""
+        row = self.session.execute(
+            select(VoidUpgraderSeed)
+            .where(VoidUpgraderSeed.server_id == self.server_id, VoidUpgraderSeed.user_id == account.user_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if row is None:
+            self.session.execute(
+                pg_insert(VoidUpgraderSeed)
+                .values(server_id=self.server_id, user_id=account.user_id, server_seed=secrets.token_hex(16), nonce=0)
+                .on_conflict_do_nothing(constraint="uq_void_upgrader_seed_server_user")
+            )
+            row = self.session.execute(
+                select(VoidUpgraderSeed)
+                .where(VoidUpgraderSeed.server_id == self.server_id, VoidUpgraderSeed.user_id == account.user_id)
+                .with_for_update()
+            ).scalar_one()
+        return row
+
+    def _ensure_seed(self, account: PlayerAccount) -> VoidUpgraderSeed:
+        row = self.session.execute(
+            select(VoidUpgraderSeed).where(
+                VoidUpgraderSeed.server_id == self.server_id, VoidUpgraderSeed.user_id == account.user_id
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = self._active_seed_for_update(account)
+            self.session.commit()
+        return row
+
+    def active_seed_value(self, account: PlayerAccount) -> str | None:
+        return self.session.execute(
+            select(VoidUpgraderSeed.server_seed).where(
+                VoidUpgraderSeed.server_id == self.server_id, VoidUpgraderSeed.user_id == account.user_id
+            )
+        ).scalar_one_or_none()
+
+    def fairness(self, account: PlayerAccount) -> dict:
+        row = self._ensure_seed(account)
+        return {
+            "commit_hash": hashlib.sha256(row.server_seed.encode()).hexdigest(),
+            "nonce": int(row.nonce),
+            "rotated_at": row.rotated_at.isoformat() if row.rotated_at else None,
+        }
+
+    def rotate_seed(self, account: PlayerAccount) -> dict:
+        """Reveal the current active seed and commit a fresh one — every past spin under the
+        old seed is now independently verifiable."""
+        row = self._active_seed_for_update(account)
+        old_seed = row.server_seed
+        old_nonce = int(row.nonce)
+        new_seed = secrets.token_hex(16)
+        row.server_seed = new_seed
+        row.nonce = 0
+        row.rotated_at = func.now()
+        self.session.commit()
+        return {
+            "revealed_seed": old_seed,
+            "revealed_hash": hashlib.sha256(old_seed.encode()).hexdigest(),
+            "revealed_spins": old_nonce,
+            "commit_hash": hashlib.sha256(new_seed.encode()).hexdigest(),
+        }
