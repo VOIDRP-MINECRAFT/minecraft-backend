@@ -40,6 +40,7 @@ class BattlePassProgressUpsertRequest(BaseModel):
     season: str
     level: int
     xp: int
+    prestige: int = 0
 
 
 class BattlePassPublicProfileResponse(BaseModel):

@@ -209,6 +209,7 @@ class BattlePassService:
                 season=req.season,
                 level=req.level,
                 xp=req.xp,
+                prestige=req.prestige,
             )
             .on_conflict_do_update(
                 index_elements=["server_id", "minecraft_uuid"],
@@ -217,6 +218,7 @@ class BattlePassService:
                     "season": req.season,
                     "level": req.level,
                     "xp": req.xp,
+                    "prestige": req.prestige,
                     "updated_at": text("now()"),
                 },
             )

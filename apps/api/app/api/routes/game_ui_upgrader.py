@@ -89,6 +89,7 @@ class LeaderboardEntry(BaseModel):
     biggest_win: int
     total_won: int
     wins: int
+    prestige: int = 0
 
 
 class LeaderboardOut(BaseModel):
@@ -128,6 +129,7 @@ class RecentWin(BaseModel):
     stake: int
     multiplier: float
     created_at: str
+    prestige: int = 0
 
 
 @router.get("/rewards", response_model=RewardsResponse)
@@ -322,13 +324,16 @@ def recent_wins(
 ) -> list[RecentWin]:
     _require_feature(server)
     svc = VoidUpgraderService(db, server.id)
+    wins = svc.recent_wins()
+    pres = svc.prestige_map([s.minecraft_nickname for s in wins])
     return [
         RecentWin(
             nickname=s.minecraft_nickname, reward_display=s.reward_display,
             reward_item_key=s.reward_item_key, stake=int(s.stake),
             multiplier=round(float(s.multiplier), 2), created_at=s.created_at.isoformat(),
+            prestige=pres.get(s.minecraft_nickname.lower(), 0),
         )
-        for s in svc.recent_wins()
+        for s in wins
     ]
 
 

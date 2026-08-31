@@ -43,3 +43,4 @@ class BattlePassProgress(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin,
     season: Mapped[str] = mapped_column(String(32), nullable=False)
     level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     xp: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    prestige: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

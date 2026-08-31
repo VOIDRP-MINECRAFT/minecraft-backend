@@ -393,13 +393,27 @@ class VoidUpgraderService:
             .order_by(func.max(VoidUpgraderSpin.reward_vc_value).desc())
             .limit(limit)
         ).all()
-        return {
-            "week_start": week_start.isoformat(),
-            "entries": [
-                {"nickname": r[0], "biggest_win": int(r[1]), "total_won": int(r[2]), "wins": int(r[3])}
-                for r in rows
-            ],
-        }
+        entries = [
+            {"nickname": r[0], "biggest_win": int(r[1]), "total_won": int(r[2]), "wins": int(r[3])}
+            for r in rows
+        ]
+        pres = self.prestige_map([e["nickname"] for e in entries])
+        for e in entries:
+            e["prestige"] = pres.get(e["nickname"].lower(), 0)
+        return {"week_start": week_start.isoformat(), "entries": entries}
+
+    def prestige_map(self, nicknames: list[str]) -> dict[str, int]:
+        """nickname(lower) → Battle Pass prestige, for public status badges."""
+        names = [n.lower() for n in nicknames if n]
+        if not names:
+            return {}
+        rows = self.session.execute(
+            select(BattlePassProgress.minecraft_nickname, BattlePassProgress.prestige).where(
+                BattlePassProgress.server_id == self.server_id,
+                func.lower(BattlePassProgress.minecraft_nickname).in_(names),
+            )
+        ).all()
+        return {r[0].lower(): int(r[1] or 0) for r in rows}
 
     # ── winnings inventory (claim in-game / sell for Void Coin) ──────────────────
     def winnings(self, user_id: UUID) -> list[VoidUpgraderWinning]:
