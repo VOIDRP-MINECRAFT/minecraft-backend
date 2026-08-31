@@ -85,6 +85,55 @@ def get_track(
     return BpTrack(**data)
 
 
+# ── daily quests (mirror of the track: plugin pushes, WebGUI reads) ──
+def _quests_key(server_id, nick: str) -> str:
+    return f"bp:quests:{server_id}:{nick.lower()}"
+
+
+class BpQuest(BaseModel):
+    id: str | None = None
+    name: str
+    description: str | None = None
+    type: str | None = None
+    progress: int = 0
+    required: int = 1
+    xp: int = 0
+    completed: bool = False
+
+
+class BpQuests(BaseModel):
+    date: str | None = None
+    has_premium: bool = False
+    free: list[BpQuest] = []
+    premium: list[BpQuest] = []
+
+
+class BpQuestsPush(BpQuests):
+    minecraft_nickname: str
+
+
+@plugin_router.post("/quests")
+def push_quests(
+    payload: BpQuestsPush,
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> dict:
+    cache = RedisCacheService()
+    data = BpQuests(**{k: v for k, v in payload.model_dump().items() if k != "minecraft_nickname"}).model_dump()
+    cache.set_json(_quests_key(server.id, payload.minecraft_nickname), data, ttl_seconds=_TRACK_TTL)
+    return {"ok": True}
+
+
+@router.get("/quests", response_model=BpQuests)
+def get_quests(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> BpQuests:
+    data = RedisCacheService().get_json(_quests_key(server.id, player.minecraft_nickname))
+    if not data:
+        return BpQuests()
+    return BpQuests(**data)
+
+
 def _service(
     db: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],
