@@ -114,6 +114,55 @@ def spin(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+class WinningOut(BaseModel):
+    id: str
+    item_key: str
+    display_name: str
+    vc_value: int
+    amount: int
+    tier: str
+
+
+@router.get("/winnings", response_model=list[WinningOut])
+def get_winnings(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> list[WinningOut]:
+    svc = VoidUpgraderService(db, server.id)
+    return [
+        WinningOut(id=str(w.id), item_key=w.item_key, display_name=w.display_name,
+                   vc_value=int(w.vc_value), amount=int(w.amount or 1), tier=w.tier)
+        for w in svc.winnings(player.user_id)
+    ]
+
+
+@router.post("/winnings/{winning_id}/claim")
+def claim_winning(
+    winning_id: UUID,
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    try:
+        return VoidUpgraderService(db, server.id).claim(player, winning_id)
+    except VoidUpgraderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/winnings/{winning_id}/sell")
+def sell_winning(
+    winning_id: UUID,
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    try:
+        return VoidUpgraderService(db, server.id).sell(player, winning_id)
+    except VoidUpgraderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.get("/recent-wins", response_model=list[RecentWin])
 def recent_wins(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],

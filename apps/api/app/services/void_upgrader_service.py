@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_market import PlayerMarketWebAction
 from apps.api.app.models.void_upgrader import VoidUpgraderReward, VoidUpgraderSpin
+from apps.api.app.models.void_upgrader_winning import VoidUpgraderWinning
 from apps.api.app.models.void_upgrader_settings import VoidUpgraderSettings
 
 # Tunables (v1 constants; move to config later if needed).
@@ -80,17 +81,17 @@ class VoidUpgraderService:
             raise VoidUpgraderError("Награда не найдена.")
         return reward
 
-    def _enqueue_give(self, nickname: str, reward: VoidUpgraderReward) -> None:
+    def _enqueue_give(self, nickname: str, item_key: str, amount: int, display: str, give_command: str | None) -> None:
         self.session.add(
             PlayerMarketWebAction(
                 server_id=self.server_id,
                 player_name=nickname,
                 action_type="give_reward",
                 payload_json={
-                    "item_key": reward.item_key,
-                    "amount": int(reward.amount or 1),
-                    "display": reward.display_name,
-                    "give_command": reward.give_command,
+                    "item_key": item_key,
+                    "amount": int(amount or 1),
+                    "display": display,
+                    "give_command": give_command,
                     "source": "upgrader",
                 },
                 status="pending",
@@ -172,7 +173,14 @@ class VoidUpgraderService:
         )
 
         if won:
-            self._enqueue_give(account.minecraft_nickname, reward)
+            # Item goes to the player's Upgrader inventory — they later CLAIM it in-game or SELL it for VC.
+            self.session.add(VoidUpgraderWinning(
+                server_id=self.server_id, user_id=account.user_id,
+                minecraft_nickname=account.minecraft_nickname,
+                item_key=reward.item_key, display_name=reward.display_name,
+                vc_value=int(reward.vc_value), amount=int(reward.amount or 1),
+                tier=reward.tier, give_command=reward.give_command,
+            ))
 
         self.session.commit()
 
@@ -196,6 +204,51 @@ class VoidUpgraderService:
             "client_seed": client_seed,
             "nonce": nonce,
         }
+
+    # ── winnings inventory (claim in-game / sell for Void Coin) ──────────────────
+    def winnings(self, user_id: UUID) -> list[VoidUpgraderWinning]:
+        return list(
+            self.session.execute(
+                select(VoidUpgraderWinning)
+                .where(VoidUpgraderWinning.server_id == self.server_id, VoidUpgraderWinning.user_id == user_id)
+                .order_by(VoidUpgraderWinning.created_at.desc())
+            ).scalars().all()
+        )
+
+    def _winning(self, user_id: UUID, winning_id: UUID) -> VoidUpgraderWinning:
+        w = self.session.execute(
+            select(VoidUpgraderWinning).where(
+                VoidUpgraderWinning.id == winning_id,
+                VoidUpgraderWinning.server_id == self.server_id,
+                VoidUpgraderWinning.user_id == user_id,
+            )
+        ).scalar_one_or_none()
+        if w is None:
+            raise VoidUpgraderError("Выигрыш не найден.")
+        return w
+
+    def claim(self, account: PlayerAccount, winning_id: UUID) -> dict:
+        w = self._winning(account.user_id, winning_id)
+        self._enqueue_give(account.minecraft_nickname, w.item_key, int(w.amount or 1), w.display_name, w.give_command)
+        item = {"item_key": w.item_key, "display_name": w.display_name, "amount": int(w.amount or 1)}
+        self.session.delete(w)
+        self.session.commit()
+        return item
+
+    def sell(self, account: PlayerAccount, winning_id: UUID) -> dict:
+        w = self._winning(account.user_id, winning_id)
+        vc = int(w.vc_value)
+        row = self.session.execute(
+            update(PlayerAccount)
+            .where(PlayerAccount.user_id == account.user_id)
+            .values(void_coins=PlayerAccount.void_coins + vc)
+            .returning(PlayerAccount.void_coins)
+        ).first()
+        new_balance = int(row[0]) if row else vc
+        self.session.expire(account, ["void_coins"])
+        self.session.delete(w)
+        self.session.commit()
+        return {"vc_value": vc, "new_void_coins": new_balance, "display_name": w.display_name}
 
     def recent_wins(self, limit: int = 15) -> list[VoidUpgraderSpin]:
         """Latest winning spins on this server (public 'recent drops' feed)."""
