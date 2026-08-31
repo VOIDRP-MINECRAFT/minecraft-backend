@@ -39,6 +39,20 @@ class RewardOut(BaseModel):
     tier: str
 
 
+class JackpotOut(BaseModel):
+    enabled: bool
+    amount: int
+    last_winner: str | None = None
+    last_amount: int | None = None
+
+
+class DailyOut(BaseModel):
+    enabled: bool
+    available: bool
+    free_stake: int
+    streak: int
+
+
 class RewardsResponse(BaseModel):
     void_coins: int
     rtp: float
@@ -46,12 +60,31 @@ class RewardsResponse(BaseModel):
     max_multiplier: float
     max_chance: float
     rewards: list[RewardOut]
+    jackpot: JackpotOut
+    daily: DailyOut
 
 
 class SpinRequest(BaseModel):
     reward_id: UUID
     stake: int = Field(..., ge=1)
     client_seed: str | None = None
+
+
+class DailySpinRequest(BaseModel):
+    reward_id: UUID
+    client_seed: str | None = None
+
+
+class LeaderboardEntry(BaseModel):
+    nickname: str
+    biggest_win: int
+    total_won: int
+    wins: int
+
+
+class LeaderboardOut(BaseModel):
+    week_start: str
+    entries: list[LeaderboardEntry]
 
 
 class HistoryItem(BaseModel):
@@ -62,6 +95,19 @@ class HistoryItem(BaseModel):
     win_chance: float
     won: bool
     created_at: str
+    # provably-fair (revealed after the spin resolved)
+    server_seed: str | None = None
+    client_seed: str | None = None
+    nonce: int | None = None
+    roll: float | None = None
+
+
+class StatsOut(BaseModel):
+    spins: int
+    wins: int
+    win_rate: float
+    vc_staked: int
+    vc_won: int
 
 
 class RecentWin(BaseModel):
@@ -96,6 +142,8 @@ def get_rewards(
             )
             for r in rewards
         ],
+        jackpot=JackpotOut(**svc.jackpot()),
+        daily=DailyOut(**svc.daily_status(player.user_id)),
     )
 
 
@@ -112,6 +160,41 @@ def spin(
         return svc.spin(player, req.reward_id, req.stake, req.client_seed)
     except VoidUpgraderError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/daily-spin")
+def daily_spin(
+    req: DailySpinRequest,
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    _require_feature(server)
+    svc = VoidUpgraderService(db, server.id)
+    try:
+        return svc.spin(player, req.reward_id, 0, req.client_seed, free=True)
+    except VoidUpgraderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/jackpot", response_model=JackpotOut)
+def get_jackpot(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> JackpotOut:
+    _require_feature(server)
+    return JackpotOut(**VoidUpgraderService(db, server.id).jackpot())
+
+
+@router.get("/leaderboard", response_model=LeaderboardOut)
+def get_leaderboard(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> LeaderboardOut:
+    _require_feature(server)
+    return LeaderboardOut(**VoidUpgraderService(db, server.id).weekly_leaderboard())
 
 
 class WinningOut(BaseModel):
@@ -163,6 +246,40 @@ def sell_winning(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@router.post("/winnings/sell-all")
+def sell_all_winnings(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    try:
+        return VoidUpgraderService(db, server.id).sell_all(player)
+    except VoidUpgraderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/winnings/claim-all")
+def claim_all_winnings(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    try:
+        return VoidUpgraderService(db, server.id).claim_all(player)
+    except VoidUpgraderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/stats", response_model=StatsOut)
+def get_stats(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> StatsOut:
+    svc = VoidUpgraderService(db, server.id)
+    return StatsOut(**svc.stats(player.user_id))
+
+
 @router.get("/recent-wins", response_model=list[RecentWin])
 def recent_wins(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
@@ -193,6 +310,8 @@ def get_history(
             reward_display=s.reward_display, reward_item_key=s.reward_item_key, stake=int(s.stake),
             multiplier=round(float(s.multiplier), 2), win_chance=round(float(s.win_chance), 4),
             won=s.won, created_at=s.created_at.isoformat(),
+            server_seed=s.server_seed, client_seed=s.client_seed, nonce=s.nonce,
+            roll=round(float(s.roll), 6) if s.roll is not None else None,
         )
         for s in svc.history(player.user_id)
     ]

@@ -9,14 +9,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Integer, case, cast, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_market import PlayerMarketWebAction
 from apps.api.app.models.void_upgrader import VoidUpgraderReward, VoidUpgraderSpin
+from apps.api.app.models.void_upgrader_daily import VoidUpgraderDaily
+from apps.api.app.models.void_upgrader_jackpot import VoidUpgraderJackpot
 from apps.api.app.models.void_upgrader_winning import VoidUpgraderWinning
 from apps.api.app.models.void_upgrader_settings import VoidUpgraderSettings
 
@@ -26,6 +30,12 @@ RTP = 0.90                # return-to-player; house edge = 1 - RTP
 MIN_STAKE = 1
 MAX_MULTIPLIER = 100.0    # cap variance: reward may be at most 100x the stake
 MAX_CHANCE = 0.90         # even a near-value upgrade keeps at least 10% risk
+JACKPOT_ENABLED = True
+JACKPOT_RATE = 0.01       # share of each paid stake that feeds the pot
+JACKPOT_CHANCE = 0.001    # per-spin chance to scoop the whole pot
+JACKPOT_SEED = 500        # pot floor after a scoop
+DAILY_FREE_ENABLED = True
+DAILY_FREE_STAKE = 25     # house-paid stake for the once-a-day free spin
 
 
 class VoidUpgraderError(Exception):
@@ -48,12 +58,18 @@ class VoidUpgraderService:
                 self._settings_cache = {
                     "rtp": RTP, "coins_per_vc": COINS_PER_VC, "min_stake": MIN_STAKE,
                     "max_multiplier": MAX_MULTIPLIER, "max_chance": MAX_CHANCE,
+                    "jackpot_enabled": JACKPOT_ENABLED, "jackpot_rate": JACKPOT_RATE,
+                    "jackpot_chance": JACKPOT_CHANCE, "jackpot_seed": JACKPOT_SEED,
+                    "daily_free_enabled": DAILY_FREE_ENABLED, "daily_free_stake": DAILY_FREE_STAKE,
                 }
             else:
                 self._settings_cache = {
                     "rtp": float(row.rtp), "coins_per_vc": int(row.coins_per_vc),
                     "min_stake": int(row.min_stake), "max_multiplier": float(row.max_multiplier),
                     "max_chance": float(row.max_chance),
+                    "jackpot_enabled": bool(row.jackpot_enabled), "jackpot_rate": float(row.jackpot_rate),
+                    "jackpot_chance": float(row.jackpot_chance), "jackpot_seed": int(row.jackpot_seed),
+                    "daily_free_enabled": bool(row.daily_free_enabled), "daily_free_stake": int(row.daily_free_stake),
                 }
         return self._settings_cache
 
@@ -104,18 +120,28 @@ class VoidUpgraderService:
         reward_id: UUID,
         stake: int,
         client_seed: str | None = None,
+        free: bool = False,
     ) -> dict:
         reward = self._reward(reward_id)
         cfg = self.settings()
-        stake = int(stake)
         balance = int(account.void_coins or 0)
+        daily_streak: int | None = None
 
-        if stake < cfg["min_stake"]:
-            raise VoidUpgraderError(f"Минимальная ставка — {cfg['min_stake']} Void Coin.")
-        if stake > balance:
-            raise VoidUpgraderError("Недостаточно Void Coin.")
-        if stake >= int(reward.vc_value):
-            raise VoidUpgraderError("Ставка должна быть меньше ценности награды — это апгрейд вверх.")
+        if free:
+            if not cfg["daily_free_enabled"]:
+                raise VoidUpgraderError("Ежедневный бесплатный спин отключён.")
+            stake = int(cfg["daily_free_stake"])
+            if stake >= int(reward.vc_value):
+                raise VoidUpgraderError("Для бесплатного спина выбери награду дороже.")
+            daily_streak = self._try_claim_daily(account)   # raises if already used today
+        else:
+            stake = int(stake)
+            if stake < cfg["min_stake"]:
+                raise VoidUpgraderError(f"Минимальная ставка — {cfg['min_stake']} Void Coin.")
+            if stake > balance:
+                raise VoidUpgraderError("Недостаточно Void Coin.")
+            if stake >= int(reward.vc_value):
+                raise VoidUpgraderError("Ставка должна быть меньше ценности награды — это апгрейд вверх.")
 
         multiplier = float(reward.vc_value) / float(stake)
         if multiplier > cfg["max_multiplier"]:
@@ -139,19 +165,23 @@ class VoidUpgraderService:
         roll = int(digest[:15], 16) / float(16 ** 15)   # uniform in [0, 1)
         won = roll < win_chance
 
-        # Stake is always spent up front. Atomic conditional decrement so two concurrent
-        # spins can't double-spend the same balance (the WHERE re-checks under a row lock).
-        row = self.session.execute(
-            update(PlayerAccount)
-            .where(PlayerAccount.user_id == account.user_id, PlayerAccount.void_coins >= stake)
-            .values(void_coins=PlayerAccount.void_coins - stake)
-            .returning(PlayerAccount.void_coins)
-        ).first()
-        if row is None:
-            self.session.rollback()
-            raise VoidUpgraderError("Недостаточно Void Coin.")
-        new_balance = int(row[0])
-        self.session.expire(account, ["void_coins"])   # ORM value is now stale
+        if free:
+            # House pays the stake — no player balance change.
+            new_balance = balance
+        else:
+            # Stake is always spent up front. Atomic conditional decrement so two concurrent
+            # spins can't double-spend the same balance (the WHERE re-checks under a row lock).
+            row = self.session.execute(
+                update(PlayerAccount)
+                .where(PlayerAccount.user_id == account.user_id, PlayerAccount.void_coins >= stake)
+                .values(void_coins=PlayerAccount.void_coins - stake)
+                .returning(PlayerAccount.void_coins)
+            ).first()
+            if row is None:
+                self.session.rollback()
+                raise VoidUpgraderError("Недостаточно Void Coin.")
+            new_balance = int(row[0])
+            self.session.expire(account, ["void_coins"])   # ORM value is now stale
 
         self.session.add(
             VoidUpgraderSpin(
@@ -182,6 +212,13 @@ class VoidUpgraderService:
                 tier=reward.tier, give_command=reward.give_command,
             ))
 
+        # Server-wide jackpot: only paid spins feed the pot and can scoop it.
+        jackpot: dict | None = None
+        if not free and cfg["jackpot_enabled"]:
+            jackpot = self._process_jackpot(account, stake, server_seed, client_seed, nonce, cfg)
+            if jackpot and jackpot.get("hit"):
+                new_balance = jackpot["new_void_coins"]
+
         self.session.commit()
 
         return {
@@ -191,6 +228,9 @@ class VoidUpgraderService:
             "multiplier": round(multiplier, 4),
             "stake": stake,
             "new_void_coins": new_balance,
+            "free": free,
+            "daily_streak": daily_streak,
+            "jackpot": jackpot,
             "reward": {
                 "id": str(reward.id),
                 "item_key": reward.item_key,
@@ -200,9 +240,147 @@ class VoidUpgraderService:
                 "amount": int(reward.amount or 1),
                 "tier": reward.tier,
             },
+            "server_seed": server_seed,
             "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
             "client_seed": client_seed,
             "nonce": nonce,
+        }
+
+    # ── daily free spin ──────────────────────────────────────────────────────────
+    def _try_claim_daily(self, account: PlayerAccount) -> int:
+        """Atomically claim today's free spin; returns the new streak. Raises if already used today."""
+        today = datetime.now(timezone.utc).date()
+        yesterday = today - timedelta(days=1)
+        stmt = (
+            pg_insert(VoidUpgraderDaily)
+            .values(
+                server_id=self.server_id, user_id=account.user_id,
+                minecraft_nickname=account.minecraft_nickname,
+                last_free_spin_date=today, streak=1,
+            )
+            .on_conflict_do_update(
+                constraint="uq_void_upgrader_daily_server_user",
+                set_={
+                    "last_free_spin_date": today,
+                    "minecraft_nickname": account.minecraft_nickname,
+                    "streak": case(
+                        (VoidUpgraderDaily.last_free_spin_date == yesterday, VoidUpgraderDaily.streak + 1),
+                        else_=1,
+                    ),
+                },
+                where=VoidUpgraderDaily.last_free_spin_date < today,
+            )
+            .returning(VoidUpgraderDaily.streak)
+        )
+        res = self.session.execute(stmt).first()
+        if res is None:
+            self.session.rollback()
+            raise VoidUpgraderError("Бесплатный спин уже использован сегодня. Возвращайся завтра!")
+        return int(res[0])
+
+    def daily_status(self, user_id: UUID) -> dict:
+        cfg = self.settings()
+        row = self.session.execute(
+            select(VoidUpgraderDaily).where(
+                VoidUpgraderDaily.server_id == self.server_id,
+                VoidUpgraderDaily.user_id == user_id,
+            )
+        ).scalar_one_or_none()
+        today = datetime.now(timezone.utc).date()
+        available = cfg["daily_free_enabled"] and (row is None or row.last_free_spin_date < today)
+        streak = int(row.streak) if row else 0
+        if row and row.last_free_spin_date < today - timedelta(days=1):
+            streak = 0   # streak already broken (a day was skipped)
+        return {
+            "enabled": bool(cfg["daily_free_enabled"]),
+            "available": bool(available),
+            "free_stake": int(cfg["daily_free_stake"]),
+            "streak": streak,
+        }
+
+    # ── server-wide jackpot ──────────────────────────────────────────────────────
+    def _process_jackpot(self, account, stake, server_seed, client_seed, nonce, cfg) -> dict:
+        contribution = int(round(int(stake) * float(cfg["jackpot_rate"])))
+        # Ensure the pot row exists (seed floor), then add this spin's contribution.
+        self.session.execute(
+            pg_insert(VoidUpgraderJackpot)
+            .values(server_id=self.server_id, amount=int(cfg["jackpot_seed"]))
+            .on_conflict_do_nothing(constraint="uq_void_upgrader_jackpot_server")
+        )
+        self.session.execute(
+            update(VoidUpgraderJackpot)
+            .where(VoidUpgraderJackpot.server_id == self.server_id)
+            .values(amount=VoidUpgraderJackpot.amount + contribution)
+        )
+        # Independent scoop roll from a distinct HMAC label.
+        j_digest = hmac.new(server_seed.encode(), f"jackpot:{client_seed}:{nonce}".encode(), hashlib.sha256).hexdigest()
+        j_roll = int(j_digest[:15], 16) / float(16 ** 15)
+        hit = j_roll < float(cfg["jackpot_chance"])
+
+        if not hit:
+            amount = int(self.session.execute(
+                select(VoidUpgraderJackpot.amount).where(VoidUpgraderJackpot.server_id == self.server_id)
+            ).scalar_one())
+            return {"amount": amount, "hit": False}
+
+        # Lock the pot row, pay out the whole pot, reset to seed.
+        pot_row = self.session.execute(
+            select(VoidUpgraderJackpot).where(VoidUpgraderJackpot.server_id == self.server_id).with_for_update()
+        ).scalar_one()
+        pot = int(pot_row.amount)
+        pot_row.amount = int(cfg["jackpot_seed"])
+        pot_row.last_winner_nickname = account.minecraft_nickname
+        pot_row.last_amount = pot
+        pot_row.last_won_at = func.now()
+        bal = self.session.execute(
+            update(PlayerAccount)
+            .where(PlayerAccount.user_id == account.user_id)
+            .values(void_coins=PlayerAccount.void_coins + pot)
+            .returning(PlayerAccount.void_coins)
+        ).first()
+        new_balance = int(bal[0]) if bal else pot
+        self.session.expire(account, ["void_coins"])
+        return {"amount": int(cfg["jackpot_seed"]), "hit": True, "won_amount": pot, "new_void_coins": new_balance}
+
+    def jackpot(self) -> dict:
+        cfg = self.settings()
+        row = self.session.execute(
+            select(VoidUpgraderJackpot).where(VoidUpgraderJackpot.server_id == self.server_id)
+        ).scalar_one_or_none()
+        amount = int(row.amount) if row else int(cfg["jackpot_seed"])
+        return {
+            "enabled": bool(cfg["jackpot_enabled"]),
+            "amount": amount,
+            "last_winner": row.last_winner_nickname if row else None,
+            "last_amount": int(row.last_amount) if (row and row.last_amount is not None) else None,
+        }
+
+    # ── weekly leaderboard ───────────────────────────────────────────────────────
+    def weekly_leaderboard(self, limit: int = 10) -> dict:
+        now = datetime.now(timezone.utc)
+        week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        rows = self.session.execute(
+            select(
+                VoidUpgraderSpin.minecraft_nickname,
+                func.max(VoidUpgraderSpin.reward_vc_value).label("biggest"),
+                func.sum(VoidUpgraderSpin.reward_vc_value).label("total"),
+                func.count(VoidUpgraderSpin.id).label("wins"),
+            )
+            .where(
+                VoidUpgraderSpin.server_id == self.server_id,
+                VoidUpgraderSpin.won.is_(True),
+                VoidUpgraderSpin.created_at >= week_start,
+            )
+            .group_by(VoidUpgraderSpin.minecraft_nickname)
+            .order_by(func.max(VoidUpgraderSpin.reward_vc_value).desc())
+            .limit(limit)
+        ).all()
+        return {
+            "week_start": week_start.isoformat(),
+            "entries": [
+                {"nickname": r[0], "biggest_win": int(r[1]), "total_won": int(r[2]), "wins": int(r[3])}
+                for r in rows
+            ],
         }
 
     # ── winnings inventory (claim in-game / sell for Void Coin) ──────────────────
@@ -249,6 +427,53 @@ class VoidUpgraderService:
         self.session.delete(w)
         self.session.commit()
         return {"vc_value": vc, "new_void_coins": new_balance, "display_name": w.display_name}
+
+    def sell_all(self, account: PlayerAccount) -> dict:
+        rows = self.winnings(account.user_id)
+        if not rows:
+            return {"sold_count": 0, "vc_total": 0, "new_void_coins": int(account.void_coins or 0)}
+        total = sum(int(w.vc_value) for w in rows)
+        row = self.session.execute(
+            update(PlayerAccount)
+            .where(PlayerAccount.user_id == account.user_id)
+            .values(void_coins=PlayerAccount.void_coins + total)
+            .returning(PlayerAccount.void_coins)
+        ).first()
+        new_balance = int(row[0]) if row else total
+        self.session.expire(account, ["void_coins"])
+        for w in rows:
+            self.session.delete(w)
+        self.session.commit()
+        return {"sold_count": len(rows), "vc_total": total, "new_void_coins": new_balance}
+
+    def claim_all(self, account: PlayerAccount) -> dict:
+        rows = self.winnings(account.user_id)
+        for w in rows:
+            self._enqueue_give(account.minecraft_nickname, w.item_key, int(w.amount or 1), w.display_name, w.give_command)
+            self.session.delete(w)
+        self.session.commit()
+        return {"claimed_count": len(rows)}
+
+    def stats(self, user_id: UUID) -> dict:
+        row = self.session.execute(
+            select(
+                func.count(VoidUpgraderSpin.id),
+                func.coalesce(func.sum(cast(VoidUpgraderSpin.won, Integer)), 0),
+                func.coalesce(func.sum(VoidUpgraderSpin.stake), 0),
+                func.coalesce(func.sum(VoidUpgraderSpin.reward_vc_value).filter(VoidUpgraderSpin.won.is_(True)), 0),
+            ).where(
+                VoidUpgraderSpin.server_id == self.server_id,
+                VoidUpgraderSpin.user_id == user_id,
+            )
+        ).first()
+        spins, wins, staked, won_value = (int(row[0]), int(row[1]), int(row[2]), int(row[3])) if row else (0, 0, 0, 0)
+        return {
+            "spins": spins,
+            "wins": wins,
+            "win_rate": round(wins / spins, 4) if spins else 0.0,
+            "vc_staked": staked,
+            "vc_won": won_value,
+        }
 
     def recent_wins(self, limit: int = 15) -> list[VoidUpgraderSpin]:
         """Latest winning spins on this server (public 'recent drops' feed)."""

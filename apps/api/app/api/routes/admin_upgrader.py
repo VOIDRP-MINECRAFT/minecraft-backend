@@ -74,6 +74,12 @@ class ConfigOut(BaseModel):
     min_stake: int
     max_multiplier: float
     max_chance: float
+    jackpot_enabled: bool
+    jackpot_rate: float
+    jackpot_chance: float
+    jackpot_seed: int
+    daily_free_enabled: bool
+    daily_free_stake: int
 
 
 class ConfigUpdate(BaseModel):
@@ -82,6 +88,12 @@ class ConfigUpdate(BaseModel):
     min_stake: int | None = Field(default=None, ge=1, le=1_000_000)
     max_multiplier: float | None = Field(default=None, ge=1.5, le=10_000)
     max_chance: float | None = Field(default=None, ge=0.05, le=0.99)
+    jackpot_enabled: bool | None = Field(default=None)
+    jackpot_rate: float | None = Field(default=None, ge=0.0, le=0.5)
+    jackpot_chance: float | None = Field(default=None, ge=0.0, le=0.1)
+    jackpot_seed: int | None = Field(default=None, ge=0, le=100_000_000)
+    daily_free_enabled: bool | None = Field(default=None)
+    daily_free_stake: int | None = Field(default=None, ge=1, le=1_000_000)
 
 
 def _out(r: VoidUpgraderReward) -> RewardOut:
@@ -122,10 +134,7 @@ def update_config(
             setattr(row, key, val)
     db.commit()
     db.refresh(row)
-    return ConfigOut(
-        rtp=float(row.rtp), coins_per_vc=int(row.coins_per_vc), min_stake=int(row.min_stake),
-        max_multiplier=float(row.max_multiplier), max_chance=float(row.max_chance),
-    )
+    return ConfigOut(**VoidUpgraderService(db, server.id).settings())
 
 
 @router.get("/rewards", response_model=list[RewardOut])
