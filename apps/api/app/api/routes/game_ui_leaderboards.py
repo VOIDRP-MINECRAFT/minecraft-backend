@@ -15,6 +15,7 @@ from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.nation import Nation
 from apps.api.app.models.nation_stat import NationStat
 from apps.api.app.models.player_account import PlayerAccount
+from apps.api.app.models.battlepass import BattlePassProgress
 from apps.api.app.models.player_stat_cache import PlayerStatCache
 
 router = APIRouter(prefix="/game-ui/leaderboards", tags=["game-ui", "leaderboards"])
@@ -68,6 +69,15 @@ def get_leaderboards(
             for i, s in enumerate(rows)
         ]
 
+    def bp_players() -> list[LbEntry]:
+        rows = db.execute(
+            select(BattlePassProgress)
+            .where(BattlePassProgress.server_id == server.id, BattlePassProgress.level > 0)
+            .order_by(BattlePassProgress.level.desc(), BattlePassProgress.xp.desc())
+            .limit(_TOP)
+        ).scalars().all()
+        return [LbEntry(rank=i + 1, name=r.minecraft_nickname, value=float(r.level)) for i, r in enumerate(rows)]
+
     return Leaderboards(
         nations={
             "prestige": nations("prestige_score"),
@@ -80,5 +90,6 @@ def get_leaderboards(
             "playtime": players("total_playtime_minutes"),
             "balance": players("current_balance"),
             "quests": players("completed_quests"),
+            "battlepass": bp_players(),
         },
     )
