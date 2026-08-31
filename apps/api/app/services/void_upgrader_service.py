@@ -16,6 +16,7 @@ from sqlalchemy import Integer, case, cast, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from apps.api.app.models.battlepass import BattlePassProgress
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_market import PlayerMarketWebAction
 from apps.api.app.models.void_upgrader import VoidUpgraderReward, VoidUpgraderSpin
@@ -130,7 +131,8 @@ class VoidUpgraderService:
         if free:
             if not cfg["daily_free_enabled"]:
                 raise VoidUpgraderError("Ежедневный бесплатный спин отключён.")
-            stake = int(cfg["daily_free_stake"])
+            # Battle Pass level boosts the free stake (higher pass ⇒ juicier daily spin).
+            stake = self._scaled_free_stake(int(cfg["daily_free_stake"]), self._bp_level(account.minecraft_nickname))
             if stake >= int(reward.vc_value):
                 raise VoidUpgraderError("Для бесплатного спина выбери награду дороже.")
             daily_streak = self._try_claim_daily(account)   # raises if already used today
@@ -278,12 +280,28 @@ class VoidUpgraderService:
             raise VoidUpgraderError("Бесплатный спин уже использован сегодня. Возвращайся завтра!")
         return int(res[0])
 
-    def daily_status(self, user_id: UUID) -> dict:
+    def _bp_level(self, nickname: str) -> int:
+        """Current Battle Pass level for this player on this server (0 if none)."""
+        lvl = self.session.execute(
+            select(BattlePassProgress.level).where(
+                BattlePassProgress.server_id == self.server_id,
+                func.lower(BattlePassProgress.minecraft_nickname) == (nickname or "").lower(),
+            )
+        ).scalar_one_or_none()
+        return int(lvl or 0)
+
+    @staticmethod
+    def _scaled_free_stake(base: int, bp_level: int) -> int:
+        """Free daily stake grows with BP level: +2%/level, capped at 4×base."""
+        factor = min(4.0, 1.0 + max(0, bp_level) / 50.0)
+        return max(base, int(round(base * factor)))
+
+    def daily_status(self, account: PlayerAccount) -> dict:
         cfg = self.settings()
         row = self.session.execute(
             select(VoidUpgraderDaily).where(
                 VoidUpgraderDaily.server_id == self.server_id,
-                VoidUpgraderDaily.user_id == user_id,
+                VoidUpgraderDaily.user_id == account.user_id,
             )
         ).scalar_one_or_none()
         today = datetime.now(timezone.utc).date()
@@ -291,11 +309,13 @@ class VoidUpgraderService:
         streak = int(row.streak) if row else 0
         if row and row.last_free_spin_date < today - timedelta(days=1):
             streak = 0   # streak already broken (a day was skipped)
+        bp_level = self._bp_level(account.minecraft_nickname)
         return {
             "enabled": bool(cfg["daily_free_enabled"]),
             "available": bool(available),
-            "free_stake": int(cfg["daily_free_stake"]),
+            "free_stake": self._scaled_free_stake(int(cfg["daily_free_stake"]), bp_level),
             "streak": streak,
+            "bp_level": bp_level,
         }
 
     # ── server-wide jackpot ──────────────────────────────────────────────────────

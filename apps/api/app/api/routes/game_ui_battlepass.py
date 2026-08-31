@@ -5,15 +5,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
+from apps.api.app.models.battlepass import BattlePassProgress
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
-from apps.api.app.schemas.battlepass import BattlePassPublicProfileResponse
+from apps.api.app.schemas.battlepass import BattlePassPremiumGrantRequest, BattlePassPublicProfileResponse
 from apps.api.app.services.battlepass_service import BattlePassService
 from apps.api.app.services.redis_cache_service import RedisCacheService
 
@@ -21,6 +23,8 @@ router = APIRouter(prefix="/game-ui/battlepass", tags=["game-ui", "battlepass"])
 plugin_router = APIRouter(prefix="/game-sync/battlepass", tags=["battlepass"])
 
 _TRACK_TTL = 172800
+PREMIUM_VC_PRICE = 2000            # Void Coins to unlock premium for the current season
+PREMIUM_DEFAULT_DAYS = 90          # fallback when the season length isn't known
 
 
 def _track_key(server_id, nick: str) -> str:
@@ -86,6 +90,71 @@ def _service(
     server: Annotated[GameServer, Depends(resolve_server)],
 ) -> BattlePassService:
     return BattlePassService(session=db, server_id=server.id)
+
+
+class BuyPremiumResponse(BaseModel):
+    ok: bool = True
+    price: int
+    days: int
+    new_void_coins: int
+    expires_at: str
+
+
+@router.post("/buy-premium", response_model=BuyPremiumResponse)
+def buy_premium(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> BuyPremiumResponse:
+    """Unlock Battle Pass premium for the current season by spending Void Coins."""
+    # Resolve the player's minecraft UUID (premium is keyed by uuid) from their BP progress.
+    prog = db.execute(
+        select(BattlePassProgress).where(
+            BattlePassProgress.server_id == server.id,
+            func.lower(BattlePassProgress.minecraft_nickname) == player.minecraft_nickname.lower(),
+        )
+    ).scalar_one_or_none()
+    if prog is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сначала зайди в игру, чтобы Battle Pass инициализировался.",
+        )
+
+    # Cover the rest of the season where we know its length, else a sane default.
+    track = RedisCacheService().get_json(_track_key(server.id, player.minecraft_nickname))
+    days = PREMIUM_DEFAULT_DAYS
+    if track and track.get("ends_in_days"):
+        days = max(1, int(track["ends_in_days"]))
+
+    # Atomic conditional decrement — no double-spend if two tabs click at once.
+    row = db.execute(
+        update(PlayerAccount)
+        .where(PlayerAccount.user_id == player.user_id, PlayerAccount.void_coins >= PREMIUM_VC_PRICE)
+        .values(void_coins=PlayerAccount.void_coins - PREMIUM_VC_PRICE)
+        .returning(PlayerAccount.void_coins)
+    ).first()
+    if row is None:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Недостаточно Void Coin — нужно {PREMIUM_VC_PRICE}.",
+        )
+    new_balance = int(row[0])
+
+    # grant_premium commits the session, persisting the VC deduction together with the grant.
+    grant = BattlePassService(session=db, server_id=server.id).grant_premium(
+        BattlePassPremiumGrantRequest(
+            minecraft_uuid=prog.minecraft_uuid,
+            minecraft_nickname=player.minecraft_nickname,
+            days=days,
+            note="Куплено за Void Coin",
+        ),
+        granted_by="void_coin_shop",
+    )
+    return BuyPremiumResponse(
+        price=PREMIUM_VC_PRICE, days=days, new_void_coins=new_balance,
+        expires_at=grant.expires_at.isoformat(),
+    )
 
 
 @router.get("/status", response_model=BattlePassPublicProfileResponse)

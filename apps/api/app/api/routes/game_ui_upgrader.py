@@ -51,6 +51,7 @@ class DailyOut(BaseModel):
     available: bool
     free_stake: int
     streak: int
+    bp_level: int = 0
 
 
 class RewardsResponse(BaseModel):
@@ -143,7 +144,7 @@ def get_rewards(
             for r in rewards
         ],
         jackpot=JackpotOut(**svc.jackpot()),
-        daily=DailyOut(**svc.daily_status(player.user_id)),
+        daily=DailyOut(**svc.daily_status(player)),
     )
 
 
