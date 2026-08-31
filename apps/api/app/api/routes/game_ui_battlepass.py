@@ -23,8 +23,8 @@ router = APIRouter(prefix="/game-ui/battlepass", tags=["game-ui", "battlepass"])
 plugin_router = APIRouter(prefix="/game-sync/battlepass", tags=["battlepass"])
 
 _TRACK_TTL = 172800
-PREMIUM_VC_PRICE = 2000            # Void Coins to unlock premium for the current season
-PREMIUM_DEFAULT_DAYS = 90          # fallback when the season length isn't known
+PREMIUM_VC_PRICE = 2000            # Void Coins to unlock premium
+PREMIUM_VC_DAYS = 30               # a purchase grants a flat 30 days
 
 
 def _track_key(server_id, nick: str) -> str:
@@ -169,11 +169,7 @@ def buy_premium(
             detail="Сначала зайди в игру, чтобы Battle Pass инициализировался.",
         )
 
-    # Cover the rest of the season where we know its length, else a sane default.
-    track = RedisCacheService().get_json(_track_key(server.id, player.minecraft_nickname))
-    days = PREMIUM_DEFAULT_DAYS
-    if track and track.get("ends_in_days"):
-        days = max(1, int(track["ends_in_days"]))
+    days = PREMIUM_VC_DAYS   # flat 30 days per purchase (stacks/extends on repeat buys)
 
     # Atomic conditional decrement — no double-spend if two tabs click at once.
     row = db.execute(
