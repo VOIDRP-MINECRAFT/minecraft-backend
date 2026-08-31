@@ -258,6 +258,28 @@ def sell_winning(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+class UpgradeWinningRequest(BaseModel):
+    target_reward_id: UUID
+    client_seed: str | None = None
+
+
+@router.post("/winnings/{winning_id}/upgrade")
+def upgrade_winning(
+    winning_id: UUID,
+    req: UpgradeWinningRequest,
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    _require_feature(server)
+    try:
+        return VoidUpgraderService(db, server.id).upgrade_winning(
+            player, winning_id, req.target_reward_id, req.client_seed
+        )
+    except VoidUpgraderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.post("/winnings/sell-all")
 def sell_all_winnings(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],

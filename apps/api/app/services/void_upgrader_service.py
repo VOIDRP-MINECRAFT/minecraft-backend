@@ -446,6 +446,89 @@ class VoidUpgraderService:
         self.session.commit()
         return {"vc_value": vc, "new_void_coins": new_balance, "display_name": w.display_name}
 
+    def upgrade_winning(
+        self,
+        account: PlayerAccount,
+        winning_id: UUID,
+        target_reward_id: UUID,
+        client_seed: str | None = None,
+    ) -> dict:
+        """Trade-up: stake a won item toward a more valuable target. Win ⇒ the item is
+        swapped for the bigger one; loss ⇒ the item is consumed. No Void Coin changes hands
+        and the jackpot is not fed (the stake is an item, not VC)."""
+        w = self._winning(account.user_id, winning_id)
+        target = self._reward(target_reward_id)
+        cfg = self.settings()
+        stake = int(w.vc_value)
+
+        if int(target.vc_value) <= stake:
+            raise VoidUpgraderError("Цель апгрейда должна быть дороже текущего предмета.")
+        multiplier = float(target.vc_value) / float(stake)
+        if multiplier > cfg["max_multiplier"]:
+            raise VoidUpgraderError(
+                f"Слишком большой скачок (макс ×{int(cfg['max_multiplier'])}). Выбери цель дешевле."
+            )
+        win_chance = min(cfg["max_chance"], cfg["rtp"] / multiplier)
+
+        seed_row = self._active_seed_for_update(account)
+        server_seed = seed_row.server_seed
+        client_seed = (client_seed or secrets.token_hex(8))[:64]
+        nonce = int(seed_row.nonce)
+        digest = hmac.new(server_seed.encode(), f"{client_seed}:{nonce}".encode(), hashlib.sha256).hexdigest()
+        roll = int(digest[:15], 16) / float(16 ** 15)
+        won = roll < win_chance
+
+        self.session.add(
+            VoidUpgraderSpin(
+                server_id=self.server_id, user_id=account.user_id,
+                minecraft_nickname=account.minecraft_nickname, stake=stake,
+                reward_item_key=target.item_key, reward_display=target.display_name,
+                reward_vc_value=int(target.vc_value), multiplier=multiplier,
+                win_chance=win_chance, roll=roll, won=won,
+                server_seed=server_seed, client_seed=client_seed, nonce=nonce,
+            )
+        )
+        seed_row.nonce = nonce + 1
+
+        staked_from = {"display_name": w.display_name, "vc_value": int(w.vc_value)}
+        self.session.delete(w)   # the staked item is consumed either way
+
+        new_winning = None
+        if won:
+            nw = VoidUpgraderWinning(
+                server_id=self.server_id, user_id=account.user_id,
+                minecraft_nickname=account.minecraft_nickname,
+                item_key=target.item_key, display_name=target.display_name,
+                vc_value=int(target.vc_value), amount=int(target.amount or 1),
+                tier=target.tier, give_command=target.give_command,
+            )
+            self.session.add(nw)
+            self.session.flush()
+            new_winning = {
+                "id": str(nw.id), "item_key": nw.item_key, "display_name": nw.display_name,
+                "vc_value": int(nw.vc_value), "amount": int(nw.amount or 1), "tier": nw.tier,
+            }
+
+        self.session.commit()
+        return {
+            "won": won,
+            "roll": round(roll, 6),
+            "win_chance": round(win_chance, 6),
+            "multiplier": round(multiplier, 4),
+            "stake": stake,
+            "trade_up": True,
+            "staked_from": staked_from,
+            "new_winning": new_winning,
+            "reward": {
+                "id": str(target.id), "item_key": target.item_key, "display_name": target.display_name,
+                "image_url": target.image_url, "vc_value": int(target.vc_value),
+                "amount": int(target.amount or 1), "tier": target.tier,
+            },
+            "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
+            "client_seed": client_seed,
+            "nonce": nonce,
+        }
+
     def sell_all(self, account: PlayerAccount) -> dict:
         rows = self.winnings(account.user_id)
         if not rows:
