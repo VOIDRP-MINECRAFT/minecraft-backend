@@ -98,6 +98,12 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix=settings.api_v1_prefix)
     app.include_router(rss_router)
+
+    # Self-hosted Figura backend (served on figura.void-rp.ru; nginx maps /api/* → /figura/*,
+    # /ws → /figura-ws). Mounted at app root, NOT under /api/v1.
+    from apps.api.app.api.routes.figura import router as figura_router, ws_router as figura_ws_router
+    app.include_router(figura_router)
+    app.include_router(figura_ws_router)
     return app
 
 
