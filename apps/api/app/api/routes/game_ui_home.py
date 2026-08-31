@@ -4,11 +4,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+import re
+from io import BytesIO
+
+import httpx
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from apps.api.app.core.rcon_client import send_rcon_command
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
@@ -18,7 +24,10 @@ from apps.api.app.models.nation_member import NationMember
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_skin import PlayerSkin
 from apps.api.app.models.player_stat_cache import PlayerStatCache
+from apps.api.app.models.user import User
 from apps.api.app.services.battlepass_service import BattlePassService
+from apps.api.app.services.player_skin_service import PlayerSkinService, PlayerSkinValidationError
+from apps.api.app.services.redis_cache_service import RedisCacheService
 
 router = APIRouter(prefix="/game-ui/home", tags=["game-ui", "home"])
 
@@ -313,3 +322,73 @@ def get_home(
         achievements=_compute_achievements(stats, nation_out is not None),
         onboarding=_compute_onboarding(stats, nation_out is not None, bp_out.level if bp_out else 0),
     )
+
+
+# ── instant skin change from the WebGUI main menu ────────────────────────────
+class SkinChangeResponse(BaseModel):
+    skin_url: str
+    model_variant: str
+    applied: bool
+
+
+@router.post("/skin", response_model=SkinChangeResponse)
+async def change_skin(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    file: UploadFile | None = File(default=None),
+    from_username: str | None = Form(default=None),
+    model_variant: str | None = Form(default=None),
+) -> SkinChangeResponse:
+    """Set the player's skin (uploaded PNG or copied from another Java username) and apply
+    it in-game instantly via SkinsRestorer."""
+    user = db.execute(select(User).where(User.id == player.user_id)).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Аккаунт не найден.")
+
+    upload: UploadFile
+    if file is not None:
+        upload = file
+    elif from_username and from_username.strip():
+        nick = from_username.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{1,16}", nick):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный ник Minecraft.")
+        raw = None
+        sources = [f"https://mc-heads.net/skin/{nick}", f"https://minotar.net/skin/{nick}"]
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True,
+                                     headers={"User-Agent": "VoidRP/1.0"}) as http:
+            for src in sources:
+                try:
+                    resp = await http.get(src)
+                    if resp.status_code == 200 and resp.content and resp.headers.get("content-type", "").startswith("image"):
+                        raw = resp.content
+                        break
+                except httpx.HTTPError:
+                    continue
+        if raw is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не удалось получить скин этого игрока. Проверь ник.")
+        upload = StarletteUploadFile(filename=f"{nick}.png", file=BytesIO(raw))
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Загрузите PNG или укажите ник.")
+
+    service = PlayerSkinService(session=db)
+    try:
+        skin = await service.save_for_user(current_user=user, upload=upload, model_variant=model_variant)
+    except PlayerSkinValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    nick = player.minecraft_nickname
+    # Bust the 20s player-skin cache so the mod's re-fetch sees the new skin immediately.
+    RedisCacheService().delete(f"player_skin:{player.minecraft_nickname_normalized}")
+
+    # Instant in-game apply: the auth-bridge mod re-fetches this player's skin from the
+    # backend and broadcasts it to every client (which swaps it live, no relog). Offline
+    # players get it on next join anyway.
+    applied = False
+    try:
+        send_rcon_command(f"voidrpskin refresh {nick}")
+        applied = True
+    except Exception:  # noqa: BLE001 — RCON is best-effort; the skin is saved regardless
+        applied = False
+
+    return SkinChangeResponse(skin_url=skin.original_url, model_variant=skin.model_variant, applied=applied)
