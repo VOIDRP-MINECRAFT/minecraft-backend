@@ -156,10 +156,17 @@ class TopBar(BaseModel):
 
 
 @router.get("/features")
-def get_features(server: Annotated[GameServer, Depends(resolve_server)]) -> dict:
+def get_features(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
     """Per-server feature toggles (game_servers.features) so the WebGUI can hide
-    disabled tabs. Absent/unknown key ⇒ enabled."""
-    return {"features": getattr(server, "features", None) or {}}
+    disabled tabs. Absent/unknown key ⇒ enabled. Also exposes is_admin for admin-only tabs."""
+    is_admin = bool(db.execute(
+        select(User.is_admin).where(User.id == player.user_id)
+    ).scalar_one_or_none())
+    return {"features": getattr(server, "features", None) or {}, "is_admin": is_admin}
 
 
 @router.get("/topbar", response_model=TopBar)
