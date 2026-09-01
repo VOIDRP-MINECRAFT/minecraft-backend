@@ -65,7 +65,25 @@ owns the compositor; equipping a slot recomposes + bumps the version → WS EVEN
 5. **Cosmetics:** author avatars (Blockbench → Figura .moon), backend compositor per slot, admin
    grant + (later) purchase with Void Coins, `/vcosmetic` command.
 
-## Status
-Spec captured (protocol reverse-engineered). Client source builds are gated by the architectury
-snapshot repo (fixable). Nothing implemented yet — next: infra decision (subdomain) + backend
-Figura router skeleton (auth/version/motd/limits testable via curl), then avatars + WS.
+## Status — LIVE (2026-09-01)
+- **Backend**: DONE + verified end-to-end through `https://figura.void-rp.ru` (nginx) — HTTP
+  (auth/version/motd/limits/getUser/getAvatar/upload/equip) **and WSS** (TOKEN→AUTH, SUB→EVENT,
+  equip pushes EVENT). `routes/figura.py` + `services/figura_ws.py` + models + migration
+  `20260901_0001`. nginx vhost `deploy/nginx/figura.void-rp.ru.conf` (installed).
+- **Client**: patched Figura built from the `1.21` branch (`Figura/`), jar in the launcher pack
+  (`figura-0.1.5+1.21.1-neoforge-mc.jar`, archived in `deploy/figura/`) + in the voidrp manifest.
+  Patches (local Figura commit 2bb2d5a): `AuthHandler` skips Mojang joinServer when the backend is
+  ours (`HttpAPI.isVoidRpBackend()` → contains `void-rp.ru`); `Configs.SERVER_IP` default
+  `figura.void-rp.ru`. Cert: `KeyStoreHelper` merges system CAs + bundled ISRG (Let's Encrypt) roots,
+  so our LE cert is trusted. Build gotcha: server reaches the internet only via privoxy — gradle
+  needs `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=8118`; pin `architectury-plugin 3.4.164` +
+  `loom 1.7.423`. Build: `Figura/ ./gradlew :neoforge:build -x test`.
+- CPM (`CustomPlayerModels` + `voidrp-cpm-companion`) still in the pack — remove once Figura
+  cosmetics are proven.
+
+## Next
+1. Verify a real client connects (relaunch → join → Figura "connected"; wardrobe upload round-trips
+   through our backend).
+2. Cosmetics: author avatar(s), `/vcosmetic give|equip <player> <cosmetic>` → backend stores the
+   avatar under the player + sets it equipped (WS EVENT → everyone sees it). Then slot compositor +
+   Void Coin purchase.
