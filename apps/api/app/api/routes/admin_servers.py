@@ -91,6 +91,21 @@ def create_server(
     if data.get("features") is None:
         data.pop("features", None)
 
+    # External / third-party server: a catalogue entry only (connect-by-IP + status ping).
+    # Skip all launcher/pack/runtime/rcon provisioning — it isn't ours to manage.
+    if data.get("is_external"):
+        for k in ("pack_root", "pack_base_url", "manifest_url", "runtime_seed_url",
+                  "runtime_manifest_url", "manifest_build_script", "data_dir", "log_path",
+                  "systemd_unit", "rcon_host", "rcon_password"):
+            data.pop(k, None)
+        server = GameServer(**data, game_auth_secret=secret)
+        if server.is_default:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Внешний сервер не может быть сервером по умолчанию.")
+        repo.add(server)
+        session.commit()
+        session.refresh(server)
+        return server
+
     # Auto-provision: fill any blank modpack/monitoring path field from the
     # slug+version convention, then create the on-disk folder skeleton. Explicit
     # values the admin typed are kept as-is; only blanks are filled.

@@ -57,6 +57,10 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # ``is_visible``, which hides the server from absolutely everyone — use this
     # one to soft-launch / test a server with the team before opening it up.
     staff_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # External / third-party server owned by someone else: shown in the catalogue as a
+    # connect-by-IP card with a live status ping, but NOT managed by our launcher/pack/
+    # game-sync (no modpack, no game_auth_secret usage, skipped by the manifest generator).
+    is_external: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # ── Connection / runtime ──────────────────────────────────────────────
     host: Mapped[str] = mapped_column(String(255), nullable=False)
