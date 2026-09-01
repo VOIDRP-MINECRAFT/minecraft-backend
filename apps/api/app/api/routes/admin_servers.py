@@ -91,20 +91,10 @@ def create_server(
     if data.get("features") is None:
         data.pop("features", None)
 
-    # External / third-party server: a catalogue entry only (connect-by-IP + status ping).
-    # Skip all launcher/pack/runtime/rcon provisioning — it isn't ours to manage.
-    if data.get("is_external"):
-        for k in ("pack_root", "pack_base_url", "manifest_url", "runtime_seed_url",
-                  "runtime_manifest_url", "manifest_build_script", "data_dir", "log_path",
-                  "systemd_unit", "rcon_host", "rcon_password"):
-            data.pop(k, None)
-        server = GameServer(**data, game_auth_secret=secret)
-        if server.is_default:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Внешний сервер не может быть сервером по умолчанию.")
-        repo.add(server)
-        session.commit()
-        session.refresh(server)
-        return server
+    # Partner (external) server: our client pack + launcher + RCON, but the game host is on
+    # someone else's machine — so it has no systemd service / data dir / log path on our side.
+    if data.get("is_external") and data.get("is_default"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Внешний сервер не может быть сервером по умолчанию.")
 
     # Auto-provision: fill any blank modpack/monitoring path field from the
     # slug+version convention, then create the on-disk folder skeleton. Explicit
@@ -134,6 +124,13 @@ def create_server(
             loader=data.get("loader"), neoforge_version=data.get("neoforge_version"),
             java_version=data.get("java_version"), port=data.get("port"),
         )
+
+    # Partner server: not our machine → no systemd unit / data dir / log path (our pack,
+    # launcher and RCON stay as-is). Clear any convention-filled local-ops paths.
+    if data.get("is_external"):
+        data["systemd_unit"] = None
+        data["data_dir"] = None
+        data["log_path"] = None
 
     try:
         server_provision.provision_dirs(data.get("pack_root"), data.get("data_dir"))
