@@ -1,9 +1,9 @@
-"""In-game WebGUI cosmetics (Figura avatars). Admin-only for now — the admin picks a
-cosmetic and wears it; later this becomes the player-facing wardrobe + Void Coin shop.
+"""In-game WebGUI cosmetics (Figura) — catalog, ownership, purchase with Void Coins, equip.
 
-A cosmetic is a Figura avatar owned by a fixed system UUID; "wearing" it sets the player's
-Figura equipped list to point at it, and the Figura backend WS pushes an EVENT so every
-client re-fetches and renders it. See docs/figura_backend_spec.md.
+Admin-only for now (the tab is hidden for non-admins). A cosmetic is a Figura avatar owned by
+a fixed system UUID; a catalog row (FiguraCosmetic) gives it a name/slot/price. Players buy a
+cosmetic → own it → equip it, which sets their Figura equipped list and pushes a WS EVENT so
+every client renders it. See docs/figura_backend_spec.md.
 """
 from __future__ import annotations
 
@@ -11,37 +11,50 @@ import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.routes.figura import _offline_uuid
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.figura import FiguraAvatar, FiguraEquipped
+from apps.api.app.models.figura_cosmetic import FiguraCosmetic, FiguraCosmeticOwned
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.user import User
 from apps.api.app.services.figura_ws import hub
 
 router = APIRouter(prefix="/game-ui/cosmetics", tags=["game-ui", "cosmetics"])
 
-COSMETIC_OWNER = "00000000-0000-0000-0000-0000000000c0"   # system owner for all cosmetics
+COSMETIC_OWNER = "00000000-0000-0000-0000-0000000000c0"
 
 
-def _require_admin(
+class Ctx:
+    def __init__(self, player: PlayerAccount, user: User) -> None:
+        self.player = player
+        self.user = user
+        self.uuid = _offline_uuid(player.minecraft_nickname)
+
+
+def _ctx(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-) -> tuple[PlayerAccount, str]:
+) -> Ctx:
     user = db.execute(select(User).where(User.id == player.user_id)).scalar_one_or_none()
-    if user is None or not user.is_admin:
+    if user is None or not user.is_admin:   # admin-only for now
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только для администратора.")
-    return player, _offline_uuid(player.minecraft_nickname)
+    return Ctx(player, user)
 
 
+# ── schemas ──
 class CosmeticOut(BaseModel):
-    id: str            # avatar_id under COSMETIC_OWNER
+    slug: str
     name: str
-    size_bytes: int
+    slot: str
+    price: int
+    enabled: bool
+    owned: bool
+    equipped: bool
 
 
 class MyAvatarOut(BaseModel):
@@ -51,122 +64,214 @@ class MyAvatarOut(BaseModel):
 
 class CosmeticsResponse(BaseModel):
     is_admin: bool = True
-    cosmetics: list[CosmeticOut]
+    void_coins: int
+    catalog: list[CosmeticOut]
     my_avatars: list[MyAvatarOut]
-    equipped: list[str]   # cosmetic ids currently worn by the caller
 
 
-def _equipped_ids(db: Session, owner_uuid: str) -> list[str]:
+def _equipped_slugs(db: Session, owner_uuid: str) -> set[str]:
     eq = db.execute(select(FiguraEquipped).where(FiguraEquipped.owner_uuid == owner_uuid)).scalar_one_or_none()
     if eq is None:
-        return []
-    return [e["id"] for e in (eq.equipped or []) if e.get("owner") == COSMETIC_OWNER]
+        return set()
+    return {e["id"] for e in (eq.equipped or []) if e.get("owner") == COSMETIC_OWNER}
 
 
 @router.get("", response_model=CosmeticsResponse)
 def list_cosmetics(
-    ctx: Annotated[tuple[PlayerAccount, str], Depends(_require_admin)],
+    ctx: Annotated[Ctx, Depends(_ctx)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> CosmeticsResponse:
-    _, my_uuid = ctx
-    cosmetics = db.execute(
-        select(FiguraAvatar).where(FiguraAvatar.owner_uuid == COSMETIC_OWNER, FiguraAvatar.is_cosmetic.is_(True))
-        .order_by(FiguraAvatar.avatar_id)
-    ).scalars().all()
+    catalog = db.execute(select(FiguraCosmetic).order_by(FiguraCosmetic.name)).scalars().all()
+    owned = {
+        r for (r,) in db.execute(
+            select(FiguraCosmeticOwned.cosmetic_slug).where(FiguraCosmeticOwned.user_id == ctx.player.user_id)
+        ).all()
+    }
+    equipped = _equipped_slugs(db, ctx.uuid)
     mine = db.execute(
-        select(FiguraAvatar).where(FiguraAvatar.owner_uuid == my_uuid).order_by(FiguraAvatar.updated_at.desc())
+        select(FiguraAvatar).where(FiguraAvatar.owner_uuid == ctx.uuid).order_by(FiguraAvatar.updated_at.desc())
     ).scalars().all()
     return CosmeticsResponse(
-        cosmetics=[CosmeticOut(id=c.avatar_id, name=c.avatar_id, size_bytes=int(c.size_bytes)) for c in cosmetics],
+        void_coins=int(ctx.player.void_coins or 0),
+        catalog=[
+            CosmeticOut(
+                slug=c.slug, name=c.name, slot=c.slot, price=int(c.price_void_coins), enabled=bool(c.enabled),
+                owned=(c.slug in owned), equipped=(c.slug in equipped),
+            )
+            for c in catalog
+        ],
         my_avatars=[MyAvatarOut(id=a.avatar_id, size_bytes=int(a.size_bytes)) for a in mine],
-        equipped=_equipped_ids(db, my_uuid),
     )
 
 
+# ── admin: build the catalog from uploaded Figura avatars ──
 class PromoteRequest(BaseModel):
     source_avatar_id: str
     name: str
+    slot: str = "full"
+    price: int = Field(default=0, ge=0)
 
 
 @router.post("/promote", response_model=CosmeticOut)
-def promote_to_cosmetic(
+def promote(
     req: PromoteRequest,
-    ctx: Annotated[tuple[PlayerAccount, str], Depends(_require_admin)],
+    ctx: Annotated[Ctx, Depends(_ctx)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> CosmeticOut:
-    """Turn one of the admin's own uploaded Figura avatars into a shared cosmetic."""
-    _, my_uuid = ctx
     src = db.execute(
-        select(FiguraAvatar).where(FiguraAvatar.owner_uuid == my_uuid, FiguraAvatar.avatar_id == req.source_avatar_id)
+        select(FiguraAvatar).where(FiguraAvatar.owner_uuid == ctx.uuid, FiguraAvatar.avatar_id == req.source_avatar_id)
     ).scalar_one_or_none()
     if src is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Аватар не найден. Сначала загрузи его в игре через Figura.")
-    slug = re.sub(r"[^A-Za-z0-9_\- ]", "", req.name).strip()[:48] or req.source_avatar_id
-    existing = db.execute(
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Аватар не найден. Загрузи его в игре через Figura.")
+    slug = re.sub(r"[^A-Za-z0-9_\-]", "-", req.name.strip().lower())[:48].strip("-") or req.source_avatar_id.lower()
+    # store the avatar blob under COSMETIC_OWNER
+    av = db.execute(
         select(FiguraAvatar).where(FiguraAvatar.owner_uuid == COSMETIC_OWNER, FiguraAvatar.avatar_id == slug)
     ).scalar_one_or_none()
-    if existing is None:
+    if av is None:
         db.add(FiguraAvatar(owner_uuid=COSMETIC_OWNER, avatar_id=slug, data=src.data,
                             sha256=src.sha256, size_bytes=src.size_bytes, is_cosmetic=True))
     else:
-        existing.data, existing.sha256, existing.size_bytes, existing.is_cosmetic = src.data, src.sha256, src.size_bytes, True
+        av.data, av.sha256, av.size_bytes, av.is_cosmetic = src.data, src.sha256, src.size_bytes, True
+    # catalog row
+    cat = db.execute(select(FiguraCosmetic).where(FiguraCosmetic.slug == slug)).scalar_one_or_none()
+    if cat is None:
+        cat = FiguraCosmetic(slug=slug, name=req.name.strip()[:64], slot=req.slot, price_void_coins=req.price, enabled=True)
+        db.add(cat)
+    else:
+        cat.name, cat.slot, cat.price_void_coins = req.name.strip()[:64], req.slot, req.price
     db.commit()
-    return CosmeticOut(id=slug, name=slug, size_bytes=int(src.size_bytes))
+    return CosmeticOut(slug=slug, name=cat.name, slot=cat.slot, price=int(cat.price_void_coins),
+                       enabled=True, owned=False, equipped=False)
 
 
-class EquipRequest(BaseModel):
-    cosmetic_id: str
+class PatchRequest(BaseModel):
+    name: str | None = None
+    slot: str | None = None
+    price: int | None = Field(default=None, ge=0)
+    enabled: bool | None = None
+
+
+@router.patch("/{slug}", response_model=CosmeticOut)
+def patch_cosmetic(
+    slug: str,
+    req: PatchRequest,
+    ctx: Annotated[Ctx, Depends(_ctx)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> CosmeticOut:
+    cat = db.execute(select(FiguraCosmetic).where(FiguraCosmetic.slug == slug)).scalar_one_or_none()
+    if cat is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Косметика не найдена.")
+    if req.name is not None:
+        cat.name = req.name.strip()[:64]
+    if req.slot is not None:
+        cat.slot = req.slot
+    if req.price is not None:
+        cat.price_void_coins = req.price
+    if req.enabled is not None:
+        cat.enabled = req.enabled
+    db.commit()
+    return CosmeticOut(slug=cat.slug, name=cat.name, slot=cat.slot, price=int(cat.price_void_coins),
+                       enabled=bool(cat.enabled), owned=False, equipped=False)
+
+
+@router.delete("/{slug}")
+def delete_cosmetic(
+    slug: str,
+    ctx: Annotated[Ctx, Depends(_ctx)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    cat = db.execute(select(FiguraCosmetic).where(FiguraCosmetic.slug == slug)).scalar_one_or_none()
+    if cat is not None:
+        db.delete(cat)
+    av = db.execute(
+        select(FiguraAvatar).where(FiguraAvatar.owner_uuid == COSMETIC_OWNER, FiguraAvatar.avatar_id == slug)
+    ).scalar_one_or_none()
+    if av is not None:
+        db.delete(av)
+    db.execute(FiguraCosmeticOwned.__table__.delete().where(FiguraCosmeticOwned.cosmetic_slug == slug))
+    db.commit()
+    return {"ok": True}
+
+
+# ── player: buy / equip (economy ready; still admin-gated for now) ──
+class SlugRequest(BaseModel):
+    slug: str
+
+
+@router.post("/buy")
+def buy_cosmetic(
+    req: SlugRequest,
+    ctx: Annotated[Ctx, Depends(_ctx)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    cat = db.execute(
+        select(FiguraCosmetic).where(FiguraCosmetic.slug == req.slug, FiguraCosmetic.enabled.is_(True))
+    ).scalar_one_or_none()
+    if cat is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Косметика не найдена.")
+    already = db.execute(
+        select(FiguraCosmeticOwned).where(
+            FiguraCosmeticOwned.user_id == ctx.player.user_id, FiguraCosmeticOwned.cosmetic_slug == req.slug
+        )
+    ).scalar_one_or_none()
+    if already is not None:
+        return {"ok": True, "already_owned": True, "new_void_coins": int(ctx.player.void_coins or 0)}
+    price = int(cat.price_void_coins)
+    new_balance = int(ctx.player.void_coins or 0)
+    if price > 0:
+        row = db.execute(
+            update(PlayerAccount)
+            .where(PlayerAccount.user_id == ctx.player.user_id, PlayerAccount.void_coins >= price)
+            .values(void_coins=PlayerAccount.void_coins - price)
+            .returning(PlayerAccount.void_coins)
+        ).first()
+        if row is None:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Недостаточно Void Coin — нужно {price}.")
+        new_balance = int(row[0])
+    db.add(FiguraCosmeticOwned(user_id=ctx.player.user_id, cosmetic_slug=req.slug))
+    db.commit()
+    return {"ok": True, "new_void_coins": new_balance}
 
 
 @router.post("/equip")
 async def equip_cosmetic(
-    req: EquipRequest,
-    ctx: Annotated[tuple[PlayerAccount, str], Depends(_require_admin)],
+    req: SlugRequest,
+    ctx: Annotated[Ctx, Depends(_ctx)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
-    _, my_uuid = ctx
-    cosmetic = db.execute(
-        select(FiguraAvatar).where(FiguraAvatar.owner_uuid == COSMETIC_OWNER, FiguraAvatar.avatar_id == req.cosmetic_id)
-    ).scalar_one_or_none()
-    if cosmetic is None:
+    cat = db.execute(select(FiguraCosmetic).where(FiguraCosmetic.slug == req.slug)).scalar_one_or_none()
+    if cat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Косметика не найдена.")
-    equipped = [{"owner": COSMETIC_OWNER, "id": req.cosmetic_id}]
-    row = db.execute(select(FiguraEquipped).where(FiguraEquipped.owner_uuid == my_uuid)).scalar_one_or_none()
+    owned = db.execute(
+        select(FiguraCosmeticOwned).where(
+            FiguraCosmeticOwned.user_id == ctx.player.user_id, FiguraCosmeticOwned.cosmetic_slug == req.slug
+        )
+    ).scalar_one_or_none()
+    if owned is None and not ctx.user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Косметика не куплена.")
+    equipped = [{"owner": COSMETIC_OWNER, "id": req.slug}]
+    row = db.execute(select(FiguraEquipped).where(FiguraEquipped.owner_uuid == ctx.uuid)).scalar_one_or_none()
     if row is None:
-        db.add(FiguraEquipped(owner_uuid=my_uuid, equipped=equipped, version=1))
+        db.add(FiguraEquipped(owner_uuid=ctx.uuid, equipped=equipped, version=1))
     else:
         row.equipped = equipped
         row.version = int(row.version) + 1
     db.commit()
-    await hub.notify_event(my_uuid)
-    return {"ok": True, "equipped": req.cosmetic_id}
+    await hub.notify_event(ctx.uuid)
+    return {"ok": True, "equipped": req.slug}
 
 
 @router.post("/unequip")
 async def unequip_cosmetic(
-    ctx: Annotated[tuple[PlayerAccount, str], Depends(_require_admin)],
+    ctx: Annotated[Ctx, Depends(_ctx)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
-    _, my_uuid = ctx
-    row = db.execute(select(FiguraEquipped).where(FiguraEquipped.owner_uuid == my_uuid)).scalar_one_or_none()
+    row = db.execute(select(FiguraEquipped).where(FiguraEquipped.owner_uuid == ctx.uuid)).scalar_one_or_none()
     if row is not None:
         row.equipped = []
         row.version = int(row.version) + 1
         db.commit()
-        await hub.notify_event(my_uuid)
-    return {"ok": True}
-
-
-@router.delete("/{cosmetic_id}")
-def delete_cosmetic(
-    cosmetic_id: str,
-    ctx: Annotated[tuple[PlayerAccount, str], Depends(_require_admin)],
-    db: Annotated[Session, Depends(get_db_session)],
-) -> dict:
-    c = db.execute(
-        select(FiguraAvatar).where(FiguraAvatar.owner_uuid == COSMETIC_OWNER, FiguraAvatar.avatar_id == cosmetic_id)
-    ).scalar_one_or_none()
-    if c is not None:
-        db.delete(c)
-        db.commit()
+        await hub.notify_event(ctx.uuid)
     return {"ok": True}

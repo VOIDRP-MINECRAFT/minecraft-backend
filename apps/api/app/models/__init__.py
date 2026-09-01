@@ -29,6 +29,7 @@ from apps.api.app.models.void_upgrader_jackpot import VoidUpgraderJackpot
 from apps.api.app.models.void_upgrader_daily import VoidUpgraderDaily
 from apps.api.app.models.void_upgrader_seed import VoidUpgraderSeed
 from apps.api.app.models.figura import FiguraSession, FiguraAvatar, FiguraEquipped
+from apps.api.app.models.figura_cosmetic import FiguraCosmetic, FiguraCosmeticOwned
 from apps.api.app.models.player_weekly_challenges import PlayerWeeklyChallenges
 from apps.api.app.models.player_game_settings import PlayerGameSettings
 from apps.api.app.models.player_follow import PlayerFollow
@@ -101,6 +102,8 @@ __all__ = [
     "FiguraSession",
     "FiguraAvatar",
     "FiguraEquipped",
+    "FiguraCosmetic",
+    "FiguraCosmeticOwned",
     "PlayerWeeklyChallenges",
     "PlayerGameSettings",
     "PlayerFollow",
