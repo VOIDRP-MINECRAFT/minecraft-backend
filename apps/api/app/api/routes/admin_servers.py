@@ -125,12 +125,16 @@ def create_server(
             java_version=data.get("java_version"), port=data.get("port"),
         )
 
-    # Partner server: not our machine → no systemd unit / data dir / log path (our pack,
-    # launcher and RCON stay as-is). Clear any convention-filled local-ops paths.
+    # Partner server: not our machine → no systemd service. Keep whatever the admin set for
+    # log_path / data_dir (a partner may expose latest.log by URL); only drop an auto-filled
+    # local systemd unit / local convention paths the admin didn't type.
     if data.get("is_external"):
         data["systemd_unit"] = None
-        data["data_dir"] = None
-        data["log_path"] = None
+        payload_data = payload.model_dump()
+        if not payload_data.get("data_dir"):
+            data["data_dir"] = None
+        if not payload_data.get("log_path"):
+            data["log_path"] = None
 
     try:
         server_provision.provision_dirs(data.get("pack_root"), data.get("data_dir"))

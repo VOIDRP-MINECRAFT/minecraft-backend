@@ -587,8 +587,33 @@ def strip_color_codes(text: str) -> str:
 
 
 # ── Log tail ────────────────────────────────────────────────────────────────
+def _tail_log_url(url: str, lines: int, max_bytes: int) -> list[str]:
+    """Tail a log served over HTTP(S) — used by partner (external) servers that expose
+    their latest.log by URL. Requests the byte tail via Range; falls back to a bounded
+    stream. Honours the box's outbound proxy (httpx trust_env)."""
+    import httpx
+
+    try:
+        with httpx.Client(timeout=8.0, trust_env=True, follow_redirects=True) as client:
+            with client.stream("GET", url, headers={"Range": f"bytes=-{max_bytes}"}) as resp:
+                if resp.status_code not in (200, 206):
+                    return []
+                data = b""
+                for chunk in resp.iter_bytes():
+                    data += chunk
+                    if len(data) > max_bytes:
+                        data = data[-max_bytes:]   # keep only the tail in memory
+    except Exception:  # noqa: BLE001 — network/log fetch is best-effort
+        return []
+    text = data.decode("utf-8", errors="replace")
+    return text.splitlines()[-lines:]
+
+
 def tail_log(path: str, lines: int = 200, max_bytes: int = 512 * 1024) -> list[str]:
-    """Return the last ``lines`` lines of a log file, reading only the tail."""
+    """Return the last ``lines`` lines of a log — a local file, or an HTTP(S) URL
+    (partner servers expose latest.log by link)."""
+    if path and (path.startswith("http://") or path.startswith("https://")):
+        return _tail_log_url(path, lines, max_bytes)
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as fh:
