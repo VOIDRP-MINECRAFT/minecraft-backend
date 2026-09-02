@@ -77,10 +77,16 @@ def apply_mods(
     admin: Annotated[User, Depends(get_current_staff_user)],
     payload: ApplyRequest,
 ) -> dict:
+    external = getattr(server, "is_external", False)
+    selections = []
+    for s in payload.selections:
+        d = s.model_dump()
+        if external:
+            d["on_server"] = False   # partner server: no server-side mods (not our machine)
+        selections.append(d)
     try:
         result = mod_ops.apply_staged(
-            session, server, payload.token,
-            [s.model_dump() for s in payload.selections],
+            session, server, payload.token, selections,
             updated_by=admin.site_login,
         )
         session.commit()
@@ -133,8 +139,11 @@ def set_targets(
     server: Annotated[GameServer, Depends(resolve_server)],
     payload: TargetsRequest,
 ) -> dict:
+    # Partner (external) server: its mods folder is on someone else's machine — never place
+    # a mod server-side there. Keep only the client-pack target.
+    on_server = payload.on_server and not getattr(server, "is_external", False)
     try:
-        return mod_ops.set_targets(server, filename, payload.on_client, payload.on_server)
+        return mod_ops.set_targets(server, filename, payload.on_client, on_server)
     except mod_ops.ModOpsError as exc:
         raise _fail(exc)
 
