@@ -522,7 +522,27 @@ _DIM_RE = re.compile(r"([a-z0-9_.-]+:[a-z0-9_./-]+)")
 _OVERALL_RE = re.compile(r"overall|в целом|итог", re.IGNORECASE)
 
 
+def _folia_region_tps(raw: str, label: str) -> float | None:
+    """One Folia 'Server Health Report' region-TPS value (comma or dot decimals)."""
+    m = re.search(rf"{label}\s*:?\s*(\d+[.,]\d+|\d+)", raw, re.IGNORECASE)
+    return float(m.group(1).replace(",", ".")) if m else None
+
+
 def _parse_tps(raw: str) -> dict | None:
+    # Folia: a regionised "Server Health Report" (no single server TPS) — headline the
+    # Median Region TPS, keep lowest/highest for detail. Comes before the generic checks
+    # because the report contains the substring "TPS" (Region TPS) which would misparse.
+    if "Server Health Report" in raw or "Region TPS" in raw:
+        median = _folia_region_tps(raw, "Median Region TPS")
+        low = _folia_region_tps(raw, "Lowest Region TPS")
+        high = _folia_region_tps(raw, "Highest Region TPS")
+        headline = median if median is not None else (low if low is not None else high)
+        if headline is not None:
+            return {
+                "tps": round(min(headline, 20.0), 1), "mspt": None,
+                "windows": None, "dimensions": None, "source": "folia",
+                "regions": {"lowest": low, "median": median, "highest": high},
+            }
     # Paper/Purpur: "TPS from last 5s, 1m, 5m, 15m: 20.0, 19.2, ..."
     if "TPS from last" in raw:
         nums = _floats(raw.split(":", 1)[-1])
