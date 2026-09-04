@@ -92,11 +92,38 @@ def motd() -> PlainTextResponse:
     return PlainTextResponse('{"text":"VoidRP Figura","color":"aqua"}')
 
 
+def _wardrobe_allowed(db: Session, nickname: str | None) -> bool:
+    """Whether this player may open the Figura mod menu (upload/wardrobe).
+
+    Gated by the `figura.wardrobe` permission on the linked site account (full admins bypass).
+    Unknown/unlinked nicks → not allowed. The patched client reads this from `/limits`.
+    """
+    if not nickname:
+        return False
+    from apps.api.app.core.permissions import resolve_user_permissions
+    from apps.api.app.models.player_account import PlayerAccount
+    from apps.api.app.models.user import User
+
+    acc = db.execute(
+        select(PlayerAccount).where(PlayerAccount.minecraft_nickname_normalized == nickname.lower())
+    ).scalar_one_or_none()
+    if acc is None:
+        return False
+    user = db.execute(select(User).where(User.id == acc.user_id)).scalar_one_or_none()
+    return "figura.wardrobe" in resolve_user_permissions(user)
+
+
 @router.get("/limits")
-def limits() -> JSONResponse:
+def limits(
+    db: Annotated[Session, Depends(get_db_session)],
+    token: Annotated[str | None, Header(alias="token")] = None,
+) -> JSONResponse:
+    sess = _session_for_token(db, token)
+    wardrobe = _wardrobe_allowed(db, sess.minecraft_nickname if sess else None)
     return JSONResponse({
         "rate": {"upload": 1, "download": 50},
         "limits": {"maxAvatarSize": MAX_AVATAR_BYTES, "maxAvatars": 10, "allowedBadges": {"pride": [], "special": []}},
+        "voidrpWardrobe": wardrobe,
     })
 
 

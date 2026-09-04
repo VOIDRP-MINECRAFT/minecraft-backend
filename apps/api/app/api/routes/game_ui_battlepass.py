@@ -134,6 +134,91 @@ def get_quests(
     return BpQuests(**data)
 
 
+# ── plugin fetches the active season config (dates / level cap / name) ──
+class BpSeasonResponse(BaseModel):
+    season_key: str
+    name: str
+    start_date: str
+    end_date: str
+    max_level: int
+
+
+@plugin_router.get("/season", response_model=BpSeasonResponse)
+def get_active_season_for_plugin(
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> BpSeasonResponse:
+    """The plugin fetches its active season so dates/level-cap/name are backend-managed.
+    404 → the plugin keeps its config.yml values."""
+    from apps.api.app.models.battlepass_season import BattlePassSeason
+
+    s = db.execute(
+        select(BattlePassSeason).where(
+            BattlePassSeason.server_id == server.id,
+            BattlePassSeason.is_active.is_(True),
+        )
+    ).scalar_one_or_none()
+    if s is None:
+        raise HTTPException(status_code=404, detail="no active season")
+    return BpSeasonResponse(
+        season_key=s.season_key, name=s.name,
+        start_date=s.start_date.isoformat(), end_date=s.end_date.isoformat(),
+        max_level=s.max_level,
+    )
+
+
+# ── plugin fetches its reward definitions (admin-edited, per season) ──
+class BpRewardDef(BaseModel):
+    type: str
+    displayName: str | None = None
+    command: str | None = None
+    material: str | None = None
+    count: int | None = None
+    amount: float | None = None
+    icon: str | None = None
+
+
+class BpRewardsResponse(BaseModel):
+    season: str
+    free: dict[int, BpRewardDef] = {}
+    premium: dict[int, BpRewardDef] = {}
+
+
+@plugin_router.get("/rewards", response_model=BpRewardsResponse)
+def get_rewards_for_plugin(
+    season: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> BpRewardsResponse:
+    """The battle-pass plugin fetches the admin-edited reward table for a season.
+
+    Returns rewards.yml-compatible entries so SeasonRewards can parse them directly,
+    falling back to its bundled rewards.yml if this endpoint is unreachable.
+    """
+    from apps.api.app.models.battlepass_reward import BattlePassReward
+
+    rows = db.execute(
+        select(BattlePassReward).where(
+            BattlePassReward.server_id == server.id,
+            BattlePassReward.season == season,
+        )
+    ).scalars().all()
+
+    out = BpRewardsResponse(season=season)
+    for r in rows:
+        d = BpRewardDef(
+            type=r.reward_type.upper(),
+            displayName=r.display_name,
+            command=r.command,
+            material=r.material,
+            count=r.count,
+            amount=(float(r.amount) if r.amount is not None else None),
+            icon=r.icon,
+        )
+        (out.free if r.track == "free" else out.premium)[r.level] = d
+    return out
+
+
 def _service(
     db: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],

@@ -17,6 +17,7 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "donate.view", "label": "Донаты (платежи, выручка)", "sensitive": True},
             {"key": "battlepass.view", "label": "Battle Pass (просмотр)", "sensitive": True},
             {"key": "battlepass.manage", "label": "Battle Pass: выдавать/снимать премиум", "sensitive": True},
+            {"key": "battlepass.rewards.manage", "label": "Battle Pass: править награды и сезоны", "sensitive": True},
         ],
     },
     {
@@ -100,6 +101,13 @@ PERMISSION_CATALOG: list[dict] = [
         "permissions": [
             {"key": "upgrader.view", "label": "Апгрейдер: пул наград (просмотр)"},
             {"key": "upgrader.manage", "label": "Апгрейдер: править награды/настройки", "sensitive": True},
+        ],
+    },
+    {
+        "group": "Косметика (Figura)",
+        "permissions": [
+            {"key": "figura.wardrobe", "label": "Figura: открывать меню мода (гардероб/загрузка)", "sensitive": True},
+            {"key": "figura.cosmetics.manage", "label": "Figura: загружать модели и выдавать косметику", "sensitive": True},
         ],
     },
 ]

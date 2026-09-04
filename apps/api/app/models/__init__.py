@@ -1,5 +1,7 @@
 from apps.api.app.models.alliance import Alliance, AllianceMember, AllianceProposal, AllianceVote
 from apps.api.app.models.battlepass import BattlePassPremium
+from apps.api.app.models.battlepass_reward import BattlePassReward
+from apps.api.app.models.battlepass_season import BattlePassSeason
 from apps.api.app.models.bounty import Bounty
 from apps.api.app.models.claim import Claim, ClaimTrusted
 from apps.api.app.models.kill_event import KillEvent
@@ -104,6 +106,8 @@ __all__ = [
     "FiguraEquipped",
     "FiguraCosmetic",
     "FiguraCosmeticOwned",
+    "BattlePassReward",
+    "BattlePassSeason",
     "PlayerWeeklyChallenges",
     "PlayerGameSettings",
     "PlayerFollow",
