@@ -7,6 +7,7 @@ consume this catalogue. A cosmetic's blob is stored under the fixed system UUID 
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import re
 from io import BytesIO
@@ -40,6 +41,39 @@ router = APIRouter(
 COSMETIC_OWNER = "00000000-0000-0000-0000-0000000000c0"
 SLOTS = {"full", "head", "body", "wings", "accessory"}
 MAX_MODEL_BYTES = 2 * 1024 * 1024
+
+
+def _validate_figura_blob(data: bytes) -> None:
+    """Reject anything that isn't a real Figura avatar (gzip-compressed NBT).
+
+    Figura exports a gzip of an NBT compound whose root (0x0A) carries a `models` child.
+    A .zip/.tar.gz of the source folder passes the gzip magic but is NOT this, so check the
+    decompressed NBT head — that's what caught the early tar.gz upload.
+    """
+    if len(data) < 8 or data[:2] != b"\x1f\x8b":
+        raise HTTPException(status_code=400, detail="Не похоже на аватар Figura (ожидается gzip-файл из Figura).")
+    try:
+        inner = gzip.decompress(data)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="Файл не распаковывается (повреждённый gzip).")
+    if not inner or inner[0] != 0x0A or b"models" not in inner[:512]:
+        raise HTTPException(status_code=400,
+                            detail="Это не аватар Figura. Нужен экспорт модели из Figura, а не архив папки (.zip/.tar.gz).")
+
+
+def _delete_media(url: str | None) -> None:
+    """Best-effort removal of a media file we own (e.g. a replaced/removed preview)."""
+    if not url:
+        return
+    try:
+        base = get_settings().media_public_base_url.rstrip("/")
+        if url.startswith(base):
+            rel = url[len(base):].lstrip("/")
+            fp = Path(get_settings().media_storage_root) / rel
+            if fp.is_file() and "cosmetics/" in fp.as_posix():
+                fp.unlink()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _slugify(name: str) -> str:
@@ -104,6 +138,7 @@ def list_cosmetics(db: Annotated[Session, Depends(get_db_session)]) -> list[Cosm
 @router.post("/upload", response_model=CosmeticOut, status_code=status.HTTP_201_CREATED)
 async def upload_cosmetic(
     db: Annotated[Session, Depends(get_db_session)],
+    admin: Annotated[User, Depends(get_current_staff_user)],
     file: UploadFile = File(...),
     name: str = Form(...),
     slot: str = Form("full"),
@@ -114,8 +149,7 @@ async def upload_cosmetic(
         raise HTTPException(status_code=400, detail="Пустой файл.")
     if len(data) > MAX_MODEL_BYTES:
         raise HTTPException(status_code=400, detail=f"Файл больше {MAX_MODEL_BYTES // (1024*1024)} МБ.")
-    if data[:2] != b"\x1f\x8b":
-        raise HTTPException(status_code=400, detail="Не похоже на аватар Figura (ожидается gzip). Экспортируй модель из Figura.")
+    _validate_figura_blob(data)
     sha = hashlib.sha256(data).hexdigest()
     slug = _slugify(name) or f"cosmetic-{sha[:8]}"   # Cyrillic-only names → hash-based slug
     if slot not in SLOTS:
@@ -134,6 +168,8 @@ async def upload_cosmetic(
         db.add(cat)
     else:
         cat.name, cat.slot, cat.price_void_coins = name.strip()[:64], slot, max(0, int(price))
+    record_audit(db, category="cosmetics", action="upload", actor=admin,
+                 target_type="cosmetic", target_id=slug, target_label=cat.name, commit=False)
     db.commit()
     return _out(cat, len(data), 0)
 
@@ -167,7 +203,11 @@ class PromoteRequest(BaseModel):
 
 
 @router.post("/promote", response_model=CosmeticOut, status_code=status.HTTP_201_CREATED)
-def promote_cosmetic(req: PromoteRequest, db: Annotated[Session, Depends(get_db_session)]) -> CosmeticOut:
+def promote_cosmetic(
+    req: PromoteRequest,
+    db: Annotated[Session, Depends(get_db_session)],
+    admin: Annotated[User, Depends(get_current_staff_user)],
+) -> CosmeticOut:
     src = db.execute(
         select(FiguraAvatar).where(
             FiguraAvatar.owner_uuid == _offline_uuid(req.nickname.strip()),
@@ -176,6 +216,7 @@ def promote_cosmetic(req: PromoteRequest, db: Annotated[Session, Depends(get_db_
     ).scalar_one_or_none()
     if src is None:
         raise HTTPException(status_code=404, detail="Аватар не найден. Загрузи модель в Figura в игре.")
+    _validate_figura_blob(bytes(src.data))
     slug = _slugify(req.name) or f"cosmetic-{src.sha256[:8]}"
     slot = req.slot if req.slot in SLOTS else "full"
     av = db.execute(
@@ -192,6 +233,8 @@ def promote_cosmetic(req: PromoteRequest, db: Annotated[Session, Depends(get_db_
         db.add(cat)
     else:
         cat.name, cat.slot, cat.price_void_coins = req.name.strip()[:64], slot, max(0, int(req.price))
+    record_audit(db, category="cosmetics", action="promote", actor=admin,
+                 target_type="cosmetic", target_id=slug, target_label=cat.name, commit=False)
     db.commit()
     return _out(cat, int(src.size_bytes), 0)
 
@@ -244,6 +287,7 @@ def delete_cosmetic(
 ) -> None:
     cat = db.execute(select(FiguraCosmetic).where(FiguraCosmetic.slug == slug)).scalar_one_or_none()
     name = cat.name if cat else slug
+    preview = cat.preview_url if cat else None
     if cat is not None:
         db.delete(cat)
     av = db.execute(
@@ -253,6 +297,7 @@ def delete_cosmetic(
         db.delete(av)
     db.execute(FiguraCosmeticOwned.__table__.delete().where(FiguraCosmeticOwned.cosmetic_slug == slug))
     db.commit()
+    _delete_media(preview)   # remove the orphaned preview image file
     record_audit(db, category="cosmetics", action="delete", actor=admin,
                  target_type="cosmetic", target_id=slug, target_label=name)
 
@@ -332,8 +377,10 @@ async def upload_preview(
     abs_dir = Path(settings.media_storage_root) / rel_dir
     abs_dir.mkdir(parents=True, exist_ok=True)
     working.save(abs_dir / filename, format="WEBP", quality=90, method=4)
+    old_preview = cat.preview_url
     cat.preview_url = f"{settings.media_public_base_url}/{(rel_dir / filename).as_posix()}"
     db.commit()
+    _delete_media(old_preview)   # drop the replaced preview so files don't pile up
 
     size = db.execute(
         select(FiguraAvatar.size_bytes).where(FiguraAvatar.owner_uuid == COSMETIC_OWNER, FiguraAvatar.avatar_id == slug)
