@@ -11,6 +11,7 @@ config yields ``None`` fields rather than raising, so the panel degrades to
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -22,6 +23,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import psutil
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from apps.api.app.models.game_server import GameServer
@@ -318,16 +321,49 @@ class PowerNotConfigured(PowerError):
     pass
 
 
-def power_action(server: "GameServer", action: str, timeout: float = 15.0) -> str:
+# Сообщение игрокам перед остановкой/перезапуском из панели. Пишется в чат по
+# RCON, следом идёт save-all — чтобы дисковый сброс успел пройти до systemctl.
+_SHUTDOWN_WARN_TEMPLATE = "§e§lРестарт сервера через {seconds} секунд — применяем обновления."
+_SHUTDOWN_STOP_TEMPLATE = "§c§lСервер останавливается через {seconds} секунд."
+_MAX_WARN_SECONDS = 60
+
+
+def warn_and_save(server: "GameServer", action: str, warn_seconds: int) -> bool:
+    """Предупреждает игроков в чате и сохраняет мир перед выключением.
+
+    Полностью best-effort: если RCON не настроен или сервер уже не отвечает,
+    возвращает False и НЕ мешает выполнить systemctl — иначе упавший сервер
+    было бы невозможно перезапустить из панели.
+    """
+    if warn_seconds <= 0:
+        return False
+    template = _SHUTDOWN_STOP_TEMPLATE if action == "stop" else _SHUTDOWN_WARN_TEMPLATE
+    try:
+        rcon_command(server, f"say {template.format(seconds=warn_seconds)}")
+        rcon_command(server, "save-all")
+    except Exception as exc:  # noqa: BLE001
+        logger.info("power_action: не удалось предупредить игроков (%s) — продолжаем", exc)
+        return False
+    time.sleep(min(warn_seconds, _MAX_WARN_SECONDS))
+    return True
+
+
+def power_action(server: "GameServer", action: str, timeout: float = 15.0,
+                 warn_seconds: int = 0) -> str:
     """Run ``systemctl <action> <unit>`` for the server's unit. Returns any
     stdout on success; raises ``PowerNotConfigured`` if the server has no unit
     and ``PowerError`` on any systemctl failure (incl. "authentication required"
-    when the polkit/sudoers grant is missing)."""
+    when the polkit/sudoers grant is missing).
+
+    ``warn_seconds`` > 0 для stop/restart сначала пишет предупреждение в чат и
+    сохраняет мир, затем ждёт указанное время."""
     if action not in _POWER_ACTIONS:
         raise PowerError(f"Неизвестное действие: {action}")
     unit = server.systemd_unit
     if not unit:
         raise PowerNotConfigured("systemd-юнит не настроен для этого сервера")
+    if action in ("stop", "restart"):
+        warn_and_save(server, action, warn_seconds)
     args = [_SYSTEMCTL, action, "--no-block", unit]
     try:
         res = subprocess.run(args, capture_output=True, text=True, timeout=timeout)

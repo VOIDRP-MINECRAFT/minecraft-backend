@@ -12,24 +12,64 @@ from apps.api.app.models.base import (
     UuidPrimaryKeyMixin,
 )
 
-PROGRESSION_TIERS = [
-    "create_age",
-    "mekanism_age",
-    "ae2_age",
-    "quantum_age",   # quantum_circuit крафтится из AE2-компонентов — до реактора
-    "reactor_age",   # reactor_heart требует quantum_circuit как ингредиент
-    "draconic_age",
-    "endgame",
+# Эпохи прогрессии. Список ОБЯЗАН совпадать с секцией `epochs.list` в
+# config.yml плагина voidrp_gamesync_plugin: сервис отвергает незнакомый tier
+# (UnknownTierError), поэтому переименование эпохи только в плагине приводит к
+# тихой потере всех анлоков — в логе плагина будет «Бэкенд не принял <ключ>».
+#
+# Порядок = порядок общей линии; ветки идут после неё и на «текущую эпоху»
+# игрока не влияют, потому что не обязательны и не upgrade-ят друг друга.
+MAIN_PROGRESSION_TIERS = [
+    "mechanisms_age",
+    "steel_age",
+    "energy_age",
+    "automation_age",
+    "industry_age",
+    "quantum_age",
+    "singularity_age",
+    "transcendence",
 ]
 
+BRANCH_PROGRESSION_TIERS = [
+    "magic_path",
+    "arcane_path",
+    "hunter_path",
+    "starlight_path",
+    "draconic_path",
+]
+
+# Эпохи до 2026-09-08 удалены вместе с их записями: строк с ними в
+# player_progressions не осталось (проверено), а держать мёртвые ключи в списке
+# значит показывать их на странице рейтинга.
+PROGRESSION_TIERS = MAIN_PROGRESSION_TIERS + BRANCH_PROGRESSION_TIERS
+
+TIER_BRANCHES: dict[str, str] = {
+    **{t: "main" for t in MAIN_PROGRESSION_TIERS},
+    "magic_path": "magic",
+    "arcane_path": "magic",
+    "hunter_path": "exploration",
+    "starlight_path": "exploration",
+    "draconic_path": "tech",
+}
+
 TIER_LABELS: dict[str, str] = {
-    "create_age": "Эпоха механизмов",
-    "mekanism_age": "Эпоха стали",
-    "ae2_age": "Эпоха автоматизации",
-    "reactor_age": "Эпоха реакторов",
-    "draconic_age": "Эпоха дракона",
+    # Общая линия
+    "mechanisms_age": "Эпоха механизмов",
+    "steel_age": "Эпоха стали",
+    "energy_age": "Эпоха энергии",
+    "automation_age": "Эпоха автоматизации",
+    "industry_age": "Индустриальная эпоха",
     "quantum_age": "Квантовая эпоха",
-    "endgame": "Эндгейм",
+    "singularity_age": "Эпоха сингулярности",
+    "transcendence": "Трансцендентство",
+    # Ветки
+    "magic_path": "Путь магии",
+    "arcane_path": "Тайные искусства",
+    "hunter_path": "Путь охотника",
+    "starlight_path": "Вечный Звездосвет",
+    # Draconic Evolution — про дракониум и Стража Хаоса, драконов как таковых
+    # в паке нет (Ice and Fire не установлен), поэтому название без «драконов».
+    "draconic_path": "Дракониевая энергетика",
 }
 
 

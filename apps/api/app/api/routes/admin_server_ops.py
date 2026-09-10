@@ -95,6 +95,10 @@ def moderate_player(
 # ── Power control (start / restart / stop the systemd unit) ──────────────────
 class PowerRequest(BaseModel):
     action: str = Field(pattern=r"^(start|restart|stop)$")
+    # Секунды предупреждения в игровом чате перед stop/restart. 0 — выключить.
+    # Запрос на это время подвисает намеренно: панель должна показать результат
+    # уже после того, как игроки предупреждены и мир сохранён.
+    warn_seconds: int = Field(default=10, ge=0, le=60)
 
 
 @router.post("/power", dependencies=[Depends(require_permission("monitoring.restart"))])
@@ -108,14 +112,17 @@ def power_control(
     monitoring.restart. Задача ставится в очередь (--no-block) — панель ловит
     смену состояния службы через опрос метрик."""
     try:
-        output = server_ops.power_action(server, payload.action)
+        output = server_ops.power_action(server, payload.action,
+                                         warn_seconds=payload.warn_seconds)
     except server_ops.PowerNotConfigured as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except server_ops.PowerError as exc:
         raise HTTPException(status_code=502, detail=f"Не удалось выполнить: {exc}")
     record_audit(session, actor=actor, category="monitoring", action=f"power_{payload.action}",
-                 target_type="server", target_id=server.slug, target_label=server.name, server_id=server.id)
-    return {"action": payload.action, "output": output or "ok"}
+                 target_type="server", target_id=server.slug, target_label=server.name, server_id=server.id,
+                 meta={"warn_seconds": payload.warn_seconds})
+    return {"action": payload.action, "output": output or "ok",
+            "warn_seconds": payload.warn_seconds}
 
 
 # ── RCON console ────────────────────────────────────────────────────────────
