@@ -11,11 +11,14 @@ config yields ``None`` fields rather than raising, so the panel degrades to
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import shutil
 import socket
+from datetime import datetime, timezone
+from pathlib import Path
 import struct
 import subprocess
 import time
@@ -754,3 +757,130 @@ def parse_chat(path: str, scan_lines: int = 4000, limit: int = 200) -> list[dict
             kind = "system"
         out.append({"time": time_s, "type": kind, "text": msg})
     return out[-limit:]
+
+
+# ── Watchdog (hang guard) on/off ────────────────────────────────────────────
+# The hang guard is a cron script on the host (scripts/hang_guard.sh) that
+# catches "process alive, tick dead" — a state neither systemd nor a plain
+# is-active check can see. It is toggled through a small state file inside the
+# server's own data dir, because the script and this API run on the same host
+# but share no other channel.
+#
+# The maintenance flag is reported alongside deliberately: it suppresses the
+# guard entirely, and a forgotten one is the classic way a watchdog ends up
+# "enabled" while doing nothing for weeks. Showing both in the panel means the
+# admin sees the real state, not the intended one.
+
+WATCHDOG_STATE_FILE = "voidrp-watchdog.json"
+MAINTENANCE_FLAG_FILE = "maintenance.flag"
+
+
+def _server_dir(server: "GameServer") -> Path | None:
+    # resolve_data_dir falls back to the unit's WorkingDirectory, which is how
+    # the main server resolves at all — its data_dir column is empty.
+    raw = resolve_data_dir(server)
+    return Path(raw) if raw else None
+
+
+def get_watchdog_state(server: "GameServer") -> dict:
+    directory = _server_dir(server)
+    if directory is None:
+        return {
+            "available": False,
+            "reason": "У сервера не задан каталог данных (data_dir)",
+        }
+
+    enabled = True
+    # The AI watchdog defaults to OFF on purpose: when it triggers it launches
+    # `claude --dangerously-skip-permissions` against the live server, i.e. an
+    # agent that may restart it and edit files without asking. That is a
+    # deliberate choice an admin makes, never a default someone inherits.
+    ai_enabled = False
+    updated_at = None
+    updated_by = None
+    state_path = directory / WATCHDOG_STATE_FILE
+    if state_path.is_file():
+        try:
+            data = json.loads(state_path.read_text(encoding="utf-8"))
+            enabled = bool(data.get("enabled", True))
+            ai_enabled = bool(data.get("ai_enabled", False))
+            updated_at = data.get("updated_at")
+            updated_by = data.get("updated_by")
+        except (OSError, ValueError):
+            # Unreadable state must not be reported as "on" — say so instead.
+            return {
+                "available": False,
+                "reason": f"Файл состояния повреждён: {state_path}",
+            }
+
+    flag_path = directory / MAINTENANCE_FLAG_FILE
+    maintenance = flag_path.is_file()
+    maintenance_days = None
+    if maintenance:
+        try:
+            age = time.time() - flag_path.stat().st_mtime
+            maintenance_days = int(age // 86400)
+        except OSError:
+            maintenance_days = None
+
+    return {
+        "available": True,
+        "enabled": enabled,
+        "ai_enabled": ai_enabled,
+        "updated_at": updated_at,
+        "updated_by": updated_by,
+        "maintenance": maintenance,
+        "maintenance_days": maintenance_days,
+        # Both guards skip while maintenance is on, whatever the toggles say.
+        "effective": enabled and not maintenance,
+        "ai_effective": ai_enabled and not maintenance,
+    }
+
+
+def set_watchdog_state(
+    server: "GameServer",
+    actor: str | None,
+    *,
+    enabled: bool | None = None,
+    ai_enabled: bool | None = None,
+) -> dict:
+    directory = _server_dir(server)
+    if directory is None or not directory.is_dir():
+        raise RuntimeError("У сервера не задан каталог данных (data_dir)")
+
+    # Merge over what is there: the two guards are toggled independently and
+    # writing one must not silently reset the other.
+    current = get_watchdog_state(server)
+    payload = {
+        "enabled": bool(current.get("enabled", True) if enabled is None else enabled),
+        "ai_enabled": bool(current.get("ai_enabled", False) if ai_enabled is None else ai_enabled),
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "updated_by": actor or "unknown",
+    }
+    path = directory / WATCHDOG_STATE_FILE
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)  # atomic: the cron script may read this at any moment
+    return get_watchdog_state(server)
+
+
+def set_maintenance_flag(server: "GameServer", enabled: bool, actor: str | None) -> dict:
+    """Create or remove the server's maintenance flag.
+
+    This is the real master switch: while the flag exists BOTH watchdogs skip
+    every check — the deterministic hang guard and the AI auto-recovery. That is
+    correct behaviour (an admin working on the server does not want automation
+    fighting them), but a forgotten flag silently disables all supervision, which
+    is exactly what happened here: one sat untouched for 36 days.
+    """
+    directory = _server_dir(server)
+    if directory is None or not directory.is_dir():
+        raise RuntimeError("У сервера не задан каталог данных (data_dir)")
+
+    path = directory / MAINTENANCE_FLAG_FILE
+    if enabled:
+        note = f"set from admin panel by {actor or 'unknown'} at {datetime.now(timezone.utc).isoformat(timespec='seconds')}\n"
+        path.write_text(note, encoding="utf-8")
+    else:
+        path.unlink(missing_ok=True)
+    return get_watchdog_state(server)

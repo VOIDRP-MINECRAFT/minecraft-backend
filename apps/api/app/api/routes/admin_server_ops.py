@@ -194,3 +194,60 @@ def get_chat(
         return {"path": None, "messages": [], "available": False}
     messages = server_ops.parse_chat(path, limit=limit)
     return {"path": path, "messages": messages, "available": True}
+
+
+# ── Watchdog (hang guard) ───────────────────────────────────────────────────
+class WatchdogToggle(BaseModel):
+    """Any subset of the three switches; omitted ones are left alone."""
+
+    enabled: bool | None = None          # детерминированный сторож зависаний
+    ai_enabled: bool | None = None       # ИИ-автовосстановление
+    maintenance: bool | None = None      # режим обслуживания — глушит оба
+
+
+@router.get("/watchdog")
+def get_watchdog(server: Annotated[GameServer, Depends(resolve_server)]) -> dict:
+    """State of the hang guard, plus whether maintenance mode is suppressing it.
+
+    Both are returned on purpose: a forgotten maintenance flag silently disables
+    the guard, and that is exactly how a watchdog ends up looking enabled while
+    doing nothing for weeks.
+    """
+    return server_ops.get_watchdog_state(server)
+
+
+@router.post("/watchdog", dependencies=[Depends(require_permission("monitoring.restart"))])
+def set_watchdog(
+    payload: WatchdogToggle,
+    server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
+) -> dict:
+    if payload.enabled is None and payload.ai_enabled is None and payload.maintenance is None:
+        raise HTTPException(status_code=400, detail="Не указано ни одного переключателя")
+
+    login = getattr(actor, "site_login", None)
+    try:
+        state = server_ops.get_watchdog_state(server)
+        if payload.enabled is not None or payload.ai_enabled is not None:
+            state = server_ops.set_watchdog_state(
+                server, login, enabled=payload.enabled, ai_enabled=payload.ai_enabled
+            )
+        if payload.maintenance is not None:
+            state = server_ops.set_maintenance_flag(server, payload.maintenance, login)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    record_audit(
+        session,
+        category="server_ops",
+        action="watchdog.toggle",
+        actor=actor,
+        target_type="server",
+        target_id=str(server.id),
+        target_label=server.slug,
+        server_id=server.id,
+        meta=payload.model_dump(exclude_none=True),
+    )
+    session.commit()
+    return state
