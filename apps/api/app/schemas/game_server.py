@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class TelegramTarget(BaseModel):
@@ -66,6 +66,12 @@ class GameServerAdmin(GameServerPublic):
     status_port: int | None = None
     easydonate_server_id: int | None = None
     news_channels: dict = Field(default_factory=dict)
+    # Resolved (defaults merged, clamped) — never the raw column, which may
+    # be partial. Reading the ORM object prefers the model's resolved property.
+    auth_settings: dict[str, int] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("resolved_auth_settings", "auth_settings"),
+    )
     game_auth_secret: str
 
     # Operations / monitoring
@@ -174,3 +180,29 @@ class GameServerUpdate(BaseModel):
     rcon_host: str | None = None
     rcon_port: int | None = Field(default=None, ge=1, le=65535)
     rcon_password: str | None = None
+
+
+class AuthSettingsUpdate(BaseModel):
+    """Admin edit of a server's login timeouts.
+
+    Every field is optional so the form can send only what changed; bounds
+    mirror ``AUTH_SETTINGS_BOUNDS`` on the model, which clamps again on read.
+    ``auth_grace_seconds = 0`` is the deliberate "unlimited login" mode.
+    """
+
+    play_ticket_expire_minutes: int | None = Field(default=None, ge=5, le=10080)
+    auth_grace_seconds: int | None = Field(default=None, ge=0, le=3600)
+    request_timeout_ms: int | None = Field(default=None, ge=1000, le=120000)
+    reconnect_grant_minutes: int | None = Field(default=None, ge=1, le=1440)
+
+
+class AuthSettingsAdmin(BaseModel):
+    """Login timeouts plus the metadata the admin form needs to render itself.
+
+    ``defaults`` and ``bounds`` travel with the values so the UI never hardcodes
+    limits that could drift from the model.
+    """
+
+    settings: dict[str, int]
+    defaults: dict[str, int]
+    bounds: dict[str, list[int]]

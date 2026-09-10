@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.core.security import generate_opaque_token, hash_opaque_token, utc_now
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.play_ticket import PlayTicket
 from apps.api.app.models.user import User
 from apps.api.app.utils.normalization import normalize_minecraft_nickname
@@ -54,6 +55,18 @@ class PlayTicketService:
         self.server_id = server_id
         self.settings = get_settings()
 
+    def _ticket_ttl_minutes(self) -> int:
+        """Ticket lifetime for this server, admin-editable and applied live.
+
+        Falls back to the ``.env`` value only if the server row is somehow gone,
+        so issuing a ticket never fails over a settings lookup.
+        """
+
+        server = self.session.get(GameServer, self.server_id)
+        if server is None:
+            return self.settings.play_ticket_expire_minutes
+        return server.resolved_auth_settings["play_ticket_expire_minutes"]
+
     def issue_for_user(
         self,
         *,
@@ -68,7 +81,7 @@ class PlayTicketService:
 
         raw_ticket = generate_opaque_token()
         now = utc_now()
-        expires_at = now + timedelta(minutes=self.settings.play_ticket_expire_minutes)
+        expires_at = now + timedelta(minutes=self._ticket_ttl_minutes())
 
         ticket = PlayTicket(
             server_id=self.server_id,

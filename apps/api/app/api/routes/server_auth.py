@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.user_messages import localize_player_access_error, translate_user_message
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_auth import require_game_auth_secret
+from apps.api.app.dependencies.server_auth import require_game_auth_secret, require_game_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_skin import PlayerSkin
 from apps.api.app.schemas.server_auth import (
+    AuthSettingsResponse,
     LegacyLoginRequest,
     LegacyLoginResponse,
     PlayerAccessRequest,
@@ -126,3 +128,19 @@ def player_skin(
     )
     cache.set_json(f"player_skin:{normalized}", payload.model_dump(mode="json"), ttl_seconds=20)
     return payload
+
+
+@router.get("/settings", response_model=AuthSettingsResponse)
+def get_auth_settings(
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> AuthSettingsResponse:
+    """Login timeouts for the calling server, resolved from its own row.
+
+    The auth-bridge mod polls this so an admin can loosen or tighten login
+    timeouts during an incident without touching youer.service or restarting
+    the server. Cheap and uncached on purpose: it is one indexed row read every
+    few seconds from a single caller, and staleness here is exactly what the
+    endpoint exists to avoid.
+    """
+
+    return AuthSettingsResponse(**server.resolved_auth_settings)

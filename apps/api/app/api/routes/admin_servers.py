@@ -14,9 +14,16 @@ from apps.api.app.config import get_settings
 from apps.api.app.core import server_provision
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import require_permission
-from apps.api.app.models.game_server import GameServer
+from apps.api.app.models.game_server import (
+    AUTH_SETTINGS_BOUNDS,
+    DEFAULT_AUTH_SETTINGS,
+    GameServer,
+    resolve_auth_settings,
+)
 from apps.api.app.repositories.game_server_repository import GameServerRepository
 from apps.api.app.schemas.game_server import (
+    AuthSettingsAdmin,
+    AuthSettingsUpdate,
     GameServerAdmin,
     GameServerCreate,
     GameServerUpdate,
@@ -182,6 +189,51 @@ def update_server(
     session.commit()
     session.refresh(server)
     return server
+
+
+@router.get("/{server_id}/auth-settings", response_model=AuthSettingsAdmin)
+def get_auth_settings(
+    server_id: UUID,
+    session: Annotated[Session, Depends(get_db_session)],
+) -> AuthSettingsAdmin:
+    """Current login timeouts for a server, with defaults merged in."""
+
+    repo = GameServerRepository(session)
+    server = _get_or_404(repo, server_id)
+    return AuthSettingsAdmin(
+        settings=server.resolved_auth_settings,
+        defaults=dict(DEFAULT_AUTH_SETTINGS),
+        bounds={key: list(value) for key, value in AUTH_SETTINGS_BOUNDS.items()},
+    )
+
+
+@router.put("/{server_id}/auth-settings", response_model=AuthSettingsAdmin)
+def update_auth_settings(
+    server_id: UUID,
+    payload: AuthSettingsUpdate,
+    session: Annotated[Session, Depends(get_db_session)],
+) -> AuthSettingsAdmin:
+    """Change login timeouts. Applied live — the auth-bridge mod polls them.
+
+    Stored merged over what is already there, so sending one field does not
+    silently reset the rest.
+    """
+
+    repo = GameServerRepository(session)
+    server = _get_or_404(repo, server_id)
+
+    merged = dict(server.resolved_auth_settings)
+    merged.update(payload.model_dump(exclude_unset=True, exclude_none=True))
+    # Re-assign (not mutate) so SQLAlchemy detects the JSONB change.
+    server.auth_settings = resolve_auth_settings(merged)
+
+    session.commit()
+    session.refresh(server)
+    return AuthSettingsAdmin(
+        settings=server.resolved_auth_settings,
+        defaults=dict(DEFAULT_AUTH_SETTINGS),
+        bounds={key: list(value) for key, value in AUTH_SETTINGS_BOUNDS.items()},
+    )
 
 
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)

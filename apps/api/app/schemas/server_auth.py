@@ -42,3 +42,16 @@ class PlayerSkinResponse(BaseModel):
     height: int | None = None
     sha256: str | None = None
     updated_at: str | None = None
+
+
+class AuthSettingsResponse(BaseModel):
+    """Login timeouts the auth-bridge mod polls and applies without a restart.
+
+    ``auth_grace_seconds = 0`` means unlimited — the mod must never kick a
+    player for not authenticating in time.
+    """
+
+    play_ticket_expire_minutes: int
+    auth_grace_seconds: int
+    request_timeout_ms: int
+    reconnect_grant_minutes: int

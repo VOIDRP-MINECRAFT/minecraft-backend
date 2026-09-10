@@ -34,6 +34,60 @@ def default_features() -> dict[str, bool]:
     return {key: True for key in SERVER_FEATURE_KEYS}
 
 
+# ── Authentication timeouts ────────────────────────────────────────────────
+# Everything a player's login depends on time-wise. These used to live in two
+# places nobody could touch without a deploy — the backend ``.env``
+# (play-ticket TTL) and JVM ``-Dvoidrp.auth.*`` flags in youer.service (the
+# auth-bridge mod's own timers) — which meant loosening a timeout during an
+# incident required editing files on the host and restarting the server.
+# They are stored per server so the admin panel can change them live; the
+# mod polls ``GET /server/auth/settings`` and applies the new values without
+# a restart.
+#
+# ``auth_grace_seconds = 0`` means "never kick for not authenticating" — the
+# unlimited-login mode used while crashes are being worked on.
+DEFAULT_AUTH_SETTINGS: dict[str, int] = {
+    "play_ticket_expire_minutes": 1440,
+    "auth_grace_seconds": 120,
+    "request_timeout_ms": 60000,
+    "reconnect_grant_minutes": 30,
+}
+
+# Bounds are enforced on write (admin API) and again on read, so a hand-edited
+# row can never hand the mod a value that would lock every player out.
+AUTH_SETTINGS_BOUNDS: dict[str, tuple[int, int]] = {
+    "play_ticket_expire_minutes": (5, 10080),
+    "auth_grace_seconds": (0, 3600),
+    "request_timeout_ms": (1000, 120000),
+    "reconnect_grant_minutes": (1, 1440),
+}
+
+
+def default_auth_settings() -> dict[str, int]:
+    return dict(DEFAULT_AUTH_SETTINGS)
+
+
+def resolve_auth_settings(raw: dict[str, Any] | None) -> dict[str, int]:
+    """Merge a stored ``auth_settings`` blob over the defaults, clamped to bounds.
+
+    Missing keys fall back to the default, so adding a new setting later does not
+    require backfilling every row.
+    """
+
+    resolved = dict(DEFAULT_AUTH_SETTINGS)
+    for key, default in DEFAULT_AUTH_SETTINGS.items():
+        value = (raw or {}).get(key)
+        if value is None:
+            continue
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            continue
+        low, high = AUTH_SETTINGS_BOUNDS[key]
+        resolved[key] = max(low, min(high, value))
+    return resolved
+
+
 class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     """A single Minecraft server instance the launcher can connect to.
 
@@ -109,6 +163,17 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     easydonate_server_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Feature flags controlling which tabs/sections appear in launcher & site.
     features: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=default_features)
+
+    # ── Authentication timeouts (see DEFAULT_AUTH_SETTINGS above) ─────────
+    # Read through ``resolved_auth_settings`` — never straight off this column,
+    # which may be partial or hand-edited.
+    auth_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=default_auth_settings, server_default="{}"
+    )
+
+    @property
+    def resolved_auth_settings(self) -> dict[str, int]:
+        return resolve_auth_settings(self.auth_settings)
 
     # ── News auto-posting channels, per category ──────────────────────────
     # Shape: {"update": {"telegram": [{"chat_id","thread_id"}], "discord": ["url"]},
