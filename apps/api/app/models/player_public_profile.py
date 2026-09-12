@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
@@ -43,6 +44,9 @@ class PlayerPublicProfile(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("media_assets.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+    # {platform: url}; allowed platforms/hosts are validated in schemas/profile.py.
+    social_links: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
 
     is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     allow_followers_list_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

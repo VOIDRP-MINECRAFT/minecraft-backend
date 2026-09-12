@@ -80,6 +80,9 @@ class PublicProfileService:
         if "accent_color" in fields_set:
             profile.accent_color = payload.accent_color
 
+        if "social_links" in fields_set:
+            profile.social_links = payload.social_links or {}
+
         if "is_public" in fields_set and payload.is_public is not None:
             profile.is_public = payload.is_public
 
@@ -287,6 +290,7 @@ class PublicProfileService:
             status_text=profile.status_text,
             theme_mode=profile.theme_mode,
             accent_color=profile.accent_color,
+            social_links=dict(profile.social_links or {}),
             is_public=profile.is_public,
             allow_followers_list_public=profile.allow_followers_list_public,
             allow_friends_list_public=profile.allow_friends_list_public,

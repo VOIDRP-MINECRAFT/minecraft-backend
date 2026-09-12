@@ -53,6 +53,10 @@ _EXACT_MESSAGES: dict[str, str] = {
 }
 
 _CONTAINS_RULES: list[tuple[str, str]] = [
+    ("unknown social link platform", "Такая соцсеть не поддерживается."),
+    ("link must point to", "Ссылка ведёт не на тот сайт — проверь, что она от нужной соцсети."),
+    ("link must lead to a channel or profile", "Ссылка должна вести на канал или профиль, а не на главную страницу."),
+    ("link is too long", "Ссылка слишком длинная."),
     ("site login is already taken", "Этот логин уже занят."),
     ("email is already registered", "На эту почту уже зарегистрирован аккаунт."),
     ("minecraft nickname is already taken", "Этот игровой ник уже занят."),
