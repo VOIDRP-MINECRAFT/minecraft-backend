@@ -22,6 +22,8 @@ class LauncherCrashReport(UuidPrimaryKeyMixin, Base):
     java_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
     ram_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     server_slug: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Launcher crash rule that recognized this crash (NULL = the player got generic advice).
+    advice_rule_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )

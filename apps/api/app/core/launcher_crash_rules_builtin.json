@@ -1,0 +1,308 @@
+[
+  {
+    "key": "crash_assistant_startup_script",
+    "priority": 100,
+    "patterns_all": [
+      "Script startup[\\\\/](?<script>[^\\s\\\\/]+\\.jexl) marked game for crash"
+    ],
+    "patterns_any": [],
+    "exit_codes": [],
+    "title": "Мешает старый файл от прошлой версии сборки",
+    "cause": "Игру остановил встроенный модуль CrashAssistant: у вас остался старый скрипт проверки модов ({script}) от прошлой версии сборки. С компьютером и файлами игры всё в порядке.",
+    "solution": "Нажмите «Исправить» — лаунчер уберёт этот файл (копия сохранится в папке config-backups). Потом нажмите «Запустить снова».",
+    "actions": [
+      {
+        "type": "fix_files",
+        "label": "Исправить",
+        "paths": [
+          "config/crash_assistant/scripts/startup/{script}",
+          "config/crash_assistant/problematic_mods_config.json",
+          "config/crash_assistant/problematic_mods_config.json.bak"
+        ]
+      },
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "broken_mod_config",
+    "priority": 90,
+    "patterns_all": [],
+    "patterns_any": [
+      "Failed to back up config file (?<file>[^\\r\\n]+?\\.(?:toml|json5?|cfg|properties))",
+      "Failed loading config file (?<file>\\S+?\\.toml)",
+      "ParsingException[^\\r\\n]*?(?<file>\\S+[\\\\/]config[\\\\/]\\S+?\\.toml)"
+    ],
+    "exit_codes": [],
+    "title": "Сломан файл настроек мода",
+    "cause": "Файл настроек {file|одного из модов} повреждён или остался от старой версии мода, и игра не смогла восстановить его сама.",
+    "solution": "Нажмите «Сбросить» — лаунчер уберёт только этот файл (копия сохранится в папке config-backups), мод создаст его заново. Потом запустите игру.",
+    "actions": [
+      {
+        "type": "reset_config",
+        "label": "Сбросить {file}",
+        "paths": []
+      },
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "mod_config_not_loaded",
+    "priority": 80,
+    "patterns_all": [
+      "Cannot get config value before config is loaded"
+    ],
+    "patterns_any": [
+      "before config is loaded\\.[\\s\\S]{0,1500}?TRANSFORMER/(?!neoforge@|minecraft@)(?<mod>[a-z0-9_]+)@",
+      "before config is loaded"
+    ],
+    "exit_codes": [],
+    "title": "Не загрузились настройки мода",
+    "cause": "Мод {mod|из сборки} обратился к своим настройкам раньше, чем они загрузились. Обычно так бывает, когда файлы настроек испорчены или остались от старой версии.",
+    "solution": "Нажмите «Сбросить настройки модов» — лаунчер переложит папку config в config-backups и заново скачает настройки сборки. Управление и графика (options.txt) останутся как были.",
+    "actions": [
+      {
+        "type": "reset_all_configs",
+        "label": "Сбросить настройки модов",
+        "paths": []
+      },
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "join_recipes_mod_bug",
+    "priority": 70,
+    "patterns_all": [
+      "ServerLifecycleHooks\\.getCurrentServer\\(\\)\" is null|because \"lookup\" is null"
+    ],
+    "patterns_any": [
+      "TRANSFORMER/(?<mod>compactmachines|extended_industrialization|wom)@",
+      "ServerLifecycleHooks\\.getCurrentServer\\(\\)\" is null|because \"lookup\" is null"
+    ],
+    "exit_codes": [],
+    "title": "Игра упала при входе на сервер",
+    "cause": "Это известная ошибка мода {mod|из сборки}: он падает, когда сервер присылает рецепты. Ваш персонаж, вещи и файлы игры в порядке.",
+    "solution": "Просто запустите игру и зайдите на сервер ещё раз — обычно со второй попытки всё работает. Мы уже чиним эту ошибку.",
+    "actions": [
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "sodium_iris_not_ready",
+    "priority": 60,
+    "patterns_all": [
+      "Mod with id iris not found in ModList"
+    ],
+    "patterns_any": [],
+    "exit_codes": [],
+    "title": "Графика не успела загрузиться",
+    "cause": "Моды графики Sodium и Iris не успели запуститься. Чаще всего так бывает, когда игре выделено мало оперативной памяти.",
+    "solution": "Откройте настройки и выделите игре 6–8 ГБ памяти. Если на компьютере всего 8 ГБ — закройте браузер перед запуском. Потом запустите игру снова.",
+    "actions": [
+      {
+        "type": "open_settings",
+        "label": "Настроить память",
+        "paths": []
+      },
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "pack_files_mismatch",
+    "priority": 55,
+    "patterns_all": [],
+    "patterns_any": [
+      "Missing or unsupported mandatory dependencies",
+      "requires \\S+ [\\w.+-]+ or above"
+    ],
+    "exit_codes": [],
+    "title": "Файлы сборки устарели",
+    "cause": "Некоторым модам не хватает других модов нужной версии: файлы сборки на компьютере устарели или скачались не полностью.",
+    "solution": "Нажмите «Починить клиент» — лаунчер проверит и перекачает файлы сборки. Затем запустите игру.",
+    "actions": [
+      {
+        "type": "repair",
+        "label": "Починить клиент",
+        "paths": []
+      },
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "antivirus_locked_files",
+    "priority": 50,
+    "patterns_all": [],
+    "patterns_any": [
+      "setup the game directory",
+      "(?:NoSuchFile|AccessDenied)Exception: [^\\r\\n]*[\\\\/]mods[\\\\/]"
+    ],
+    "exit_codes": [],
+    "title": "Антивирус заблокировал файлы сборки",
+    "cause": "Во время запуска часть модов в папке mods оказалась недоступна (файлы удалены или заблокированы). Обычно это антивирус (чаще всего Windows Defender), который держит или помещает .jar-моды в карантин.",
+    "solution": "1) Добавьте папку лаунчера в исключения антивируса: %LOCALAPPDATA%\\VoidRpLauncher\n2) Нажмите «Починить клиент», чтобы докачать файлы заново.\n3) Запустите игру снова.",
+    "actions": [
+      {
+        "type": "repair",
+        "label": "Починить клиент",
+        "paths": []
+      },
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "out_of_memory",
+    "priority": 45,
+    "patterns_all": [],
+    "patterns_any": [
+      "OutOfMemoryError",
+      "java heap space",
+      "GC overhead limit"
+    ],
+    "exit_codes": [],
+    "title": "Не хватает оперативной памяти",
+    "cause": "Игре не хватило выделенной оперативной памяти (OutOfMemoryError). Для этой сборки выделено слишком мало ОЗУ.",
+    "solution": "Откройте настройки и увеличьте выделяемую память (рекомендуется 6–8 ГБ). Если на компьютере всего 8 ГБ — закройте браузер и другие программы перед запуском.",
+    "actions": [
+      {
+        "type": "open_settings",
+        "label": "Настроить память",
+        "paths": []
+      },
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "gpu_driver",
+    "priority": 40,
+    "patterns_all": [],
+    "patterns_any": [
+      "Couldn't set pixel format",
+      "Failed to create window",
+      "Requested GL version \\S+ got version (?:[12]\\.|3\\.[01])",
+      "EXCEPTION_ACCESS_VIOLATION[\\s\\S]*?(?:nvoglv|atio6axx|igdumd|ig\\d+icd)"
+    ],
+    "exit_codes": [],
+    "title": "Проблема с драйвером видеокарты",
+    "cause": "Не удалось запустить графику нужной версии. Обычно причина — устаревший драйвер видеокарты или запуск на встроенной графике.",
+    "solution": "1) Обновите драйвер видеокарты (NVIDIA/AMD/Intel) до последней версии.\n2) На ноутбуке убедитесь, что игра запускается на дискретной видеокарте.\n3) Перезагрузите компьютер и попробуйте снова.",
+    "actions": [
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "window_zero_size",
+    "priority": 38,
+    "patterns_all": [
+      "Window 0x0 size out of bounds"
+    ],
+    "patterns_any": [],
+    "exit_codes": [],
+    "title": "Окно игры было свёрнуто при запуске",
+    "cause": "Игра не смогла создать окно нулевого размера. Обычно так бывает, если свернуть окно во время загрузки или если сохранился неверный размер окна.",
+    "solution": "Запустите игру снова и не сворачивайте окно, пока идёт загрузка. Если повторяется — выключите полноэкранный режим в настройках игры.",
+    "actions": [
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "mcef_native_crash",
+    "priority": 35,
+    "patterns_all": [],
+    "patterns_any": [],
+    "exit_codes": [
+      -1073740791
+    ],
+    "title": "Сбой встроенного браузера (MCEF)",
+    "cause": "Игра упала из-за встроенного браузера MCEF/CEF (код 0xC0000409). Обычно это разовый сбой или заблокированные антивирусом файлы CEF.",
+    "solution": "1) Запустите игру ещё раз — часто помогает.\n2) Если повторяется — добавьте папку лаунчера в исключения антивируса и нажмите «Починить клиент».",
+    "actions": [
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      },
+      {
+        "type": "repair",
+        "label": "Починить клиент",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "key": "mod_loading_failed",
+    "priority": 10,
+    "patterns_all": [],
+    "patterns_any": [
+      "Failed to load mods",
+      "Mod loading has failed",
+      "ModLoadingException"
+    ],
+    "exit_codes": [],
+    "title": "Ошибка в одном из модов",
+    "cause": "Один из модов сборки остановил игру при загрузке. Часто это следствие повреждённого файла мода или незавершённого обновления.",
+    "solution": "1) Нажмите «Починить клиент» — лаунчер перекачает и проверит файлы.\n2) Если не помогло — скопируйте отчёт и пришлите его в поддержку.",
+    "actions": [
+      {
+        "type": "repair",
+        "label": "Починить клиент",
+        "paths": []
+      },
+      {
+        "type": "relaunch",
+        "label": "Запустить снова",
+        "paths": []
+      }
+    ],
+    "enabled": true
+  }
+]

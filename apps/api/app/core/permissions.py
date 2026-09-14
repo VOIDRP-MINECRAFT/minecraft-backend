@@ -64,6 +64,7 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "feedback.manage", "label": "Обращения (изменять/удалять)", "sensitive": True},
             {"key": "crashes.view", "label": "Краши лаунчера (просмотр)"},
             {"key": "crashes.manage", "label": "Краши лаунчера (удалять)"},
+            {"key": "crashes.rules.manage", "label": "Правила крашей лаунчера (изменять — кнопки правил трогают файлы игроков)", "sensitive": True},
         ],
     },
     {

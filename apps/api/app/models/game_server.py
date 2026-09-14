@@ -164,6 +164,10 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # Feature flags controlling which tabs/sections appear in launcher & site.
     features: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=default_features)
 
+    # Launcher pre-launch check: warn when a player allocates less memory than this.
+    # Null → the launcher default (6 GB).
+    launcher_recommended_ram_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # ── Authentication timeouts (see DEFAULT_AUTH_SETTINGS above) ─────────
     # Read through ``resolved_auth_settings`` — never straight off this column,
     # which may be partial or hand-edited.

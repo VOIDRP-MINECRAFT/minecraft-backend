@@ -8,8 +8,11 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.launcher_crash_report import LauncherCrashReport
 from apps.api.app.models.user import User
+from apps.api.app.services.launcher_crash_rules_service import rules_for_server
 
 router = APIRouter(prefix="/launcher", tags=["launcher-crash"])
 
@@ -33,6 +36,21 @@ class CrashReportRequest(BaseModel):
     java_version: str | None = None
     ram_mb: int | None = None
     server_slug: str | None = None
+    # Key of the launcher crash rule that recognized the crash (launcher 4.0.41+).
+    advice_rule_key: str | None = None
+
+
+@router.get("/crash-rules")
+def get_crash_rules(
+    server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """Crash rules the launcher merges over its built-ins (disabled ones included — they switch
+    a built-in off), plus the pre-launch memory threshold. Public: the launcher may ask before login."""
+    return {
+        "recommended_ram_mb": server.launcher_recommended_ram_mb,
+        "rules": rules_for_server(session, server),
+    }
 
 
 @router.post("/me/crash-report", status_code=204)
@@ -55,6 +73,7 @@ def submit_crash_report(
         java_version=body.java_version,
         ram_mb=body.ram_mb,
         server_slug=body.server_slug,
+        advice_rule_key=(body.advice_rule_key or None) and body.advice_rule_key[:64],
     )
     session.add(record)
     session.commit()

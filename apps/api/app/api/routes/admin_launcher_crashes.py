@@ -29,6 +29,7 @@ class CrashReportItem(BaseModel):
     java_version: str | None = None
     ram_mb: int | None = None
     server_slug: str | None = None
+    advice_rule_key: str | None = None
     created_at: str
 
     model_config = {"from_attributes": True}
@@ -44,6 +45,8 @@ def list_crashes(
     session: Annotated[Session, Depends(get_db_session)],
     player: str | None = Query(default=None),
     version: str | None = Query(default=None),
+    # "yes" = the launcher showed a matching rule, "no" = generic advice only.
+    recognized: str | None = Query(default=None, pattern="^(yes|no)$"),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> CrashReportListResponse:
@@ -52,6 +55,10 @@ def list_crashes(
             stmt = stmt.where(LauncherCrashReport.player_nickname.ilike(f"%{player}%"))
         if version:
             stmt = stmt.where(LauncherCrashReport.launcher_version == version)
+        if recognized == "yes":
+            stmt = stmt.where(LauncherCrashReport.advice_rule_key.is_not(None))
+        elif recognized == "no":
+            stmt = stmt.where(LauncherCrashReport.advice_rule_key.is_(None))
         return stmt
 
     q = _apply(select(LauncherCrashReport).order_by(desc(LauncherCrashReport.created_at)))
@@ -73,6 +80,7 @@ def list_crashes(
                 java_version=r.java_version,
                 ram_mb=r.ram_mb,
                 server_slug=r.server_slug,
+                advice_rule_key=r.advice_rule_key,
                 created_at=r.created_at.isoformat(),
             )
             for r in rows
