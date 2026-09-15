@@ -190,16 +190,23 @@ def get_player_tiers_for_plugin(
     server: Annotated[GameServer, Depends(require_game_server)],
 ) -> BpPlayerTiers:
     """Progression tiers (epochs) a player has unlocked — the plugin checks zone gates
-    against them. Keyed by Minecraft UUID: nicknames change, the unlock rows keep the uuid."""
-    from apps.api.app.models.player_progression import PlayerProgression
+    against them. Keyed by Minecraft UUID: nicknames change, the unlock rows keep the uuid.
 
-    rows = db.execute(
+    Main-line tiers are implied backwards: detection sees an item in the inventory, so a
+    player can unlock «energy» without ever being seen holding the steel ingot, and a gate
+    on an earlier tier must not lock them out."""
+    from apps.api.app.models.player_progression import MAIN_PROGRESSION_TIERS, PlayerProgression
+
+    rows = set(db.execute(
         select(PlayerProgression.tier_name).where(
             PlayerProgression.server_id == server.id,
             PlayerProgression.minecraft_uuid == uuid,
         )
-    ).scalars().all()
-    return BpPlayerTiers(tiers=sorted(set(rows)))
+    ).scalars().all())
+    reached = [i for i, t in enumerate(MAIN_PROGRESSION_TIERS) if t in rows]
+    if reached:
+        rows.update(MAIN_PROGRESSION_TIERS[: max(reached) + 1])
+    return BpPlayerTiers(tiers=sorted(rows))
 
 
 # ── plugin fetches its reward definitions (admin-edited, per season) ──
