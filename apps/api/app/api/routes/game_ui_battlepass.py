@@ -38,6 +38,16 @@ class BpReward(BaseModel):
     material: str | None = None
     count: int = 0
     icon: str | None = None          # item id for the WebGUI texture
+    count_max: int | None = None     # random amount upper bound (count/amount = lower)
+    amount_max: float | None = None
+    options: list["BpReward"] | None = None   # type "choice": variants to pick from
+
+
+class BpTrackGate(BaseModel):
+    level: int                       # levels past this need `tier`
+    tier: str
+    label: str | None = None
+    unlocked: bool = False
 
 
 class BpTrackLevel(BaseModel):
@@ -56,6 +66,7 @@ class BpTrack(BaseModel):
     xp_per_level: int = 10000
     has_premium: bool = False
     ends_in_days: int | None = None
+    gates: list[BpTrackGate] = []
     levels: list[BpTrackLevel] = []
 
 
@@ -141,6 +152,7 @@ class BpSeasonResponse(BaseModel):
     start_date: str
     end_date: str
     max_level: int
+    gates: list[dict] = []
 
 
 @plugin_router.get("/season", response_model=BpSeasonResponse)
@@ -163,8 +175,31 @@ def get_active_season_for_plugin(
     return BpSeasonResponse(
         season_key=s.season_key, name=s.name,
         start_date=s.start_date.isoformat(), end_date=s.end_date.isoformat(),
-        max_level=s.max_level,
+        max_level=s.max_level, gates=s.gates or [],
     )
+
+
+class BpPlayerTiers(BaseModel):
+    tiers: list[str] = []
+
+
+@plugin_router.get("/player-tiers", response_model=BpPlayerTiers)
+def get_player_tiers_for_plugin(
+    uuid: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> BpPlayerTiers:
+    """Progression tiers (epochs) a player has unlocked — the plugin checks zone gates
+    against them. Keyed by Minecraft UUID: nicknames change, the unlock rows keep the uuid."""
+    from apps.api.app.models.player_progression import PlayerProgression
+
+    rows = db.execute(
+        select(PlayerProgression.tier_name).where(
+            PlayerProgression.server_id == server.id,
+            PlayerProgression.minecraft_uuid == uuid,
+        )
+    ).scalars().all()
+    return BpPlayerTiers(tiers=sorted(set(rows)))
 
 
 # ── plugin fetches its reward definitions (admin-edited, per season) ──
@@ -176,12 +211,32 @@ class BpRewardDef(BaseModel):
     count: int | None = None
     amount: float | None = None
     icon: str | None = None
+    countMax: int | None = None
+    amountMax: float | None = None
+    options: list["BpRewardDef"] | None = None
 
 
 class BpRewardsResponse(BaseModel):
     season: str
     free: dict[int, BpRewardDef] = {}
     premium: dict[int, BpRewardDef] = {}
+
+
+def _option_def(o: dict) -> BpRewardDef:
+    """A stored choice option (snake_case, as the admin saves it) → plugin shape."""
+    amount = o.get("amount")
+    amount_max = o.get("amount_max")
+    return BpRewardDef(
+        type=str(o.get("type") or "command").upper(),
+        displayName=o.get("display_name"),
+        command=o.get("command"),
+        material=o.get("material"),
+        count=o.get("count"),
+        amount=float(amount) if amount is not None else None,
+        icon=o.get("icon"),
+        countMax=o.get("count_max"),
+        amountMax=float(amount_max) if amount_max is not None else None,
+    )
 
 
 @plugin_router.get("/rewards", response_model=BpRewardsResponse)
@@ -214,6 +269,9 @@ def get_rewards_for_plugin(
             count=r.count,
             amount=(float(r.amount) if r.amount is not None else None),
             icon=r.icon,
+            countMax=r.count_max,
+            amountMax=(float(r.amount_max) if r.amount_max is not None else None),
+            options=[_option_def(o) for o in (r.options or [])] or None,
         )
         (out.free if r.track == "free" else out.premium)[r.level] = d
     return out

@@ -110,6 +110,12 @@ _RTYPES = {"command", "item", "money", "voidcoin"}
 _MANAGE = Depends(require_permission("battlepass.rewards.manage"))
 
 
+class SeasonGate(BaseModel):
+    level: int = Field(..., ge=1, le=MAX_BP_LEVEL)   # levels past this need `tier`
+    tier: str = Field(..., min_length=1, max_length=64)
+    label: str | None = Field(default=None, max_length=128)
+
+
 class SeasonOut(BaseModel):
     id: str
     season_key: str
@@ -119,6 +125,7 @@ class SeasonOut(BaseModel):
     max_level: int
     is_active: bool
     reward_count: int = 0
+    gates: list[SeasonGate] = []
 
 
 class SeasonCreate(BaseModel):
@@ -137,12 +144,27 @@ class SeasonUpdate(BaseModel):
     end_date: date | None = None
     max_level: int | None = Field(default=None, ge=1, le=MAX_BP_LEVEL)
     is_active: bool | None = None
+    gates: list[SeasonGate] | None = None
+
+
+def _validated_gates(gates: list[SeasonGate]) -> list[dict] | None:
+    from apps.api.app.models.player_progression import PROGRESSION_TIERS, TIER_LABELS
+
+    out: list[dict] = []
+    for g in sorted(gates, key=lambda g: g.level):
+        if g.tier not in PROGRESSION_TIERS:
+            raise HTTPException(status_code=422, detail=f"Неизвестная эпоха «{g.tier}».")
+        if any(x["level"] == g.level for x in out):
+            raise HTTPException(status_code=422, detail=f"Две границы на уровне {g.level}.")
+        out.append({"level": g.level, "tier": g.tier, "label": (g.label or TIER_LABELS.get(g.tier) or g.tier)})
+    return out or None
 
 
 def _season_out(s: BattlePassSeason, reward_count: int = 0) -> SeasonOut:
     return SeasonOut(
         id=str(s.id), season_key=s.season_key, name=s.name, start_date=s.start_date,
         end_date=s.end_date, max_level=s.max_level, is_active=s.is_active, reward_count=reward_count,
+        gates=[SeasonGate(**g) for g in (s.gates or [])],
     )
 
 
@@ -248,6 +270,8 @@ def update_season(
         s.max_level = int(data["max_level"])
     if s.end_date < s.start_date:
         raise HTTPException(status_code=422, detail="Дата окончания раньше даты начала.")
+    if "gates" in data:
+        s.gates = _validated_gates(payload.gates or [])
     if data.get("is_active") is True:
         db.execute(sa_update(BattlePassSeason)
                    .where(BattlePassSeason.server_id == server.id,
@@ -293,13 +317,29 @@ class RewardSlotOut(BaseModel):
     amount: int | None = None
     display_name: str | None = None
     icon: str | None = None
+    count_max: int | None = None
+    amount_max: int | None = None
+    options: list[dict] | None = None
+
+
+class RewardOption(BaseModel):
+    """One variant of a choice reward — a plain reward of its own (no nesting)."""
+    type: str = Field(..., pattern=r"^(command|item|money|voidcoin|exp)$")
+    command: str | None = Field(default=None, max_length=512)
+    material: str | None = Field(default=None, max_length=64)
+    count: int | None = Field(default=None, ge=1, le=6400)
+    count_max: int | None = Field(default=None, ge=1, le=6400)
+    amount: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    amount_max: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    display_name: str | None = Field(default=None, max_length=128)
+    icon: str | None = Field(default=None, max_length=128)
 
 
 class RewardSlotUpsert(BaseModel):
     season: str = Field(..., min_length=4, max_length=32)
     level: int = Field(..., ge=1, le=MAX_BP_LEVEL)
     track: str = Field(..., pattern=r"^(free|premium)$")
-    reward_type: str = Field(..., pattern=r"^(command|item|money|voidcoin)$")
+    reward_type: str = Field(..., pattern=r"^(command|item|money|voidcoin|exp|choice)$")
     command: str | None = Field(default=None, max_length=512)
     material: str | None = Field(default=None, max_length=64)
     item_key: str | None = Field(default=None, max_length=128)
@@ -307,6 +347,9 @@ class RewardSlotUpsert(BaseModel):
     amount: int | None = Field(default=None, ge=0, le=10_000_000_000)
     display_name: str | None = Field(default=None, max_length=128)
     icon: str | None = Field(default=None, max_length=128)
+    count_max: int | None = Field(default=None, ge=1, le=6400)
+    amount_max: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    options: list[RewardOption] | None = Field(default=None, max_length=9)
 
 
 class SeasonInfo(BaseModel):
@@ -327,19 +370,38 @@ def _reward_out(r: BattlePassReward) -> RewardSlotOut:
         item_key=r.item_key, count=r.count,
         amount=(int(r.amount) if r.amount is not None else None),
         display_name=r.display_name, icon=r.icon,
+        count_max=r.count_max,
+        amount_max=(int(r.amount_max) if r.amount_max is not None else None),
+        options=r.options,
     )
 
 
-def _validate_slot(p: RewardSlotUpsert) -> None:
-    if p.reward_type in ("money", "voidcoin"):
-        if p.amount is None or p.amount <= 0:
-            raise HTTPException(status_code=422, detail="Для награды-валюты укажите amount > 0.")
-    elif p.reward_type == "item":
-        if not (p.material and p.material.strip()):
+def _validate_plain(kind: str, amount, amount_max, count, count_max, material, command) -> None:
+    if kind in ("money", "voidcoin", "exp"):
+        if amount is None or amount <= 0:
+            raise HTTPException(status_code=422, detail="Для награды-валюты/опыта укажите amount > 0.")
+        if amount_max is not None and amount_max < amount:
+            raise HTTPException(status_code=422, detail="amount_max меньше amount.")
+    elif kind == "item":
+        if not (material and material.strip()):
             raise HTTPException(status_code=422, detail="Для предмета укажите material.")
-    elif p.reward_type == "command":
-        if not (p.command and p.command.strip()):
+    elif kind == "command":
+        if not (command and command.strip()):
             raise HTTPException(status_code=422, detail="Для команды укажите command.")
+        if count_max is not None and "{count}" not in command:
+            raise HTTPException(status_code=422, detail="Случайное количество у команды требует {count} в команде.")
+    if count_max is not None and count is not None and count_max < count:
+        raise HTTPException(status_code=422, detail="count_max меньше count.")
+
+
+def _validate_slot(p: RewardSlotUpsert) -> None:
+    if p.reward_type == "choice":
+        if not p.options or len(p.options) < 2:
+            raise HTTPException(status_code=422, detail="Награда на выбор — минимум 2 варианта.")
+        for o in p.options:
+            _validate_plain(o.type, o.amount, o.amount_max, o.count, o.count_max, o.material, o.command)
+        return
+    _validate_plain(p.reward_type, p.amount, p.amount_max, p.count, p.count_max, p.material, p.command)
 
 
 @router.get("/rewards/seasons", response_model=list[SeasonInfo])
@@ -397,16 +459,24 @@ def upsert_reward(
     row.reward_type = payload.reward_type
     # clear all optional fields, then set only those relevant to the type
     row.command = row.material = row.item_key = row.icon = None
-    row.count = row.amount = None
+    row.count = row.amount = row.count_max = row.amount_max = None
+    row.options = None
     row.display_name = (payload.display_name or None)
-    if payload.reward_type in ("money", "voidcoin"):
+    if payload.reward_type == "choice":
+        row.options = [o.model_dump(exclude_none=True) for o in payload.options or []]
+        row.icon = payload.icon or next((o.icon for o in payload.options or [] if o.icon), None)
+    elif payload.reward_type in ("money", "voidcoin", "exp"):
         row.amount = int(payload.amount or 0)
+        row.amount_max = payload.amount_max
     elif payload.reward_type == "item":
         row.material = payload.material.strip()
         row.count = int(payload.count or 1)
+        row.count_max = payload.count_max
         row.icon = payload.icon or f"minecraft:{row.material.lower()}"
     elif payload.reward_type == "command":
         row.command = payload.command.strip()
+        row.count = payload.count
+        row.count_max = payload.count_max
         icon = payload.icon
         if not icon:
             for tok in row.command.split(" "):
@@ -478,6 +548,7 @@ def copy_season(
             level=r.level, track=r.track, reward_type=r.reward_type,
             command=r.command, material=r.material, item_key=r.item_key,
             count=r.count, amount=r.amount, display_name=r.display_name, icon=r.icon,
+            count_max=r.count_max, amount_max=r.amount_max, options=r.options,
         ))
         n += 1
     db.commit()

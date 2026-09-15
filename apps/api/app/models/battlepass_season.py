@@ -11,6 +11,7 @@ from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.app.models.base import Base, UuidPrimaryKeyMixin
@@ -31,6 +32,10 @@ class BattlePassSeason(UuidPrimaryKeyMixin, Base):
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     max_level: Mapped[int] = mapped_column(Integer, nullable=False, server_default="100")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Zone gates: [{"level": 100, "tier": "steel_age", "label": "Эпоха стали"}] — levels past
+    # `level` need that progression tier (see player_progression.PROGRESSION_TIERS). The plugin
+    # stops XP at the boundary and refuses rewards past it until the tier is unlocked.
+    gates: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

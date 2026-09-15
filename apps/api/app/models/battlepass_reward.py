@@ -10,6 +10,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.app.models.base import Base, UuidPrimaryKeyMixin
@@ -28,12 +29,19 @@ class BattlePassReward(UuidPrimaryKeyMixin, Base):
     level: Mapped[int] = mapped_column(Integer, nullable=False)                    # 1..MAX_LEVEL
     track: Mapped[str] = mapped_column(String(8), nullable=False)                  # "free" | "premium"
 
-    reward_type: Mapped[str] = mapped_column(String(16), nullable=False)           # command|item|money|voidcoin
+    reward_type: Mapped[str] = mapped_column(String(16), nullable=False)           # command|item|money|voidcoin|exp|choice
     command: Mapped[str | None] = mapped_column(String(512), nullable=True)        # for command
     material: Mapped[str | None] = mapped_column(String(64), nullable=True)        # for item (Bukkit Material)
     item_key: Mapped[str | None] = mapped_column(String(128), nullable=True)       # namespaced id (icon/give)
     count: Mapped[int | None] = mapped_column(Integer, nullable=True)              # item count
     amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)          # money / voidcoin amount
+    # Random amounts: count/amount are the lower bound, *_max the upper (NULL = fixed).
+    # A command reward rolls its count into the `{count}` placeholder.
+    count_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    amount_max: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # reward_type "choice": the player picks one of these. Each option is a reward of its
+    # own ({type, command|material|amount, count, count_max, amount_max, display_name, icon}).
+    options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     icon: Mapped[str | None] = mapped_column(String(128), nullable=True)           # item id for the WebGUI texture
 
