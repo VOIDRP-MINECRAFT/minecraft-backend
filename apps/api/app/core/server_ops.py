@@ -733,29 +733,77 @@ _CHAT_RE = re.compile(
 )
 _NOT_SECURE_RE = re.compile(r"^\[Not Secure\]\s*")
 
+# Youer (log4j2_youer.xml, and the copy in its jar) prints vanilla/Mojang
+# loggers WITHOUT a logger name and WITHOUT a date: `[18:11:24] [/INFO]: msg`.
+# Every other logger keeps `[thread/LEVEL] [logger]:`, so "no logger bracket"
+# plays the same role the MinecraftServer logger name played above. Player chat
+# comes off a thread with an empty name there (`[/INFO]`).
+_YOUER_LINE_RE = re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s*\[([^\]/]*)/INFO\]:\s(.*)$")
+# The vanilla loggers also carry server housekeeping on the Server thread;
+# these never belong in a chat feed.
+_YOUER_NOISE_RE = re.compile(
+    r"issued server command|logged in with entity id|lost connection|UUID of player"
+    r"|Attempt to teleport|moved too quickly|Rcon|^Выдано |^Gave "
+    r"|Сохранение|чанки сохранены|Saving |All chunks|Остановка|Stopping"
+    r"|Запуск сервера|Загрузка свойств|Генерация пары ключей|Этот сервер работает"
+    r"|Режим игры по умолчанию|Прошло времени|Подготовка|Используется тип канала"
+    r"|^Starting|^Preparing|^Loading properties|^Default game type|^Done \("
+)
+_JOIN_RE = re.compile(r"joined the game|присоединился к игре")
+_LEAVE_RE = re.compile(r"left the game|покинул игру")
 
-def parse_chat(path: str, scan_lines: int = 4000, limit: int = 200) -> list[dict]:
+
+def _classify_chat(thread: str, msg: str) -> str:
+    if thread.startswith("Async Chat Thread") or thread == "":
+        return "chat"
+    if _JOIN_RE.search(msg):
+        return "join"
+    if _LEAVE_RE.search(msg):
+        return "leave"
+    return "system"
+
+
+def _match_chat_line(ln: str) -> tuple[str, str, str] | None:
+    """(time, thread, raw message) for a chat-feed line in either log layout."""
+    m = _CHAT_RE.search(ln)
+    if m:
+        return m.group(1), m.group(2), m.group(3)
+    m = _YOUER_LINE_RE.match(ln)
+    if not m:
+        return None
+    time_s, thread, msg = m.group(1), m.group(2), m.group(3)
+    if msg.startswith("[Not Secure]"):
+        return time_s, "", msg  # chat relayed on the Server thread (/say, /me)
+    if thread != "Server thread" and thread != "":
+        return None  # RCON, auth, main — never chat
+    if thread == "Server thread":
+        # Plugin/mod lines on this layout start with their own `[Tag]`, NBT
+        # dumps (/data get) with `{`.
+        if msg.startswith(("[", "{")) or _YOUER_NOISE_RE.search(msg):
+            return None
+    return time_s, thread, msg
+
+
+def parse_chat(path: str, scan_lines: int = 60000, limit: int = 200) -> list[dict]:
     """Extract the in-game chat feed from the tail of a log, oldest→newest.
     Returns ``[{time, type, text}]`` where ``type`` is one of
-    ``chat`` | ``join`` | ``leave`` | ``system``."""
+    ``chat`` | ``join`` | ``leave`` | ``system``.
+
+    The window is wide on purpose: every RCON call (panel polling, cron
+    scripts) writes two "Thread RCON Client" lines, ~500/min on the main
+    server, which pushed the whole chat out of a 4000-line tail."""
     out: list[dict] = []
-    for ln in tail_log(path, lines=scan_lines, max_bytes=2 * 1024 * 1024):
-        m = _CHAT_RE.search(ln)
-        if not m:
+    for ln in tail_log(path, lines=scan_lines, max_bytes=8 * 1024 * 1024):
+        if "RCON" in ln:
             continue
-        time_s, thread, msg = m.group(1), m.group(2), m.group(3)
+        hit = _match_chat_line(ln)
+        if not hit:
+            continue
+        time_s, thread, msg = hit
         msg = strip_color_codes(_NOT_SECURE_RE.sub("", msg)).strip()
         if not msg:
             continue
-        if thread.startswith("Async Chat Thread"):
-            kind = "chat"
-        elif "joined the game" in msg:
-            kind = "join"
-        elif "left the game" in msg:
-            kind = "leave"
-        else:
-            kind = "system"
-        out.append({"time": time_s, "type": kind, "text": msg})
+        out.append({"time": time_s, "type": _classify_chat(thread, msg), "text": msg})
     return out[-limit:]
 
 
