@@ -228,7 +228,7 @@ _WEBGUI_PAGES = {"menu", "market", "nmarket", "treasury", "research", "alliance"
 _NATIONDONATE_RE = _re.compile(r"^nationdonate \d{1,15}(\.\d{1,2})?$")
 _NMARKET_BUY_RE = _re.compile(r"^nmarket buy [A-Za-z0-9\-]{1,64} \d{1,4}$")
 _DAILYQUEST_CLAIM_RE = _re.compile(r"^dailyquest claim \d{1,2}$")
-_BP_CLAIM_RE = _re.compile(r"^bp claim (free|premium) \d{1,3}$")
+_BP_CLAIM_RE = _re.compile(r"^bp claim (free|premium) \d{1,3}( \d)?$")  # optional choice option index
 
 
 def _validate_web_command(raw: str) -> str:
