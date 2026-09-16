@@ -1,0 +1,272 @@
+{
+  "version": 1,
+  "stages": [
+    {
+      "id": "start",
+      "epoch": null,
+      "title": {"ru": "Первые шаги", "en": "First steps"},
+      "summary": {
+        "ru": "В паке по-настоящему темно. Сначала свет, еда и базовые инструменты. Место для базы — /rtp, команда и приват — в /гайд.",
+        "en": "It is truly dark here. Light, food and basic tools come first. Find a base spot with /rtp; teams and claims are in /guide."
+      },
+      "questbook": {"ru": "Книга квестов: «Getting Started»", "en": "Quest book: Getting Started"},
+      "steps": [
+        {"item": "minecraft:torch", "title": {"ru": "Факелы", "en": "Torches"}, "hint": {"ru": "Уголь или древесный уголь и палка. Без света вне базы делать нечего.", "en": "Coal or charcoal and a stick. Without light there is nothing to do outside."}},
+        {"item": "minecraft:stone_pickaxe", "title": {"ru": "Каменная кирка", "en": "Stone pickaxe"}, "hint": {"ru": "Первая кирка, которой можно копать руду.", "en": "The first pickaxe that can mine ore."}},
+        {"item": "minecraft:furnace", "title": {"ru": "Печь", "en": "Furnace"}, "hint": {"ru": "Восемь булыжников. Плавит руду и готовит еду.", "en": "Eight cobblestone. Smelts ore and cooks food."}},
+        {"item": "minecraft:iron_ingot", "title": {"ru": "Железо", "en": "Iron"}, "hint": {"ru": "Переплавь железную руду в печи.", "en": "Smelt iron ore in the furnace."}},
+        {"item": "minecraft:iron_pickaxe", "title": {"ru": "Железная кирка", "en": "Iron pickaxe"}, "hint": {"ru": "Без неё не добыть алмазы.", "en": "Needed to mine diamonds."}},
+        {"item": "sophisticatedbackpacks:backpack", "title": {"ru": "Рюкзак", "en": "Backpack"}, "hint": {"ru": "Рюкзак Sophisticated Backpacks — места в инвентаре всегда не хватает.", "en": "A Sophisticated Backpacks backpack — inventory space always runs out."}}
+      ]
+    },
+    {
+      "id": "diamonds",
+      "epoch": null,
+      "title": {"ru": "Алмазы, Незер и Край", "en": "Diamonds, Nether and End"},
+      "summary": {
+        "ru": "Алмазное снаряжение, шахтёрское измерение для руды и путь в Незер за стержнями всполоха.",
+        "en": "Diamond gear, the mining dimension for ore, and the Nether for blaze rods."
+      },
+      "questbook": {"ru": "Книга квестов: «Getting Started»", "en": "Quest book: Getting Started"},
+      "steps": [
+        {"item": "minecraft:diamond", "title": {"ru": "Алмаз", "en": "Diamond"}, "hint": {"ru": "Ищи глубоко, ниже нулевой высоты.", "en": "Look deep, below height zero."}},
+        {"item": "minecraft:diamond_pickaxe", "title": {"ru": "Алмазная кирка", "en": "Diamond pickaxe"}, "hint": {"ru": "Нужна для обсидиана.", "en": "Needed for obsidian."}},
+        {"item": "jamd:portal_block", "title": {"ru": "Портал в шахтёрское измерение", "en": "Mining dimension portal"}, "hint": {"ru": "Отдельный мир для добычи руды — основной мир остаётся целым.", "en": "A separate world for mining, so the main world stays intact."}},
+        {"item": "minecraft:obsidian", "title": {"ru": "Обсидиан", "en": "Obsidian"}, "hint": {"ru": "Вода на лаву, копать алмазной киркой. На портал нужно 10 блоков.", "en": "Water onto lava, mine with a diamond pickaxe. A portal needs 10."}},
+        {"item": "minecraft:flint_and_steel", "title": {"ru": "Огниво", "en": "Flint and steel"}, "hint": {"ru": "Зажги портал в Незер.", "en": "Light the Nether portal."}},
+        {"item": "minecraft:blaze_rod", "title": {"ru": "Стержень всполоха", "en": "Blaze rod"}, "hint": {"ru": "Выпадает из всполохов в крепости Незера. Пригодится и для горелки Create.", "en": "Dropped by blazes in a Nether fortress. Also needed for the Create blaze burner."}},
+        {"item": "minecraft:ender_eye", "title": {"ru": "Око Края", "en": "Eye of Ender"}, "hint": {"ru": "Огненный порошок и жемчуг Края. Приведёт к крепости с порталом в Край.", "en": "Blaze powder and an ender pearl. Leads to the stronghold with the End portal."}}
+      ]
+    },
+    {
+      "id": "mechanisms",
+      "epoch": "mechanisms_age",
+      "title": {"ru": "Эпоха механизмов", "en": "Age of Mechanisms"},
+      "summary": {
+        "ru": "Create: вращение, пресс, миксер и латунь. Финиш этапа — Механизм точности.",
+        "en": "Create: rotation, press, mixer and brass. The stage ends with a Precision Mechanism."
+      },
+      "questbook": {"ru": "Книга квестов: глава «Create»", "en": "Quest book: Create chapter"},
+      "steps": [
+        {"item": "create:andesite_alloy", "title": {"ru": "Андезитовый сплав", "en": "Andesite alloy"}, "hint": {"ru": "Основа всего Create: андезит и железный самородок.", "en": "The base of Create: andesite and an iron nugget."}},
+        {"item": "create:cogwheel", "title": {"ru": "Шестерня", "en": "Cogwheel"}, "hint": {"ru": "Шестерни и валы передают вращение между машинами.", "en": "Cogwheels and shafts carry rotation between machines."}},
+        {"item": "create:water_wheel", "title": {"ru": "Водяное колесо", "en": "Water wheel"}, "hint": {"ru": "Первый бесплатный и бесконечный источник вращения.", "en": "The first free, endless source of rotation."}},
+        {"item": "create:mechanical_press", "title": {"ru": "Механический пресс", "en": "Mechanical press"}, "hint": {"ru": "Делает металлические листы.", "en": "Makes metal sheets."}},
+        {"item": "create:blaze_burner", "title": {"ru": "Горелка всполоха", "en": "Blaze burner"}, "hint": {"ru": "Поймай всполоха в пустую горелку. Даёт нагрев миксеру.", "en": "Catch a blaze in an empty burner. It heats the mixer."}},
+        {"item": "ftbmaterials:brass_ingot", "title": {"ru": "Латунь", "en": "Brass"}, "hint": {"ru": "Медь и цинк в механическом миксере над горелкой.", "en": "Copper and zinc in a mechanical mixer over a heated burner."}},
+        {"item": "create:electron_tube", "title": {"ru": "Электронная лампа", "en": "Electron tube"}, "hint": {"ru": "Полированный розовый кварц и железный лист.", "en": "Polished rose quartz and an iron sheet."}},
+        {"item": "create:precision_mechanism", "title": {"ru": "Механизм точности", "en": "Precision mechanism"}, "hint": {"ru": "Последовательная сборка на депо, рецепт в JEI. Открывает Эпоху механизмов.", "en": "Sequenced assembly on a depot, recipe in JEI. Unlocks the Age of Mechanisms."}, "gate": true}
+      ]
+    },
+    {
+      "id": "steel",
+      "epoch": "steel_age",
+      "title": {"ru": "Эпоха стали", "en": "Age of Steel"},
+      "summary": {
+        "ru": "Immersive Engineering: коксовая и доменная печи, первая сталь и первые провода.",
+        "en": "Immersive Engineering: coke oven, blast furnace, the first steel and the first wires."
+      },
+      "questbook": {"ru": "Книга квестов: глава «Immersive Engineering»", "en": "Quest book: Immersive Engineering chapter"},
+      "steps": [
+        {"item": "immersiveengineering:hammer", "title": {"ru": "Молот инженера", "en": "Engineer's hammer"}, "hint": {"ru": "Им собираются все многоблоки IE.", "en": "Assembles every IE multiblock."}},
+        {"item": "immersiveengineering:cokebrick", "title": {"ru": "Кирпич коксовой печи", "en": "Coke brick"}, "hint": {"ru": "Коксовая печь — куб 3×3×3 из этих кирпичей, собирается молотом.", "en": "The coke oven is a 3×3×3 cube of these, formed with the hammer."}},
+        {"item": "immersiveengineering:coal_coke", "title": {"ru": "Коксовый уголь", "en": "Coal coke"}, "hint": {"ru": "Коксовая печь делает его из угля — это топливо для стали.", "en": "The coke oven makes it from coal — fuel for steel."}},
+        {"item": "immersiveengineering:blastbrick", "title": {"ru": "Кирпич доменной печи", "en": "Blast brick"}, "hint": {"ru": "Доменная печь — тоже куб 3×3×3. Рецепт кирпича в JEI.", "en": "The blast furnace is another 3×3×3 cube. Brick recipe in JEI."}},
+        {"item": "ftbmaterials:steel_ingot", "title": {"ru": "Сталь", "en": "Steel"}, "hint": {"ru": "Железо и кокс в доменной печи. Открывает Эпоху стали.", "en": "Iron and coke in the blast furnace. Unlocks the Age of Steel."}, "gate": true},
+        {"item": "immersiveengineering:wirecoil_copper", "title": {"ru": "Медный провод", "en": "Copper wire coil"}, "hint": {"ru": "Первая электросеть: коннекторы и провода.", "en": "Your first power grid: connectors and wires."}}
+      ]
+    },
+    {
+      "id": "energy",
+      "epoch": "energy_age",
+      "title": {"ru": "Эпоха энергии", "en": "Age of Energy"},
+      "summary": {
+        "ru": "Mekanism: генераторы, наполнение металлов, схемы управления и умножение руды.",
+        "en": "Mekanism: generators, metal infusing, control circuits and ore multiplication."
+      },
+      "questbook": {"ru": "Книга квестов: глава «Mekanism»", "en": "Quest book: Mekanism chapter"},
+      "steps": [
+        {"item": "mekanismgenerators:heat_generator", "title": {"ru": "Теплогенератор", "en": "Heat generator"}, "hint": {"ru": "Первая энергия Mekanism: жжёт топливо или стоит рядом с лавой.", "en": "Mekanism's first power: burns fuel or sits next to lava."}},
+        {"item": "mekanism:metallurgic_infuser", "title": {"ru": "Металлургический наполнитель", "en": "Metallurgic infuser"}, "hint": {"ru": "Наполняет металлы: уголь — в сталь, редстоун — в сплав.", "en": "Infuses metals: carbon into steel, redstone into alloy."}},
+        {"item": "mekanism:alloy_infused", "title": {"ru": "Наполненный сплав", "en": "Infused alloy"}, "hint": {"ru": "Железо и редстоун в наполнителе.", "en": "Iron and redstone in the infuser."}},
+        {"item": "mekanism:basic_control_circuit", "title": {"ru": "Базовая схема управления", "en": "Basic control circuit"}, "hint": {"ru": "Нужна почти в каждой машине Mekanism.", "en": "Needed by almost every Mekanism machine."}},
+        {"item": "mekanism:steel_casing", "title": {"ru": "Стальной корпус", "en": "Steel casing"}, "hint": {"ru": "Основа машин Mekanism. Открывает Эпоху энергии.", "en": "The base of Mekanism machines. Unlocks the Age of Energy."}, "gate": true},
+        {"item": "mekanism:enrichment_chamber", "title": {"ru": "Камера обогащения", "en": "Enrichment chamber"}, "hint": {"ru": "Удваивает выход руды.", "en": "Doubles ore output."}},
+        {"item": "mekanism:purification_chamber", "title": {"ru": "Камера очистки", "en": "Purification chamber"}, "hint": {"ru": "Следующий шаг умножения руды — втрое.", "en": "The next ore step — triples it."}}
+      ]
+    },
+    {
+      "id": "automation",
+      "epoch": "automation_age",
+      "title": {"ru": "Эпоха автоматизации", "en": "Age of Automation"},
+      "summary": {
+        "ru": "Applied Energistics 2: все предметы в одной сети и автокрафт вместо сундуков.",
+        "en": "Applied Energistics 2: every item in one network and autocrafting instead of chests."
+      },
+      "questbook": {"ru": "Книга квестов: глава «Applied Energistics 2»", "en": "Quest book: Applied Energistics 2 chapter"},
+      "steps": [
+        {"item": "ae2:sky_stone_block", "title": {"ru": "Небесный камень", "en": "Sky stone"}, "hint": {"ru": "Из метеоритов. Внутри — прессы для высекателя и почкующийся кварц.", "en": "From meteorites. Inside are inscriber presses and budding quartz."}},
+        {"item": "ae2:certus_quartz_crystal", "title": {"ru": "Кристалл истинного кварца", "en": "Certus quartz crystal"}, "hint": {"ru": "Растёт на почкующемся кварце.", "en": "Grows on budding certus quartz."}},
+        {"item": "ae2:charger", "title": {"ru": "Зарядник", "en": "Charger"}, "hint": {"ru": "Заряжает кварц для флюисовых кристаллов.", "en": "Charges quartz for fluix crystals."}},
+        {"item": "ae2:fluix_crystal", "title": {"ru": "Флюисовый кристалл", "en": "Fluix crystal"}, "hint": {"ru": "Заряженный кварц, редстоун и кварц в воде.", "en": "Charged quartz, redstone and quartz dropped in water."}},
+        {"item": "ae2:inscriber", "title": {"ru": "Высекатель", "en": "Inscriber"}, "hint": {"ru": "Печатает схемы для процессоров.", "en": "Prints circuits for processors."}},
+        {"item": "ae2:logic_processor", "title": {"ru": "Логический процессор", "en": "Logic processor"}, "hint": {"ru": "Из печатной схемы, кремния и редстоуна.", "en": "From a printed circuit, silicon and redstone."}},
+        {"item": "ae2:drive", "title": {"ru": "МЭ-привод", "en": "ME drive"}, "hint": {"ru": "Держит диски хранения — склад в одном блоке.", "en": "Holds storage cells — a warehouse in one block."}},
+        {"item": "ae2:controller", "title": {"ru": "МЭ-контроллер", "en": "ME controller"}, "hint": {"ru": "Сердце большой сети. Открывает Эпоху автоматизации.", "en": "The heart of a large network. Unlocks the Age of Automation."}, "gate": true},
+        {"item": "ae2:crafting_terminal", "title": {"ru": "Терминал создания", "en": "Crafting terminal"}, "hint": {"ru": "Доступ ко всем вещам сети и крафт прямо из неё.", "en": "Access every item in the network and craft from it."}},
+        {"item": "ae2:pattern_provider", "title": {"ru": "Поставщик шаблонов", "en": "Pattern provider"}, "hint": {"ru": "С молекулярным сборщиком даёт автокрафт по шаблонам.", "en": "With a molecular assembler it autocrafts from patterns."}}
+      ]
+    },
+    {
+      "id": "industry",
+      "epoch": "industry_age",
+      "title": {"ru": "Индустриальная эпоха", "en": "Industrial Age"},
+      "summary": {
+        "ru": "Modern Industrialization: паровой век, затем электричество LV и многоблочные заводы.",
+        "en": "Modern Industrialization: the steam age, then LV electricity and multiblock factories."
+      },
+      "questbook": {"ru": "Книга квестов: глава «Modern Industrialization»", "en": "Quest book: Modern Industrialization chapter"},
+      "steps": [
+        {"item": "modern_industrialization:forge_hammer", "title": {"ru": "Кузнечный молот", "en": "Forge hammer"}, "hint": {"ru": "Первые пластины, стержни и болты MI.", "en": "The first MI plates, rods and bolts."}},
+        {"item": "modern_industrialization:bronze_boiler", "title": {"ru": "Бронзовый котёл", "en": "Bronze boiler"}, "hint": {"ru": "Пар — первая энергия машин MI.", "en": "Steam — the first power for MI machines."}},
+        {"item": "modern_industrialization:steam_blast_furnace", "title": {"ru": "Паровая доменная печь", "en": "Steam blast furnace"}, "hint": {"ru": "Первый многоблок MI.", "en": "The first MI multiblock."}},
+        {"item": "modern_industrialization:basic_machine_hull", "title": {"ru": "Базовый корпус машины", "en": "Basic machine hull"}, "hint": {"ru": "Начало эпохи LV — электрические машины.", "en": "The start of LV — electric machines."}},
+        {"item": "modern_industrialization:electric_blast_furnace", "title": {"ru": "Электродоменная печь", "en": "Electric blast furnace"}, "hint": {"ru": "Многоблок с купроникелевыми катушками.", "en": "A multiblock with cupronickel coils."}},
+        {"item": "ftbmaterials:aluminum_ingot", "title": {"ru": "Алюминий", "en": "Aluminum"}, "hint": {"ru": "Плавится в электродоменной печи.", "en": "Smelted in the electric blast furnace."}},
+        {"item": "modern_industrialization:electronic_circuit_board", "title": {"ru": "Плата электронной схемы", "en": "Electronic circuit board"}, "hint": {"ru": "Нужна для продвинутых машин.", "en": "Needed for advanced machines."}},
+        {"item": "modern_industrialization:advanced_machine_hull", "title": {"ru": "Усовершенствованный корпус", "en": "Advanced machine hull"}, "hint": {"ru": "Открывает Индустриальную эпоху.", "en": "Unlocks the Industrial Age."}, "gate": true}
+      ]
+    },
+    {
+      "id": "quantum",
+      "epoch": "quantum_age",
+      "title": {"ru": "Квантовая эпоха", "en": "Quantum Age"},
+      "summary": {
+        "ru": "Верх Modern Industrialization: нержавеющая сталь, процессоры, термоядерный синтез и квантовая броня.",
+        "en": "The top of Modern Industrialization: stainless steel, processors, fusion and quantum armor."
+      },
+      "questbook": {"ru": "Книга квестов: глава «Modern Industrialization»", "en": "Quest book: Modern Industrialization chapter"},
+      "steps": [
+        {"item": "ftbmaterials:stainless_steel_ingot", "title": {"ru": "Нержавеющая сталь", "en": "Stainless steel"}, "hint": {"ru": "Нужен вакуумный морозильник.", "en": "Needs the vacuum freezer."}},
+        {"item": "modern_industrialization:turbo_machine_hull", "title": {"ru": "Турбо-корпус", "en": "Turbo machine hull"}, "hint": {"ru": "Следующий уровень машин.", "en": "The next machine tier."}},
+        {"item": "modern_industrialization:processing_unit", "title": {"ru": "Процессор", "en": "Processing unit"}, "hint": {"ru": "Из кремниевых пластин.", "en": "Made from silicon wafers."}},
+        {"item": "modern_industrialization:highly_advanced_machine_hull", "title": {"ru": "Высокотехнологичный корпус", "en": "Highly advanced hull"}, "hint": {"ru": "Высшие машины MI.", "en": "The top MI machines."}},
+        {"item": "modern_industrialization:fusion_reactor", "title": {"ru": "Термоядерный реактор", "en": "Fusion reactor"}, "hint": {"ru": "Плазма и огромное количество энергии.", "en": "Plasma and huge amounts of power."}},
+        {"item": "modern_industrialization:quantum_machine_hull", "title": {"ru": "Квантовый корпус", "en": "Quantum machine hull"}, "hint": {"ru": "Материал для квантового снаряжения.", "en": "Material for quantum gear."}},
+        {"item": "modern_industrialization:quantum_chestplate", "title": {"ru": "Квантовый нагрудник", "en": "Quantum chestplate"}, "hint": {"ru": "Лучшая броня пака. Открывает Квантовую эпоху.", "en": "The best armor in the pack. Unlocks the Quantum Age."}, "gate": true}
+      ]
+    },
+    {
+      "id": "pyramid1",
+      "epoch": null,
+      "title": {"ru": "Пирамида: первый слой", "en": "Pyramid: first layer"},
+      "summary": {
+        "ru": "Финал пака — Пирамида FTB Evolution. Каждый предмет требует своего направления: магии, техники, боссов или ферм. Рецепты — в JEI и в главе «FTB Pyramid Challenge».",
+        "en": "The finale is the FTB Evolution Pyramid. Each item needs a different direction: magic, tech, bosses or farms. Recipes are in JEI and the FTB Pyramid Challenge chapter."
+      },
+      "questbook": {"ru": "Книга квестов: «FTB Pyramid Challenge»", "en": "Quest book: FTB Pyramid Challenge"},
+      "steps": [
+        {"item": "ftbevolution:evolutionary_matter", "title": {"ru": "Эволюционная материя", "en": "Evolutionary matter"}, "hint": {"ru": "Направление: фермы мобов и ванильные боссы.", "en": "Direction: mob farms and vanilla bosses."}},
+        {"item": "ftbevolution:dimensional_memory_fragment", "title": {"ru": "Фрагмент памяти измерений", "en": "Dimensional memory fragment"}, "hint": {"ru": "Направление: снаряжение и исследование миров.", "en": "Direction: gear and exploration."}},
+        {"item": "ftbevolution:elemental_arcanite", "title": {"ru": "Элементальный арканит", "en": "Elemental arcanite"}, "hint": {"ru": "Направление: магия, через первородную эссенцию.", "en": "Direction: magic, via primal essence."}},
+        {"item": "ftbevolution:ender_transmitter", "title": {"ru": "Эндер-передатчик", "en": "Ender transmitter"}, "hint": {"ru": "Направление: технические моды.", "en": "Direction: tech mods."}},
+        {"item": "ftbevolution:infinitely_compressed_circuit_board", "title": {"ru": "Бесконечно сжатая плата", "en": "Infinitely compressed circuit board"}, "hint": {"ru": "Направление: техника и цифровое хранилище.", "en": "Direction: tech and digital storage."}},
+        {"item": "ftbevolution:evolutionary_arcanum", "title": {"ru": "Эволюционный арканум", "en": "Evolutionary arcanum"}, "hint": {"ru": "Направление: магия.", "en": "Direction: magic."}}
+      ]
+    },
+    {
+      "id": "pyramid2",
+      "epoch": null,
+      "title": {"ru": "Пирамида: второй слой", "en": "Pyramid: second layer"},
+      "summary": {
+        "ru": "Второй слой пирамиды. Здесь открываются Эпоха сингулярности и Трансцендентство.",
+        "en": "The pyramid's second layer. This is where the Singularity and Transcendence epochs unlock."
+      },
+      "questbook": {"ru": "Книга квестов: «FTB Pyramid Challenge»", "en": "Quest book: FTB Pyramid Challenge"},
+      "steps": [
+        {"item": "ftbevolution:dissolved_potential", "title": {"ru": "Растворённый потенциал", "en": "Dissolved potential"}, "hint": {"ru": "Направление: фермы мобов и снаряжение.", "en": "Direction: mob farms and gear."}},
+        {"item": "ftbevolution:ethereal_essence", "title": {"ru": "Эфирная эссенция", "en": "Ethereal essence"}, "hint": {"ru": "Направление: магия.", "en": "Direction: magic."}},
+        {"item": "ftbevolution:ultimate_singularity", "title": {"ru": "Абсолютная сингулярность", "en": "Ultimate singularity"}, "hint": {"ru": "Направление: техника. Открывает Эпоху сингулярности.", "en": "Direction: tech. Unlocks the Singularity epoch."}, "gate": true},
+        {"item": "ftbevolution:omega_dragon_egg", "title": {"ru": "Яйцо дракона Омега", "en": "Omega dragon egg"}, "hint": {"ru": "Направление: производство ресурсов, пчёлы и драконы.", "en": "Direction: resource production, bees and dragons."}},
+        {"item": "ftbevolution:realized_transcendence", "title": {"ru": "Воплощённое трансцендентство", "en": "Realized transcendence"}, "hint": {"ru": "Направление: боссы и исследование. Открывает Трансцендентство.", "en": "Direction: bosses and exploration. Unlocks Transcendence."}, "gate": true}
+      ]
+    },
+    {
+      "id": "pyramid3",
+      "epoch": null,
+      "title": {"ru": "Вершина пирамиды", "en": "Top of the pyramid"},
+      "summary": {
+        "ru": "Последний слой и вершина. Механизированный суперкомпьютер — последний предмет пака.",
+        "en": "The last layer and the top. The Mekanized Super Computer is the final item of the pack."
+      },
+      "questbook": {"ru": "Книга квестов: «FTB Pyramid Challenge»", "en": "Quest book: FTB Pyramid Challenge"},
+      "steps": [
+        {"item": "ftbevolution:time_prism", "title": {"ru": "Призма времени", "en": "Time prism"}, "hint": {"ru": "Направление: магия и техника.", "en": "Direction: magic and tech."}},
+        {"item": "ftbevolution:bio_neural_circuit", "title": {"ru": "Био-нейронная схема", "en": "Bio-neural circuit"}, "hint": {"ru": "Направление: технологии конца игры.", "en": "Direction: end-game tech."}},
+        {"item": "ftbevolution:supercritical_mass", "title": {"ru": "Сверхкритическая масса", "en": "Supercritical mass"}, "hint": {"ru": "Направление: продвинутая техника.", "en": "Direction: advanced tech."}},
+        {"item": "minecraft:beacon", "title": {"ru": "Маяк", "en": "Beacon"}, "hint": {"ru": "Активирует пирамиду.", "en": "Activates the pyramid."}},
+        {"item": "ftbevolution:mekanized_super_computer", "title": {"ru": "Механизированный суперкомпьютер", "en": "Mekanized super computer"}, "hint": {"ru": "Вершина пирамиды и конец пака.", "en": "The top of the pyramid and the end of the pack."}, "gate": true}
+      ]
+    }
+  ],
+  "branches": [
+    {
+      "id": "magic",
+      "epoch": "magic_path",
+      "title": {"ru": "Путь магии", "en": "Path of Magic"},
+      "summary": {"ru": "Ars Nouveau: своя мана, заклинания из глифов и магическая автоматизация. Не зависит от техники.", "en": "Ars Nouveau: its own mana, glyph spells and magical automation. Independent from tech."},
+      "questbook": {"ru": "Книга квестов: глава «Ars Nouveau»", "en": "Quest book: Ars Nouveau chapter"},
+      "steps": [
+        {"item": "ars_nouveau:novice_spell_book", "title": {"ru": "Книга заклинаний новичка", "en": "Novice spell book"}, "hint": {"ru": "Первая книга — с неё начинается магия.", "en": "The first book — magic starts here."}},
+        {"item": "ars_nouveau:source_gem", "title": {"ru": "Самоцвет источника", "en": "Source gem"}, "hint": {"ru": "Мана для устройств Ars Nouveau.", "en": "Mana for Ars Nouveau devices."}},
+        {"item": "ars_nouveau:imbuement_chamber", "title": {"ru": "Камера наполнения", "en": "Imbuement chamber"}, "hint": {"ru": "Наполняет предметы силой источника.", "en": "Imbues items with source."}},
+        {"item": "ars_nouveau:enchanting_apparatus", "title": {"ru": "Чародейский аппарат", "en": "Enchanting apparatus"}, "hint": {"ru": "Крафт глифов и магических предметов. Открывает Путь магии.", "en": "Crafts glyphs and magic items. Unlocks the Path of Magic."}, "gate": true}
+      ]
+    },
+    {
+      "id": "arcane",
+      "epoch": "arcane_path",
+      "title": {"ru": "Тайные искусства", "en": "Arcane Arts"},
+      "summary": {"ru": "Forbidden Arcanus, Malum и Occultism: ритуалы, духи и демоны.", "en": "Forbidden Arcanus, Malum and Occultism: rituals, spirits and demons."},
+      "questbook": {"ru": "Книга квестов: главы «Forbidden & Arcanus», «Malum»", "en": "Quest book: Forbidden & Arcanus, Malum chapters"},
+      "steps": [
+        {"item": "forbidden_arcanus:arcane_crystal", "title": {"ru": "Тайный кристалл", "en": "Arcane crystal"}, "hint": {"ru": "Базовый материал Forbidden Arcanus.", "en": "The base material of Forbidden Arcanus."}},
+        {"item": "malum:spirit_altar", "title": {"ru": "Алтарь духов", "en": "Spirit altar"}, "hint": {"ru": "Сердце магии духов Malum.", "en": "The heart of Malum spirit magic."}},
+        {"item": "forbidden_arcanus:clibano_core", "title": {"ru": "Ядро Клибано", "en": "Clibano core"}, "hint": {"ru": "Открывает Тайные искусства.", "en": "Unlocks the Arcane Arts."}, "gate": true}
+      ]
+    },
+    {
+      "id": "hunter",
+      "epoch": "hunter_path",
+      "title": {"ru": "Путь охотника", "en": "Path of the Hunter"},
+      "summary": {"ru": "Боссы L_Ender's Cataclysm и их снаряжение.", "en": "L_Ender's Cataclysm bosses and their gear."},
+      "questbook": {"ru": "Книга квестов: глава «The Wild Hunt»", "en": "Quest book: The Wild Hunt chapter"},
+      "steps": [
+        {"item": "cataclysm:ignitium_ingot", "title": {"ru": "Игнитовый слиток", "en": "Ignitium ingot"}, "hint": {"ru": "Трофей с Игниса. Открывает Путь охотника.", "en": "A trophy from Ignis. Unlocks the Path of the Hunter."}, "gate": true}
+      ]
+    },
+    {
+      "id": "starlight",
+      "epoch": "starlight_path",
+      "title": {"ru": "Вечный Звездосвет", "en": "Eternal Starlight"},
+      "summary": {"ru": "Измерение Eternal Starlight: свои биомы, боссы и материалы.", "en": "The Eternal Starlight dimension: its own biomes, bosses and materials."},
+      "questbook": {"ru": "Книга квестов: глава «The Traveler's Quest»", "en": "Quest book: The Traveler's Quest chapter"},
+      "steps": [
+        {"item": "eternal_starlight:starcore", "title": {"ru": "Звёздное ядро", "en": "Starcore"}, "hint": {"ru": "Открывает Вечный Звездосвет.", "en": "Unlocks Eternal Starlight."}, "gate": true}
+      ]
+    },
+    {
+      "id": "draconic",
+      "epoch": "draconic_path",
+      "title": {"ru": "Дракониевая энергетика", "en": "Draconic Energy"},
+      "summary": {"ru": "Draconic Evolution: крафт слияния, огромное хранение энергии и снаряжение Хаоса.", "en": "Draconic Evolution: fusion crafting, massive energy storage and Chaos gear."},
+      "questbook": {"ru": "Книга квестов: глава «Draconic Evolution»", "en": "Quest book: Draconic Evolution chapter"},
+      "steps": [
+        {"item": "draconicevolution:draconium_ingot", "title": {"ru": "Дракониевый слиток", "en": "Draconium ingot"}, "hint": {"ru": "Из дракониевой руды.", "en": "From draconium ore."}},
+        {"item": "draconicevolution:crafting_core", "title": {"ru": "Ядро слияния", "en": "Fusion crafting core"}, "hint": {"ru": "Основа крафта слияния.", "en": "The base of fusion crafting."}},
+        {"item": "draconicevolution:wyvern_core", "title": {"ru": "Ядро виверны", "en": "Wyvern core"}, "hint": {"ru": "Первый уровень дракониевых предметов.", "en": "The first tier of draconic items."}},
+        {"item": "draconicevolution:chaotic_core", "title": {"ru": "Ядро Хаоса", "en": "Chaotic core"}, "hint": {"ru": "Из осколков Стража Хаоса. Открывает ветку.", "en": "From Chaos Guardian shards. Unlocks this branch."}, "gate": true}
+      ]
+    }
+  ]
+}

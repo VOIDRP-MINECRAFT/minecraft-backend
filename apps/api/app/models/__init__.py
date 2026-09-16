@@ -128,3 +128,4 @@ __all__ = [
     "TelegramGameScore",
     "TelegramLinkToken",
 ]
+from apps.api.app.models.player_guide_item import PlayerGuideItem
