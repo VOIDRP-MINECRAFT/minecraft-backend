@@ -97,6 +97,7 @@ from apps.api.app.api.routes.game_ui_home import router as game_ui_home_router
 from apps.api.app.api.routes.game_ui_battlepass import router as game_ui_battlepass_router
 from apps.api.app.api.routes.game_ui_guide import router as game_ui_guide_router
 from apps.api.app.api.routes.game_ui_guide import plugin_router as game_ui_guide_plugin_router
+from apps.api.app.api.routes.game_sync_nation_checks import router as game_sync_nation_checks_router
 from apps.api.app.api.routes.game_ui_battlepass import plugin_router as game_ui_battlepass_plugin_router
 from apps.api.app.api.routes.game_ui_alliance import router as game_ui_alliance_router
 from apps.api.app.api.routes.voxel import router as voxel_router
@@ -189,6 +190,7 @@ api_router.include_router(game_ui_home_router)
 api_router.include_router(game_ui_battlepass_router)
 api_router.include_router(game_ui_guide_router)
 api_router.include_router(game_ui_guide_plugin_router)
+api_router.include_router(game_sync_nation_checks_router)
 api_router.include_router(game_ui_battlepass_plugin_router)
 api_router.include_router(game_ui_alliance_router)
 api_router.include_router(servers_router)
