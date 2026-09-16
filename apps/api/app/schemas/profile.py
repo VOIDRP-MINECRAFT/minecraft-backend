@@ -114,6 +114,22 @@ class PublicProfileRead(BaseModel):
     current_referral_rank_expires_at: datetime | None = None
 
 
+class PublicUserSummaryRead(BaseModel):
+    """What anyone may see about a profile's owner: no email, id, roles or permissions."""
+    site_login: str
+    created_at: datetime
+
+
+class PublicPlayerAccountSummaryRead(BaseModel):
+    minecraft_nickname: str
+
+
+class PublicProfileViewRead(PublicProfileRead):
+    """``GET /profiles/{slug}`` — the page is public, so the owner's account is trimmed."""
+    user: PublicUserSummaryRead
+    player_account: PublicPlayerAccountSummaryRead
+
+
 class UpdatePublicProfileRequest(BaseModel):
     slug: str | None = Field(default=None, min_length=3, max_length=64)
     display_name: str | None = Field(default=None, max_length=64)

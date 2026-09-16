@@ -13,6 +13,7 @@ from apps.api.app.schemas.profile import (
     DeleteProfileAssetResponse,
     ProfileAssetUploadResponse,
     PublicProfileRead,
+    PublicProfileViewRead,
     UpdatePublicProfileRequest,
 )
 from apps.api.app.services.media_service import MediaValidationError, ProfileMediaService
@@ -60,14 +61,16 @@ def update_my_profile(
         ) from exc
 
 
-@router.get("/{slug}", response_model=PublicProfileRead)
+@router.get("/{slug}", response_model=PublicProfileViewRead)
 def get_public_profile(
     slug: str,
     viewer: Annotated[User | None, Depends(get_optional_current_user)],
     service: Annotated[PublicProfileService, Depends(get_profile_service)],
-) -> PublicProfileRead:
+) -> PublicProfileViewRead:
+    # Anyone (including anonymous visitors) can open this, so it must not carry the
+    # owner's email, id or staff flags — PublicProfileViewRead trims the account.
     try:
-        return service.get_by_slug(slug, viewer=viewer)
+        return PublicProfileViewRead.model_validate(service.get_by_slug(slug, viewer=viewer).model_dump())
     except PublicProfileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
