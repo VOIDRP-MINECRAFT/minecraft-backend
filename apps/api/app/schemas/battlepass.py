@@ -50,6 +50,8 @@ class BattlePassPublicProfileResponse(BaseModel):
     xp: int
     has_premium: bool
     premium_expires_at: datetime | None
+    max_level: int | None = None       # level cap of the active season (None = no active season)
+    season_name: str | None = None
 
 
 class AdminBattlePassPlayerInfo(BaseModel):

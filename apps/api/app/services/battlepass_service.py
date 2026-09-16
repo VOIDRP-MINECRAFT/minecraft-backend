@@ -253,6 +253,14 @@ class BattlePassService:
         if progress is None:
             return None
         premium_status = self.get_premium_status(progress.minecraft_uuid)
+        from apps.api.app.models.battlepass_season import BattlePassSeason
+
+        season = self.session.execute(
+            select(BattlePassSeason).where(
+                BattlePassSeason.server_id == self.server_id,
+                BattlePassSeason.is_active.is_(True),
+            )
+        ).scalar_one_or_none()
         return BattlePassPublicProfileResponse(
             minecraft_uuid=progress.minecraft_uuid,
             season=progress.season,
@@ -260,6 +268,8 @@ class BattlePassService:
             xp=progress.xp,
             has_premium=premium_status.has_premium,
             premium_expires_at=premium_status.expires_at,
+            max_level=season.max_level if season else None,
+            season_name=season.name if season else None,
         )
 
     def get_admin_player_info_by_nick(self, nickname: str) -> AdminBattlePassPlayerInfo:
