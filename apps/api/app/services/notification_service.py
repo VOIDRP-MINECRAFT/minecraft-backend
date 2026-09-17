@@ -16,7 +16,7 @@ FEED_LIMIT = 12
 
 # Notification types a player may opt out of (chatty ones). Important types
 # (join requests, approvals, season rewards, alliance votes) are always delivered.
-MUTABLE_NOTIFICATION_TYPES = {"market_sold", "achievement", "weekly_challenge", "login_streak", "battlepass", "tip"}
+MUTABLE_NOTIFICATION_TYPES = {"market_sold", "achievement", "weekly_challenge", "login_streak", "battlepass", "tip", "trader"}
 
 
 class NotificationService:

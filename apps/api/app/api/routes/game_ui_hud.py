@@ -22,6 +22,19 @@ from apps.api.app.services.battlepass_service import BattlePassService
 router = APIRouter(prefix="/game-ui/hud", tags=["game-ui", "hud"])
 
 
+def _trader_info(db: Session, server_id) -> dict | None:
+    # The HUD must never fail because of the trader; it is an extra chip.
+    try:
+        from apps.api.app.api.routes.trader import hud_trader_info
+
+        info = hud_trader_info(db, server_id)
+        db.commit()
+        return info
+    except Exception:
+        db.rollback()
+        return None
+
+
 class HudSnapshot(BaseModel):
     balance: float
     void_coins: int = 0
@@ -32,6 +45,7 @@ class HudSnapshot(BaseModel):
     bp_level: int = 0
     bp_xp: int = 0
     bp_has_premium: bool = False
+    trader: dict | None = None
 
 
 @router.get("/snapshot", response_model=HudSnapshot)
@@ -93,4 +107,5 @@ def get_hud_snapshot(
         bp_level=bp.level if bp else 0,
         bp_xp=bp.xp if bp else 0,
         bp_has_premium=bp.has_premium if bp else False,
+        trader=_trader_info(db, server.id),
     )

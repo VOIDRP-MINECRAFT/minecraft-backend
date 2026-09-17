@@ -76,6 +76,8 @@ from apps.api.app.api.routes.game_ui_upgrader import router as game_ui_upgrader_
 from apps.api.app.api.routes.game_ui_cosmetics import router as game_ui_cosmetics_router
 from apps.api.app.api.routes.game_ui_cosmetics import plugin_router as game_ui_cosmetics_plugin_router
 from apps.api.app.api.routes.admin_upgrader import router as admin_upgrader_router
+from apps.api.app.api.routes.admin_trader import router as admin_trader_router
+from apps.api.app.api.routes.trader import plugin_router as trader_plugin_router, ui_router as trader_ui_router
 from apps.api.app.api.routes.admin_cosmetics import router as admin_cosmetics_router
 from apps.api.app.api.routes.game_ui_nation_market import router as game_ui_nation_market_router
 from apps.api.app.api.routes.game_ui_treasury import router as game_ui_treasury_router
@@ -170,6 +172,9 @@ api_router.include_router(game_ui_upgrader_router)
 api_router.include_router(game_ui_cosmetics_router)
 api_router.include_router(game_ui_cosmetics_plugin_router)
 api_router.include_router(admin_upgrader_router)
+api_router.include_router(admin_trader_router)
+api_router.include_router(trader_plugin_router)
+api_router.include_router(trader_ui_router)
 api_router.include_router(admin_cosmetics_router)
 api_router.include_router(game_ui_nation_market_router)
 api_router.include_router(game_ui_treasury_router)
