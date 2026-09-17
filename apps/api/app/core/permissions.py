@@ -105,6 +105,13 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
     {
+        "group": "Скупщик",
+        "permissions": [
+            {"key": "trader.view", "label": "Скупщик: визиты, каталог и сделки (просмотр)"},
+            {"key": "trader.manage", "label": "Скупщик: править каталог/настройки, вызывать и завершать визиты", "sensitive": True},
+        ],
+    },
+    {
         "group": "Косметика (Figura)",
         "permissions": [
             {"key": "figura.wardrobe", "label": "Figura: открывать меню мода (гардероб/загрузка)", "sensitive": True},
