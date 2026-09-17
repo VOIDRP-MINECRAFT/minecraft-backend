@@ -18,6 +18,7 @@ from apps.api.app.schemas.play_ticket import (
     IssuePlayTicketRequest,
     IssuePlayTicketResponse,
 )
+from apps.api.app.services.consent_service import ConsentService
 from apps.api.app.services.play_ticket_service import PlayTicketService, PlayTicketValidationError
 
 launcher_router = APIRouter(prefix="/launcher", tags=["launcher"])
@@ -36,7 +37,16 @@ def issue_play_ticket(
     payload: IssuePlayTicketRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[PlayTicketService, Depends(get_play_ticket_service)],
+    session: Annotated[Session, Depends(get_db_session)],
 ) -> IssuePlayTicketResponse:
+    # The game is entered only after the offer and the personal data consent are accepted. The
+    # launcher asks for them right after login; older launchers get this message instead. 409 (not
+    # 403) so the launcher shows it without treating it as an expired session.
+    if ConsentService(session).status(current_user.id)["missing"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Мы обновили правила проекта. Подтвердите договор оферты и согласие на обработку персональных данных в лаунчере или на сайте void-rp.ru, чтобы продолжить играть.",
+        )
     try:
         issued = service.issue_for_user(
             user=current_user,
