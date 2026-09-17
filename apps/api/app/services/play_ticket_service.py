@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+
 import hashlib
 import hmac
 from dataclasses import dataclass
@@ -41,6 +43,8 @@ class IssuedPlayTicket:
     expires_at: datetime
     minecraft_nickname: str
     ttl_seconds: int
+    # Label the launcher prefixes to the server hostname on plugin servers.
+    hostname_label: str | None = None
 
 
 @dataclass(slots=True)
@@ -97,6 +101,7 @@ class PlayTicketService:
             expires_at=expires_at,
             consumed_at=None,
             issued_ip=(issued_ip or None),
+            hostname_label=secrets.token_hex(12),
         )
         self.session.add(ticket)
         self.session.commit()
@@ -107,6 +112,7 @@ class PlayTicketService:
             expires_at=expires_at,
             minecraft_nickname=user.player_account.minecraft_nickname,
             ttl_seconds=max(ttl_seconds, 0),
+            hostname_label=ticket.hostname_label,
         )
 
     def consume(

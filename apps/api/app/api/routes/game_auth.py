@@ -10,6 +10,9 @@ only the entry point differs, and consents are stamped ``source="game"``.
 
 from __future__ import annotations
 
+import ipaddress
+from datetime import timedelta
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -54,6 +57,24 @@ router = APIRouter(
 # per IP: the attacker picks the IP, the victim's nickname is what we protect.
 MAX_FAILED_ATTEMPTS = 6
 LOCKOUT_SECONDS = 600
+
+
+# How recently the launcher must have taken the ticket for this path to accept it.
+LAUNCHER_TICKET_WINDOW_MINUTES = 10
+
+
+def _is_private(address: str) -> bool:
+    try:
+        return ipaddress.ip_address(address).is_private or ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
+
+
+def _same_origin(issued_ip: str, joining_ip: str) -> bool:
+    if issued_ip == joining_ip:
+        return True
+    # A LAN player: both sides are local, so the pair cannot come from the internet.
+    return _is_private(issued_ip) and _is_private(joining_ip)
 
 
 def _auth_service(session: Session) -> AuthService:
@@ -343,21 +364,20 @@ def game_launcher_ticket(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Аккаунт не найден.")
 
     _, normalized = normalize_minecraft_nickname(payload.minecraft_nickname)
-    ticket = (
-        session.execute(
-            select(PlayTicket)
-            .where(
-                PlayTicket.server_id == server.id,
-                PlayTicket.user_id == account.user_id,
-                PlayTicket.consumed_at.is_(None),
-                PlayTicket.expires_at > utc_now(),
-            )
-            .order_by(PlayTicket.issued_at.desc())
-            .with_for_update()
-        )
-        .scalars()
-        .first()
+    query = select(PlayTicket).where(
+        PlayTicket.server_id == server.id,
+        PlayTicket.user_id == account.user_id,
+        PlayTicket.consumed_at.is_(None),
+        PlayTicket.expires_at > utc_now(),
     )
+    # A label read from the address proves the launcher itself sent this player: it is
+    # a secret only that launcher was given. Without one we fall back to matching the
+    # address the ticket was taken from, which a VPN or a shared LAN can break.
+    by_label = bool(payload.label)
+    if by_label:
+        query = query.where(PlayTicket.hostname_label == payload.label)
+
+    ticket = session.execute(query.order_by(PlayTicket.issued_at.desc()).with_for_update()).scalars().first()
 
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Активный билет лаунчера не найден.")
@@ -366,9 +386,18 @@ def game_launcher_ticket(
     if ticket_nick != normalized:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Билет выдан другому нику.")
 
+    # Only a ticket taken moments ago counts here. Tickets live for a day so the
+    # launcher can keep one around, but "the player our launcher just sent" is a
+    # question about the last few minutes.
+    if ticket.issued_at < utc_now() - timedelta(minutes=LAUNCHER_TICKET_WINDOW_MINUTES):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Билет лаунчера устарел.")
+
     # The address must match the one the launcher asked from — otherwise knowing a
-    # nickname would be enough to ride someone else's ticket.
-    if ticket.issued_ip and payload.ip and ticket.issued_ip != payload.ip:
+    # nickname would be enough to ride someone else's ticket. Two addresses inside the
+    # same private network count as a match: when the player and the server share a LAN,
+    # the launcher's request and the game connection arrive from different local
+    # addresses (router, hairpin NAT) even though it is the same person.
+    if not by_label and ticket.issued_ip and payload.ip and not _same_origin(ticket.issued_ip, payload.ip):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Билет выдан с другого адреса.")
 
     ticket.consumed_at = utc_now()

@@ -16,6 +16,9 @@ class IssuePlayTicketResponse(BaseModel):
     expires_at: datetime
     minecraft_nickname: str
     ttl_seconds: int
+    # On plugin servers the launcher connects the game to
+    # "<hostname_label>.<server host>" so a vanilla client carries the ticket.
+    hostname_label: str | None = None
 
 
 class ConsumePlayTicketRequest(BaseModel):

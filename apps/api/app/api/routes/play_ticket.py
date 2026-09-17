@@ -64,6 +64,7 @@ def issue_play_ticket(
         expires_at=issued.expires_at,
         minecraft_nickname=issued.minecraft_nickname,
         ttl_seconds=issued.ttl_seconds,
+        hostname_label=issued.hostname_label,
     )
 
 

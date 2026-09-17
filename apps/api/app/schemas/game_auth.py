@@ -83,3 +83,5 @@ class GameLauncherTicketRequest(BaseModel):
 
     minecraft_nickname: str = Field(min_length=3, max_length=16)
     ip: str | None = Field(default=None, max_length=64)
+    # Label read from the address the client connected to, when there is one.
+    label: str | None = Field(default=None, max_length=32, pattern=r"^[a-zA-Z0-9-]+$")

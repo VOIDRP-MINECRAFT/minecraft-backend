@@ -30,6 +30,10 @@ class PlayTicket(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
     # proves a joining player is the one who took the ticket.
     issued_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Short DNS-safe label the launcher puts in front of the server hostname, so a
+    # vanilla client can carry the ticket in the address it connects to.
+    hostname_label: Mapped[str | None] = mapped_column(String(32), nullable=True, unique=True, index=True)
+
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
