@@ -58,7 +58,7 @@ DEFAULT_AUTH_SETTINGS: dict[str, int] = {
 AUTH_SETTINGS_BOUNDS: dict[str, tuple[int, int]] = {
     "play_ticket_expire_minutes": (5, 10080),
     "auth_grace_seconds": (0, 3600),
-    "request_timeout_ms": (1000, 120000),
+    "request_timeout_ms": (1000, 1_200_000),
     "reconnect_grant_minutes": (1, 1440),
 }
 

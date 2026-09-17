@@ -22,6 +22,7 @@ from apps.api.app.models.play_ticket import PlayTicket
 from apps.api.app.models.player_notification import PlayerNotification
 from apps.api.app.models.player_feedback import PlayerFeedback
 from apps.api.app.models.player_account import PlayerAccount
+from apps.api.app.models.player_activity import PlayerServerActivity
 from apps.api.app.models.player_stat_cache import PlayerStatCache
 from apps.api.app.models.player_playtime_daily import PlayerPlaytimeDaily
 from apps.api.app.models.void_upgrader import VoidUpgraderReward, VoidUpgraderSpin
@@ -92,6 +93,7 @@ __all__ = [
     "PlayerNotification",
     "PlayerFeedback",
     "PlayerAccount",
+    "PlayerServerActivity",
     "PlayerStatCache",
     "PlayerPlaytimeDaily",
     "VoidUpgraderReward",

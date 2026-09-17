@@ -24,6 +24,13 @@ class PlayerAccount(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # Premium currency (account-wide), bought via donation / granted by admins. Starts at 0.
     void_coins: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
 
+    # Where this account was created: "site" (registration form) or "game" (the login
+    # plugin's window), plus the server the player was joining when they registered.
+    registration_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    registration_server_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("game_servers.id", ondelete="SET NULL"), nullable=True
+    )
+
     nickname_locked: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     legacy_auth_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     legacy_password_hash: Mapped[str | None] = mapped_column(String(512), nullable=True)

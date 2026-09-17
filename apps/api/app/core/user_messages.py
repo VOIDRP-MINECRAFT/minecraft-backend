@@ -60,6 +60,7 @@ _CONTAINS_RULES: list[tuple[str, str]] = [
     ("site login is already taken", "Этот логин уже занят."),
     ("email is already registered", "На эту почту уже зарегистрирован аккаунт."),
     ("minecraft nickname is already taken", "Этот игровой ник уже занят."),
+    ("already linked to another account", "Этот игровой ник уже привязан к другому аккаунту."),
     ("invalid login or password", "Неверный логин или пароль."),
     ("invalid credentials", "Неверный логин или пароль."),
     ("refresh token is invalid", "Сессия входа недействительна. Войди снова."),

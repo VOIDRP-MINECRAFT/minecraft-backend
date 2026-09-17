@@ -6,7 +6,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from apps.api.app.core.security import utc_now
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
+from apps.api.app.models.player_activity import PlayerServerActivity
 from apps.api.app.models.refresh_session import RefreshSession
 from apps.api.app.models.user import User
 from apps.api.app.schemas.admin import (
@@ -15,6 +17,7 @@ from apps.api.app.schemas.admin import (
     AdminPlayerAccountRead,
     AdminPlayerDiagnostics,
     AdminPlayerRecord,
+    AdminPlayerServerActivity,
     AdminPlayersListResponse,
     AdminUserRead,
 )
@@ -61,9 +64,12 @@ class AdminPlayerService:
         total = int(self.session.scalar(count_statement) or 0)
         rows = self.session.execute(statement).unique().scalars().all()
 
+        # One query for the whole page instead of one per player.
+        activity = self._load_activity([row.user_id for row in rows])
+
         return AdminPlayersListResponse(
             total=total,
-            items=[self._build_record(row) for row in rows],
+            items=[self._build_record(row, activity.get(row.user_id, [])) for row in rows],
         )
 
     def get_player(self, *, player_account_id: UUID) -> AdminPlayerRecord | None:
@@ -76,7 +82,10 @@ class AdminPlayerService:
         if player_account is None or player_account.user is None:
             return None
 
-        return self._build_record(player_account)
+        return self._build_record(
+            player_account,
+            self._load_activity([player_account.user_id]).get(player_account.user_id, []),
+        )
 
     def get_summary(self) -> AdminLegacySummaryResponse:
         total_players = int(
@@ -239,7 +248,42 @@ class AdminPlayerService:
 
         return filters
 
-    def _build_record(self, player_account: PlayerAccount) -> AdminPlayerRecord:
+    def _load_activity(self, user_ids: list[UUID]) -> dict[UUID, list[AdminPlayerServerActivity]]:
+        if not user_ids:
+            return {}
+        rows = self.session.execute(
+            select(PlayerServerActivity, GameServer)
+            .join(GameServer, GameServer.id == PlayerServerActivity.server_id)
+            .where(PlayerServerActivity.user_id.in_(user_ids))
+            .order_by(PlayerServerActivity.last_seen_at.desc())
+        ).all()
+
+        grouped: dict[UUID, list[AdminPlayerServerActivity]] = {}
+        for activity, server in rows:
+            grouped.setdefault(activity.user_id, []).append(
+                AdminPlayerServerActivity(
+                    server_slug=server.slug,
+                    server_name=server.name,
+                    first_seen_at=activity.first_seen_at,
+                    last_seen_at=activity.last_seen_at,
+                    last_client=activity.last_client,
+                    launcher_logins=activity.launcher_logins,
+                    external_logins=activity.external_logins,
+                )
+            )
+        return grouped
+
+    def _registration_server_slug(self, player_account: PlayerAccount) -> str | None:
+        if player_account.registration_server_id is None:
+            return None
+        server = self.session.get(GameServer, player_account.registration_server_id)
+        return server.slug if server else None
+
+    def _build_record(
+        self,
+        player_account: PlayerAccount,
+        servers: list[AdminPlayerServerActivity] | None = None,
+    ) -> AdminPlayerRecord:
         user = player_account.user
         if user is None:
             raise ValueError("player_account.user must be loaded")
@@ -273,6 +317,9 @@ class AdminPlayerService:
                 must_use_launcher=bool(user.is_active and not player_account.legacy_auth_enabled),
                 refresh_sessions_active=active_refresh_sessions,
             ),
+            registration_source=player_account.registration_source,
+            registration_server_slug=self._registration_server_slug(player_account),
+            servers=servers or [],
         )
 
     def _revoke_active_refresh_sessions(self, user_id: UUID) -> None:

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
+from apps.api.app.core.email_domains import EMAIL_DOMAIN_ERROR, is_allowed_email
 from apps.api.app.core.security import (
     build_access_token,
     generate_opaque_token,
@@ -82,6 +83,11 @@ class AuthService:
         login_raw, login_normalized = normalize_site_login(site_login)
         nickname_raw, nickname_normalized = normalize_minecraft_nickname(minecraft_nickname)
         email_normalized = normalize_email(email)
+
+        # Enforced here rather than in the route so every entry point — the site form,
+        # the API and registration from inside the game — obeys the same rule.
+        if not is_allowed_email(email_normalized):
+            raise ValueError(EMAIL_DOMAIN_ERROR)
 
         if self.user_repository.get_by_site_login_normalized(login_normalized):
             raise ConflictError("site_login is already taken")

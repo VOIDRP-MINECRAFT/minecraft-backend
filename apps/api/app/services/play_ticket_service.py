@@ -13,6 +13,8 @@ from apps.api.app.config import get_settings
 from apps.api.app.core.security import generate_opaque_token, hash_opaque_token, utc_now
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.play_ticket import PlayTicket
+from apps.api.app.models.player_activity import CLIENT_LAUNCHER
+from apps.api.app.services.player_activity_service import PlayerActivityService
 from apps.api.app.models.user import User
 from apps.api.app.utils.normalization import normalize_minecraft_nickname
 
@@ -147,6 +149,10 @@ class PlayTicketService:
                 raise PlayTicketValidationError("launcher proof is invalid")
 
         play_ticket.consumed_at = now
+        # A consumed ticket means the player came through our launcher on this server.
+        PlayerActivityService(self.session).record(
+            user_id=user.id, server_id=play_ticket.server_id, client=CLIENT_LAUNCHER
+        )
         self.session.commit()
 
         return ConsumedPlayTicket(

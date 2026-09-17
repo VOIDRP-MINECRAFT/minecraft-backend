@@ -34,10 +34,26 @@ class AdminPlayerDiagnostics(BaseModel):
     refresh_sessions_active: int
 
 
+class AdminPlayerServerActivity(BaseModel):
+    """Where the player plays and what they connect with, one entry per server."""
+
+    server_slug: str
+    server_name: str
+    first_seen_at: datetime
+    last_seen_at: datetime
+    last_client: str
+    launcher_logins: int
+    external_logins: int
+
+
 class AdminPlayerRecord(BaseModel):
     user: AdminUserRead
     player_account: AdminPlayerAccountRead
     diagnostics: AdminPlayerDiagnostics
+    # "site" or "game"; the server is set only for accounts registered in game.
+    registration_source: str | None = None
+    registration_server_slug: str | None = None
+    servers: list[AdminPlayerServerActivity] = []
 
 
 class AdminPlayersListResponse(BaseModel):
