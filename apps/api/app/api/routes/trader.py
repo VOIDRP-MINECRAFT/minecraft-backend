@@ -107,6 +107,30 @@ def trade_result(
     return {"ok": True, "status": tx.status, "qty_done": tx.qty_done}
 
 
+class SpawnRequest(BaseModel):
+    world: str = Field(min_length=1, max_length=64)
+    x: float
+    y: float
+    z: float
+    yaw: float = 0.0
+    set_by: str | None = Field(default=None, max_length=16)
+
+
+@plugin_router.post("/spawn")
+def set_spawn(
+    payload: SpawnRequest,
+    server: Annotated[GameServer, Depends(require_game_server)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """``/vrgs trader here`` from an operator in game: the NPC will stand where they stand."""
+    service = TraderService(db, server.id)
+    cfg = service.config()
+    cfg.spawn = cfg.spawn.model_validate({"world": payload.world, "x": payload.x, "y": payload.y, "z": payload.z, "yaw": payload.yaw})
+    service.save_config(cfg, payload.set_by or "game")
+    db.commit()
+    return {"ok": True, "spawn": cfg.spawn.model_dump()}
+
+
 # ── WebGUI page ──────────────────────────────────────────────────────────────
 def _tx_out(tx: TraderTransaction) -> dict:
     return {
@@ -127,7 +151,7 @@ def _tx_out(tx: TraderTransaction) -> dict:
 def _active_with_session(service: TraderService, player: PlayerAccount) -> TraderVisit:
     visit = service.active_visit(create=False)
     if visit is None:
-        raise HTTPException(status_code=404, detail="Скупщик ушёл. Следите за уведомлениями — он приходит на спавн каждые два часа.")
+        raise HTTPException(status_code=404, detail="Скупщик ушёл. Он регулярно приходит на спавн — следите за уведомлениями.")
     if not service.has_session(player.minecraft_nickname, visit):
         raise HTTPException(status_code=403, detail="Торговля открывается только у скупщика: подойдите к нему на спавне и нажмите правой кнопкой.")
     return visit
