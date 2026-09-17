@@ -175,6 +175,10 @@ echo "Готово."
 """
 
 
+# Cores that run plugins, not mods — their players use an unmodified client.
+PLUGIN_LOADERS = {"paper", "purpur", "spigot", "bukkit", "folia", "vanilla"}
+
+
 def write_runtime_build_script(slug: str, *, name: str, mc_version: str | None,
                                loader: str | None, neoforge_version: str | None,
                                java_version: int | None, port: int | None) -> str:
@@ -186,15 +190,20 @@ def write_runtime_build_script(slug: str, *, name: str, mc_version: str | None,
     path = os.path.join(REPO_ROOT, rel)
     folder = launcher_folder_name(slug, neoforge_version, mc_version)
     nf = neoforge_version or (mc_version or "")
+    # Plugin cores (Paper and friends) run a plain client: the launcher profile is the
+    # Minecraft version itself and there is no mod loader to pin, so a new plugin server
+    # gets a ready script instead of one with TODOs that only fit NeoForge.
+    plugin_core = (loader or "").lower() in PLUGIN_LOADERS
+    profile_id = (mc_version or nf) if plugin_core else f"{loader or 'neoforge'}-{nf}"
     subs = {
         "@@SLUG@@": slug,
         "@@NAME@@": (name or slug).replace('"', "'"),
         "@@SERVER@@": f"{LAUNCHER_ROOT}/{folder}",
         "@@BASE_URL@@": f"{PUBLIC_LAUNCHER_BASE}/{folder}",
         "@@MC@@": mc_version or "",
-        "@@LOADER@@": loader or "neoforge",
+        "@@LOADER@@": "vanilla" if plugin_core else (loader or "neoforge"),
         "@@NEOFORGE@@": nf,
-        "@@PROFILE_ID@@": f"{loader or 'neoforge'}-{nf}",
+        "@@PROFILE_ID@@": profile_id,
         "@@FML@@": "0.0.0",
         "@@NEOFORM@@": mc_version or "",
         "@@JAVA@@": str(java_version or 21),

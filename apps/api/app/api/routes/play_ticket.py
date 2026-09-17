@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.user_messages import translate_user_message
@@ -18,6 +18,7 @@ from apps.api.app.schemas.play_ticket import (
     IssuePlayTicketRequest,
     IssuePlayTicketResponse,
 )
+from apps.api.app.core.audit import client_ip
 from apps.api.app.services.consent_service import ConsentService
 from apps.api.app.services.play_ticket_service import PlayTicketService, PlayTicketValidationError
 
@@ -35,6 +36,7 @@ def get_play_ticket_service(
 @launcher_router.post("/play-ticket", response_model=IssuePlayTicketResponse)
 def issue_play_ticket(
     payload: IssuePlayTicketRequest,
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[PlayTicketService, Depends(get_play_ticket_service)],
     session: Annotated[Session, Depends(get_db_session)],
@@ -52,6 +54,7 @@ def issue_play_ticket(
             user=current_user,
             launcher_version=payload.launcher_version,
             launcher_platform=payload.launcher_platform,
+            issued_ip=client_ip(request),
         )
     except PlayTicketValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=translate_user_message(str(exc))) from exc

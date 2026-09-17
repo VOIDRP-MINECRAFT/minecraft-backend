@@ -26,6 +26,9 @@ class PlayTicket(UuidPrimaryKeyMixin, ServerScopedMixin, Base):
 
     launcher_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     launcher_platform: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Address the launcher asked for the ticket from: on plugin servers it is what
+    # proves a joining player is the one who took the ticket.
+    issued_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

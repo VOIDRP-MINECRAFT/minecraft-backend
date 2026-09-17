@@ -76,3 +76,10 @@ class GameSeenRequest(BaseModel):
 
     minecraft_nickname: str = Field(min_length=3, max_length=16)
     client: str = Field(default="external", pattern="^(launcher|external)$")
+
+
+class GameLauncherTicketRequest(BaseModel):
+    """Is this joining player the one our launcher just handed a ticket to?"""
+
+    minecraft_nickname: str = Field(min_length=3, max_length=16)
+    ip: str | None = Field(default=None, max_length=64)

@@ -24,6 +24,8 @@ from apps.api.app.dependencies.server_auth import require_game_auth_secret, requ
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_activity import CLIENT_EXTERNAL, CLIENT_LAUNCHER
 from apps.api.app.services.player_activity_service import PlayerActivityService
+from apps.api.app.core.security import utc_now
+from apps.api.app.models.play_ticket import PlayTicket
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.schemas.game_auth import (
     GameAccountStateResponse,
@@ -31,6 +33,7 @@ from apps.api.app.schemas.game_auth import (
     GameLoginRequest,
     GameLoginResponse,
     GameRegisterRequest,
+    GameLauncherTicketRequest,
     GameSeenRequest,
 )
 from apps.api.app.services.auth_service import AuthService, ConflictError
@@ -307,6 +310,71 @@ def game_seen(
 
     client = CLIENT_LAUNCHER if payload.client == CLIENT_LAUNCHER else CLIENT_EXTERNAL
     PlayerActivityService(session).record(user_id=account.user_id, server_id=server.id, client=client)
+    session.commit()
+
+    missing, distribution_answered = _consent_state(session, account.user_id)
+    return GameLoginResponse(
+        user_id=account.user_id,
+        minecraft_nickname=account.minecraft_nickname,
+        email_verified=bool(account.user.email_verified),
+        consents_missing=missing,
+        distribution_answered=distribution_answered,
+    )
+
+
+@router.post("/launcher-ticket", response_model=GameLoginResponse)
+def game_launcher_ticket(
+    payload: GameLauncherTicketRequest,
+    server: Annotated[GameServer, Depends(require_game_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> GameLoginResponse:
+    """Recognises a player who came through our launcher, without a mod in the client.
+
+    A modded server gets the ticket itself from the auth-bridge mod. A plugin server
+    cannot: a vanilla client carries nothing but its nickname. So the launcher's ticket
+    is matched here by nickname plus the address it was issued to, and consumed the same
+    way — one use, and it expires on its own. Any new plugin server gets this for free:
+    the ticket is already scoped to the server by the secret the plugin authenticates
+    with, so nothing has to be set up per server.
+    """
+
+    account = _find_account(session, payload.minecraft_nickname)
+    if account is None or account.user is None or not account.user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Аккаунт не найден.")
+
+    _, normalized = normalize_minecraft_nickname(payload.minecraft_nickname)
+    ticket = (
+        session.execute(
+            select(PlayTicket)
+            .where(
+                PlayTicket.server_id == server.id,
+                PlayTicket.user_id == account.user_id,
+                PlayTicket.consumed_at.is_(None),
+                PlayTicket.expires_at > utc_now(),
+            )
+            .order_by(PlayTicket.issued_at.desc())
+            .with_for_update()
+        )
+        .scalars()
+        .first()
+    )
+
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Активный билет лаунчера не найден.")
+
+    _, ticket_nick = normalize_minecraft_nickname(ticket.minecraft_nickname)
+    if ticket_nick != normalized:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Билет выдан другому нику.")
+
+    # The address must match the one the launcher asked from — otherwise knowing a
+    # nickname would be enough to ride someone else's ticket.
+    if ticket.issued_ip and payload.ip and ticket.issued_ip != payload.ip:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Билет выдан с другого адреса.")
+
+    ticket.consumed_at = utc_now()
+    PlayerActivityService(session).record(
+        user_id=account.user_id, server_id=server.id, client=CLIENT_LAUNCHER
+    )
     session.commit()
 
     missing, distribution_answered = _consent_state(session, account.user_id)

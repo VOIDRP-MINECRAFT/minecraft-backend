@@ -75,6 +75,7 @@ class PlayTicketService:
         user: User,
         launcher_version: str,
         launcher_platform: str,
+        issued_ip: str | None = None,
     ) -> IssuedPlayTicket:
         if user.player_account is None:
             raise PlayTicketValidationError("player account is not linked")
@@ -95,6 +96,7 @@ class PlayTicketService:
             issued_at=now,
             expires_at=expires_at,
             consumed_at=None,
+            issued_ip=(issued_ip or None),
         )
         self.session.add(ticket)
         self.session.commit()
