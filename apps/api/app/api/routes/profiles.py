@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.legal_documents import DISTRIBUTION_PROFILE
 from apps.api.app.core.user_messages import translate_user_message
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user, get_optional_current_user
@@ -16,6 +17,7 @@ from apps.api.app.schemas.profile import (
     PublicProfileViewRead,
     UpdatePublicProfileRequest,
 )
+from apps.api.app.services.consent_service import ConsentService
 from apps.api.app.services.media_service import MediaValidationError, ProfileMediaService
 from apps.api.app.services.public_profile_service import (
     PublicProfileConflictError,
@@ -70,12 +72,17 @@ def get_public_profile(
     # Anyone (including anonymous visitors) can open this, so it must not carry the
     # owner's email, id or staff flags — PublicProfileViewRead trims the account.
     try:
-        return PublicProfileViewRead.model_validate(service.get_by_slug(slug, viewer=viewer).model_dump())
+        profile = service.get_by_slug(slug, viewer=viewer)
     except PublicProfileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=translate_user_message(str(exc)),
         ) from exc
+    # Making the profile public is distribution of personal data (152-FZ art. 10.1): shown to
+    # others only when the owner allowed it; the owner always sees their own page.
+    if not profile.viewer.is_self and not ConsentService(service.session).status_distribution(profile.user.id)[DISTRIBUTION_PROFILE]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Игрок скрыл публичный профиль.")
+    return PublicProfileViewRead.model_validate(profile.model_dump())
 
 
 @router.get("/{slug}/game")

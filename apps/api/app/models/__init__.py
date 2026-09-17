@@ -129,3 +129,4 @@ __all__ = [
     "TelegramLinkToken",
 ]
 from apps.api.app.models.player_guide_item import PlayerGuideItem
+from apps.api.app.models.user_consent import UserConsent

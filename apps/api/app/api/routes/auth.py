@@ -3,11 +3,13 @@ from __future__ import annotations
 from html import escape
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
+from apps.api.app.core.audit import client_ip
+from apps.api.app.core.legal_documents import DOC_DISTRIBUTION, DOC_OFFER, DOC_PERSONAL_DATA
 from apps.api.app.core.user_messages import translate_user_message
 from apps.api.app.db import get_db_session
 from apps.api.app.schemas.auth import (
@@ -24,6 +26,7 @@ from apps.api.app.schemas.auth import (
     ResetPasswordRequest,
     VerifyEmailRequest,
 )
+from apps.api.app.services.consent_service import ConsentService
 from apps.api.app.services.auth_service import (
     AuthService,
     AuthenticationError,
@@ -51,8 +54,14 @@ def get_auth_service(
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 def register(
     payload: RegisterRequest,
+    request: Request,
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> RegisterResponse:
+    if not (payload.accept_offer and payload.accept_personal_data):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Чтобы создать аккаунт, примите условия договора оферты и дайте согласие на обработку персональных данных.",
+        )
     try:
         user, player_account = auth_service.register_user(
             site_login=payload.site_login,
@@ -71,6 +80,19 @@ def register(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=translate_user_message(str(exc)),
         ) from exc
+
+    consents = ConsentService(auth_service.session)
+    meta = {"source": "register", "ip": client_ip(request), "user_agent": request.headers.get("user-agent")}
+    consents.record(user.id, DOC_OFFER, granted=True, **meta)
+    consents.record(user.id, DOC_PERSONAL_DATA, granted=True, **meta)
+    consents.record(
+        user.id,
+        DOC_DISTRIBUTION,
+        granted=True,
+        options={"profile": payload.distribution_profile, "map": payload.distribution_map, "purchases": payload.distribution_purchases},
+        **meta,
+    )
+    auth_service.session.commit()
 
     return RegisterResponse(
         message="Аккаунт создан. Мы отправили письмо для подтверждения почты.",

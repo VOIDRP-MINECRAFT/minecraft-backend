@@ -148,7 +148,7 @@ class EasyDonateService:
     def get_top_donors(self, limit: int = 8) -> list:
         """Aggregate recent paid payments into a PII-free top-donors board:
         [{nickname, total, count}] sorted by total spend. Cached 5 min."""
-        cached = _cache_get("top_donors")
+        cached = _cache_get(f"top_donors:{limit}")
         if cached is not None:
             return cached  # type: ignore[return-value]
         result = self._get("/shop/payments", params={"paginate": 100, "page": 1})
@@ -167,7 +167,7 @@ class EasyDonateService:
         top = sorted(agg.values(), key=lambda r: r["total"], reverse=True)[:limit]
         for r in top:
             r["total"] = round(r["total"])
-        _cache_set("top_donors", top, ttl=300)
+        _cache_set(f"top_donors:{limit}", top, ttl=300)
         return top
 
     def get_payments_paginated(self, page: int = 1, per_page: int = 20) -> dict:

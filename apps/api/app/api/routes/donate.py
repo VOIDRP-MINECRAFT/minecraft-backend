@@ -5,12 +5,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ValidationError
+from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
+from apps.api.app.core.legal_documents import DISTRIBUTION_PURCHASES
+from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
+from apps.api.app.services.consent_service import ConsentService
 from apps.api.app.services.easydonate_service import EasyDonateError, EasyDonateService
 
 logger = logging.getLogger(__name__)
@@ -103,22 +107,46 @@ def list_servers(service: Annotated[EasyDonateService, Depends(get_donate_servic
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message)
 
 
+def _visible_buyers(db: Session) -> set[str]:
+    # A buyer's nickname is public only with their consent to distribution (152-FZ art. 10.1).
+    return ConsentService(db).nicknames_allowing(DISTRIBUTION_PURCHASES)
+
+
 @router.get("/payments/last")
-def last_payments(service: Annotated[EasyDonateService, Depends(get_donate_service)]):
+def last_payments(
+    service: Annotated[EasyDonateService, Depends(get_donate_service)],
+    db: Annotated[Session, Depends(get_db_session)],
+):
     try:
         payments = service.get_last_payments()
     except EasyDonateError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message)
-    return [_public_payment(p) for p in payments if isinstance(p, dict)] if isinstance(payments, list) else payments
+    if not isinstance(payments, list):
+        return payments
+    visible = _visible_buyers(db)
+    out = []
+    for p in payments:
+        if not isinstance(p, dict):
+            continue
+        row = _public_payment(p)
+        if str(row.get("customer") or "").lower() not in visible:
+            row["customer"] = None
+        out.append(row)
+    return out
 
 
 @router.get("/top-donors")
-def top_donors(service: Annotated[EasyDonateService, Depends(get_donate_service)]):
-    """PII-free leaderboard of top supporters (nickname + total spend)."""
+def top_donors(
+    service: Annotated[EasyDonateService, Depends(get_donate_service)],
+    db: Annotated[Session, Depends(get_db_session)],
+):
+    """Leaderboard of top supporters: only buyers who allowed their nickname to be shown."""
     try:
-        return service.get_top_donors()
+        top = service.get_top_donors(limit=50)
     except EasyDonateError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message)
+    visible = _visible_buyers(db)
+    return [row for row in top if str(row.get("nickname") or "").lower() in visible][:8]
 
 
 @router.post("/payment")
