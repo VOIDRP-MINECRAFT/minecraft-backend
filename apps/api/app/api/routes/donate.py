@@ -47,12 +47,40 @@ class DonateCallbackPayload(BaseModel):
     signature: str
 
 
+# EasyDonate returns shop internals (console commands that deliver a product, server IPs, shop ids).
+# The public endpoints pass on only what a buyer needs to see.
+_PUBLIC_PRODUCT_FIELDS = ("id", "name", "price", "old_price", "type", "number", "description", "image", "category_id", "sort_index")
+
+
+def _public_product(product: dict) -> dict:
+    return {key: product.get(key) for key in _PUBLIC_PRODUCT_FIELDS}
+
+
+def _public_payment(payment: dict) -> dict:
+    return {
+        "id": payment.get("id"),
+        "customer": payment.get("customer"),
+        "cost": payment.get("cost"),
+        "payment_type": payment.get("payment_type"),
+        "created_at": payment.get("created_at"),
+        "products": [
+            {"id": item.get("id"), "name": item.get("name"), "amount": item.get("amount")}
+            for item in (payment.get("products") or [])
+            if isinstance(item, dict)
+        ],
+    }
+
+
 @router.get("/products")
 def list_products(service: Annotated[EasyDonateService, Depends(get_donate_service)]):
     try:
-        return service.get_products()
+        products = service.get_products()
     except EasyDonateError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message)
+    return [
+        _public_product(p)
+        for p in sorted((p for p in products if isinstance(p, dict) and not p.get("is_hidden")), key=lambda p: p.get("sort_index") or 0)
+    ]
 
 
 @router.get("/products/{product_id}")
@@ -61,9 +89,10 @@ def get_product(
     service: Annotated[EasyDonateService, Depends(get_donate_service)],
 ):
     try:
-        return service.get_product(product_id)
+        product = service.get_product(product_id)
     except EasyDonateError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message)
+    return _public_product(product) if isinstance(product, dict) else product
 
 
 @router.get("/servers")
@@ -77,9 +106,10 @@ def list_servers(service: Annotated[EasyDonateService, Depends(get_donate_servic
 @router.get("/payments/last")
 def last_payments(service: Annotated[EasyDonateService, Depends(get_donate_service)]):
     try:
-        return service.get_last_payments()
+        payments = service.get_last_payments()
     except EasyDonateError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.message)
+    return [_public_payment(p) for p in payments if isinstance(p, dict)] if isinstance(payments, list) else payments
 
 
 @router.get("/top-donors")
