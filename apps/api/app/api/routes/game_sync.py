@@ -30,6 +30,22 @@ def get_game_sync_service(
     return GameSyncService(session=session, server_id=server.id)
 
 
+@router.get("/server")
+def get_calling_server(
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> dict:
+    """The server this secret belongs to, and what is switched on for it in the admin.
+
+    A plugin reads its sections from here rather than from a file of its own, so turning
+    the market or the news off for a server is one switch in the admin, not a config edit
+    on the machine.
+    """
+    from apps.api.app.models.game_server import default_features
+
+    features = {**default_features(), **(server.features or {})}
+    return {"slug": server.slug, "name": server.name, "features": features}
+
+
 @router.get(
     "/nations",
     response_model=GameNationListResponse,
