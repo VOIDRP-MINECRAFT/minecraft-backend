@@ -1,7 +1,6 @@
-# ⚙️ VoidRP Backend
+<p align="center"><img src=".github/assets/banner.jpg" alt="VoidRP Backend" width="100%"></p>
 
-> Центральный REST API платформы VoidRP: аккаунты и согласия, мультисервер, нации и экономика, рынок,
-> боевой пропуск, торговец, лаунчер, античит, админ-панель и API для страниц WebGUI внутри игры.
+<div align="center">
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -10,6 +9,11 @@
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-lightgrey)
 [![CI](https://github.com/VOIDRP-MINECRAFT/minecraft-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/VOIDRP-MINECRAFT/minecraft-backend/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-proprietary-red)
+
+</div>
+
+> Центральный REST API платформы VoidRP: аккаунты и согласия, мультисервер, нации и экономика, рынок,
+> боевой пропуск, торговец, лаунчер, античит, админ-панель и API для страниц WebGUI внутри игры.
 
 ---
 
