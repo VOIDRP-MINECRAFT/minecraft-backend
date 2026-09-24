@@ -18,6 +18,10 @@ class PlayerStatDelta(BaseModel):
     # streak reached since the last flush (so short-lived peaks aren't lost).
     kill_streak: int = 0
     max_kill_streak: int = 0
+    # Absolute, like the streak: the player's money right now, for the "richest"
+    # top. Optional — servers with nations report it through the nation sync
+    # instead, and leaving it out never overwrites that.
+    current_balance: float | None = None
 
 
 class PlayerStatsBatchRequest(BaseModel):

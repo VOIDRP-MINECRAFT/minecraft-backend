@@ -65,6 +65,8 @@ class PlayerStatIngestService:
         # (streak up then reset by a death before the flush) still set the record.
         row.current_kill_streak = delta.kill_streak
         row.best_kill_streak = max(row.best_kill_streak or 0, delta.max_kill_streak, delta.kill_streak)
+        if delta.current_balance is not None and delta.current_balance >= 0:
+            row.current_balance = round(delta.current_balance, 2)
         row.source = "live"
         row.last_seen_at = now
         row.last_synced_at = now
