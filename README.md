@@ -1,56 +1,67 @@
 # ⚙️ VoidRP Backend
 
-> Центральный REST API сервера VoidRP — авторизация, нации, экономика, античит, донат, WebGUI game-ui.
+> Центральный REST API платформы VoidRP: аккаунты и согласия, мультисервер, нации и экономика, рынок,
+> боевой пропуск, торговец, лаунчер, античит, админ-панель и API для страниц WebGUI внутри игры.
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-latest-009688?logo=fastapi&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-336791?logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-cache-DC382D?logo=redis&logoColor=white)
 ![Alembic](https://img.shields.io/badge/Alembic-migrations-lightgrey)
+[![CI](https://github.com/VOIDRP-MINECRAFT/minecraft-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/VOIDRP-MINECRAFT/minecraft-backend/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-proprietary-red)
 
 ---
 
 ## 🗺️ Место в экосистеме
 
-```
-  Лаунчер (Electron / JavaFX)
-        │ play-ticket auth (HTTPS)
-        ▼
-┌──────────────────────────────────────────┐
-│   minecraft-backend  ◄───────────────────┼── Сайт (Vue 3)  [JWT]
-│   FastAPI · PostgreSQL                   │
-│   api.void-rp.ru / api/v1                │
-└───────────┬──────────────────────────────┘
-            │                    ▲
-            │ X-Game-Auth-Secret │ webgui_token (HMAC-SHA256)
-            ▼                    │
-  Minecraft Server (Mohist)  Minecraft Client (MCEF browser)
-  └── gamesync-plugin         └── void-rp.ru/game-ui/*
-      anticheat
-      cpm-companion
+```mermaid
+flowchart LR
+    SITE["🌐 voidrp-site<br/>void-rp.ru"]
+    LAUNCH["🚀 Лаунчер"]
+    WEB["🖥️ WebGUI в игре<br/>void-rp.ru/game-ui/*"]
+    subgraph SRV["Игровые серверы"]
+        MOD["🏰 VoidRP · моды и плагины"]
+        VAN["🌱 Origins · плагины"]
+    end
+    subgraph API["minecraft-backend · api.void-rp.ru/api/v1"]
+        APP["FastAPI"]
+        PG[("PostgreSQL")]
+        RD[("Redis")]
+    end
+    TG["🤖 Telegram-бот"]
+    PR["📈 Prometheus"]
+
+    SITE -- "JWT" --> APP
+    LAUNCH -- "JWT · play-ticket" --> APP
+    WEB -- "webgui_token (HMAC)" --> APP
+    MOD -- "X-Game-Auth-Secret" --> APP
+    VAN -- "X-Game-Auth-Secret" --> APP
+    APP --> PG
+    APP --> RD
+    TG --> APP
+    PR -. "/monitoring/prometheus" .-> APP
 ```
 
 ---
 
 ## ✨ Возможности
 
-- **Авторизация** — регистрация, JWT access + opaque refresh токены, legacy Minecraft auth
-- **Play-ticket flow** — одноразовые тикеты для входа в игру (лаунчер → backend → сервер)
-- **Нации и альянсы** — создание, членство, казна, статистика, дипломатия, голосования
-- **Динамическая экономика** — рыночные цены предметов, история сделок
-- **Рынок игроков** — ордера, доставки, pending web actions (для WebGUI)
-- **Battle Pass** — сезонная система, Premium-статус, синхронизация с плагином
-- **Ежедневные квесты** — пул заданий, прогресс, интеграция с плагином
-- **Античит** — приём отчётов о нарушениях, снимков модов, детектов инъекций
-- **Admin Panel API** — управление игроками, вердикты по модам, действия
-- **Мониторинг серверов** — метрики CPU/RAM/диска (psutil + systemd), RCON-консоль, TPS, онлайн-игроки, а также запуск/перезапуск/остановка службы (`/admin/server-ops/*`)
-- **Управление модами** — панель «Моды»: добавление/удаление/замена модов на клиент и сервер, оверрайды опциональности (`server_mod_meta`), пересборка манифеста (`/admin/mods/*`)
-- **Модераторы (RBAC)** — гранулярные права админ-панели (`is_moderator` + `staff_permissions`), проверяются на бэкенде
-- **Новости и Telegram-бот** — новости по серверам с авто-постингом в Telegram/Discord; бот aiogram для привязки аккаунтов
-- **Авто-провижининг серверов** — при создании сервера пути пака/манифеста/мониторинга заполняются по конвенции `v<ядро>-<slug>` и создаются папки; рантайм наследуется от сервера с тем же ядром
-- **WebGUI Game-UI** — API для браузерных страниц внутри Minecraft клиента
-- **Медиа** — аватары, скины, статические файлы через `/media`
-- **Мульти-сервер** — общий аккаунт, но игровые данные скоупятся по серверу (см. ниже)
+| Область | Что есть | Роутеры |
+|---|---|---|
+| 🔐 **Аккаунты** | Регистрация, JWT access + opaque refresh, профили, соцсети, рефералы, привязка Telegram | `auth`, `account`, `profiles`, `social`, `referrals`, `profile_telegram` |
+| 📜 **Согласия** | Оферта, согласие на ПДн, согласие на распространение; без актуальных документов не выдаётся play-ticket | `consents` |
+| 🎫 **Вход в игру** | Play-ticket для модового сервера, вход и регистрация окнами Minecraft на плагинных серверах, скины | `play_ticket`, `server_auth`, `game_auth` |
+| 🌍 **Мультисервер** | Каталог серверов, live-пинг, авто-провижининг путей пака, флаги разделов `features` | `servers`, `admin_servers` |
+| 🏛️ **Нации** | Нации, альянсы, казна, исследования, сезоны, статистика, проверки территории | `nations`, `alliances`, `nation_stats`, `game_sync_*` |
+| 💹 **Экономика** | Динамические цены, рынок игроков и рынок наций, Void Coins, апгрейдер | `economy_market`, `player_market`, `market_public`, `game_sync_void_coins` |
+| 🧳 **Торговец** | Расписание визитов, редкие лоты с лимитами, бюджет выплат, сессии у NPC | `trader`, `admin_trader` |
+| 🏆 **Прогресс** | Боевой пропуск, еженедельные испытания, гайд и дорожная карта, статистика игроков | `battlepass`, `progression`, `player_stats` |
+| 🖥️ **WebGUI** | API для страниц в игре: меню, HUD, рынок, казна, исследования, квесты, пропуск, настройки… | `game_ui_*` |
+| 🚀 **Лаунчер** | Дашборд, настройки игры на аккаунте (по серверу), приём крашей и правила краш-советника | `launcher_*`, `admin_launcher*` |
+| 🛡️ **Античит** | Нарушения, снимки модов, отчёты об инжектах, вердикты по модам | `game_sync_anticheat`, `admin_anticheat` |
+| 🧰 **Админка** | Игроки и наказания, модераторы (RBAC), аудит, донат, новости, уведомления, моды и манифест, мониторинг и RCON | `admin_*` |
+| 📣 **Контент** | Новости с автопостингом в Telegram/Discord, RSS, лендинг, TikTok-кампании | `news`, `rss`, `landing`, `tiktok_*` |
 
 ---
 
@@ -79,19 +90,35 @@
 
 ---
 
-## 🔐 Четыре уровня авторизации
 
-| Слой | Заголовок / Параметр | Используется |
+```mermaid
+flowchart TD
+    R["Входящий запрос"] --> Q{"Откуда?"}
+    Q -- "мод или плагин" --> S1["X-Game-Auth-Secret"] --> G["game_servers по секрету"]
+    Q -- "сайт или лаунчер" --> S2{"?server=slug"}
+    S2 -- есть --> G2["сервер по slug<br/>(неизвестный → 404)"]
+    S2 -- нет --> S3{"X-Server-Slug"}
+    S3 -- есть --> G2
+    S3 -- нет --> D["сервер is_default"]
+    G & G2 & D --> SCOPE["данные скоупятся по server_id"]
+```
+
+---
+
+## 🔐 Уровни авторизации
+
+| Слой | Заголовок / параметр | Кто использует |
 |---|---|---|
 | Пользователь | `Authorization: Bearer <JWT>` | Сайт, лаунчер |
-| Администратор | `X-Admin-Api-Secret` | Admin panel |
-| Игровой сервер | `X-Game-Auth-Secret` | Плагины, моды |
-| WebGUI | `?webgui_token=<HMAC-SHA256>` | MCEF-браузер в игре |
+| Администратор | `X-Admin-Api-Secret` или JWT администратора; модераторы — по гранулярным правам | Админ-панель |
+| Игровой сервер | `X-Game-Auth-Secret` (у каждого сервера свой) | Моды и плагины |
+| WebGUI | `?webgui_token=<HMAC-SHA256>` | Страницы в игре |
+| Вход в игру | одноразовый play-ticket | Лаунчер → сервер |
 
 ### WebGUI токен
 
 HMAC-SHA256 токен, подписываемый Paper-плагином (`WebGuiBridgeService.signUrl()`):
-```
+```text
 payload = base64url("1|<playerNickname>|<expiresAtEpoch>")
 token   = payload + "." + base64url(HMAC-SHA256(payload, secret))
 ```
@@ -110,32 +137,29 @@ def get_webgui_player(webgui_token: str = Query(...), ...) -> PlayerAccount:
 
 | Компонент | Версия |
 |---|---|
-| Python | 3.12+ |
+| Python | 3.12 |
 | PostgreSQL | 15+ |
-| Redis | опционально |
+| Redis | кэш (необязателен для разработки) |
 
 ---
 
 ## 🚀 Быстрый старт
 
 ```bash
-cd minecraft_backend
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env          # заполни DATABASE_URL, JWT_SECRET_KEY и др.
+cp .env.example .env          # DATABASE_URL, JWT_SECRET_KEY, WEBGUI_TOKEN_SECRET_BASE64 и др.
 
-alembic upgrade head          # применить все миграции
+alembic upgrade head
 uvicorn apps.api.app.main:app --reload
 ```
 
 **Swagger UI:** `http://127.0.0.1:8000/docs`
 
-### Полезные команды
-
 ```bash
 alembic revision --autogenerate -m "описание"   # новая миграция
-pytest                                           # тесты
-ruff check . && ruff format .                    # lint + format
+pytest -q                                        # тесты (как в CI)
+python -m compileall apps                        # проверка синтаксиса (как в CI)
 ```
 
 ---
@@ -144,50 +168,41 @@ ruff check . && ruff format .                    # lint + format
 
 ```
 apps/api/app/
-├── main.py                  точка входа, create_app()
-├── config.py                Settings (pydantic-settings, .env)
-├── api/routes/
-│   ├── auth.py              /auth/register, /auth/login, /auth/refresh
-│   ├── me.py                /me/profile, /me/skin
-│   ├── nations.py           /nations/*
-│   ├── alliances.py         /alliances/*
-│   ├── market.py            /market/items
-│   ├── battlepass.py        /battlepass/*
-│   ├── daily_quests.py      /daily-quests/*
-│   ├── game_sync_*.py       /server/* (X-Game-Auth-Secret)
-│   ├── game_ui_market.py    /game-ui/market/* (webgui_token)  ← WebGUI
-│   └── admin_*.py           /admin/* (X-Admin-Api-Secret)
-├── models/
-│   ├── ...                  SQLAlchemy 2.0 ORM модели
-│   └── player_market_web_action.py  ← pending actions от браузера
-├── schemas/                 Pydantic v2 схемы запрос/ответ
-├── repositories/            слой доступа к данным
-├── dependencies/
-│   ├── auth.py              JWT bearer
-│   ├── admin.py             X-Admin-Api-Secret
-│   ├── server_auth.py       X-Game-Auth-Secret
-│   └── webgui_auth.py       webgui_token HMAC-SHA256  ← WebGUI
-└── core/
-    ├── security.py          JWT, Argon2 хэширование
-    └── user_messages.py     локализация ошибок EN → RU
+├── main.py            create_app(): /api/v1, RSS, Figura
+├── config.py          Settings (pydantic-settings, .env)
+├── api/routes/        93 модуля роутеров: auth, nations, game_sync_*, game_ui_*, admin_*, launcher_*…
+├── dependencies/      auth (JWT) · admin · server_auth (X-Game-Auth-Secret) · server_context (slug) · webgui_auth
+├── services/          бизнес-логика: рынок, торговец, пропуск, согласия, play-ticket, краши лаунчера…
+├── repositories/      доступ к данным
+├── models/ schemas/   SQLAlchemy 2.0 и Pydantic v2
+└── core/              безопасность, права, юр. документы, операции с серверами и манифестом, Prometheus
+alembic/versions/      миграции
+deploy/                nginx, systemd-юнит Telegram-бота, Figura
+docs/scripts/          скрипты сервера (вотчдог, бэкапы, манифест лаунчера)
 ```
 
 ---
 
-## 🌐 WebGUI Game-UI роутер
+## 🌐 WebGUI: очередь действий со страниц
 
-Роутер `game_ui_market.py` обслуживает MCEF-браузер внутри Minecraft. Все эндпоинты принимают `?webgui_token=` вместо JWT.
+Страница в игре не может сама выдать предмет или списать деньги — это делает плагин на сервере.
+Поэтому страница кладёт действие в очередь, а `gamesync-plugin` забирает его:
 
-### Эндпоинты `/api/v1/game-ui/market/`
-
-| Метод | Путь | Описание |
-|---|---|---|
-| `GET` | `order-book/{item_key}` | Книга ордеров по товару |
-| `GET` | `my-orders` | Мои активные ордера |
-| `GET` | `items` | Список товаров |
-| `GET` | `trades` | История сделок |
-| `POST` | `pending-action` | Создать действие для плагина (buy, cancel, pickup) |
-| `GET` | `pickup-ready` | Количество незабранных доставок |
+```mermaid
+sequenceDiagram
+    participant W as Страница /game-ui
+    participant B as Бэкенд
+    participant G as gamesync-plugin
+    W->>B: POST /game-ui/market/pending-action (webgui_token)
+    B->>B: player_market_web_actions: pending (TTL 3–5 мин)
+    loop каждую секунду
+        G->>B: GET /game-sync/market-web-actions
+    end
+    B-->>G: действия игрока
+    G->>G: Vault, предметы, проверки
+    G->>B: ack (done / failed)
+    B-->>W: статус и обновлённые данные
+```
 
 ### PlayerMarketWebAction
 
@@ -220,10 +235,13 @@ WEBGUI_TOKEN_SECRET_BASE64=<base64-encoded-32-bytes>
 
 | Репо | Связь |
 |---|---|
-| [voidrp-site](https://github.com/VOIDRP-MINECRAFT/voidrp-site) | Сайт — основной потребитель JWT API |
-| [voidrp-gamesync-plugin](https://github.com/VOIDRP-MINECRAFT/voidrp-gamesync-plugin) | Плагин — X-Game-Auth-Secret + pending web actions |
-| [voidrp-webgui-neoforge](https://github.com/VOIDRP-MINECRAFT/voidrp-webgui-neoforge) | NeoForge мод — генерирует webgui_token |
-| [voidrp-anticheat](https://github.com/VOIDRP-MINECRAFT/voidrp-anticheat) | Мод — шлёт violation/mod-snapshot/injection-report |
+| [voidrp-site](https://github.com/VOIDRP-MINECRAFT/voidrp-site) | Сайт и страницы `/game-ui/*` |
+| [voidrp-launcher-vue](https://github.com/VOIDRP-MINECRAFT/voidrp-launcher-vue) | Лаунчер: play-ticket, каталог серверов, краши, настройки игры |
+| [voidrp-gamesync-plugin](https://github.com/VOIDRP-MINECRAFT/voidrp-gamesync-plugin) | Главный плагин: `/game-sync/*`, очередь web actions |
+| [voidrp-auth-bridge](https://github.com/VOIDRP-MINECRAFT/voidrp-auth-bridge) · [voidrp-auth-plugin](https://github.com/VOIDRP-MINECRAFT/voidrp-auth-plugin) | Вход на модовом и плагинном серверах |
+| [voidrp-anticheat](https://github.com/VOIDRP-MINECRAFT/voidrp-anticheat) | Нарушения, снимки модов, отчёты об инжектах |
+
+Полная карта взаимодействий — в [документации организации](https://github.com/VOIDRP-MINECRAFT/.github/blob/main/docs/INTEGRATION.md).
 
 ---
 
