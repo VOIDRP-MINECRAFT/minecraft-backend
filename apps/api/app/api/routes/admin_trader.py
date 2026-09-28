@@ -317,6 +317,53 @@ def bulk_catalog(
     return {"updated": len(rows)}
 
 
+class ImportRequest(BaseModel):
+    items: list[CatalogIn] = Field(min_length=1, max_length=500)
+    # False: items already in the catalog are left as they are; True: they take the new values.
+    overwrite: bool = False
+
+
+@router.post("/catalog/import", dependencies=[_MANAGE])
+def import_catalog(
+    payload: ImportRequest,
+    request: Request,
+    server: Annotated[GameServer, Depends(resolve_server)],
+    db: Annotated[Session, Depends(get_db_session)],
+    admin: Annotated[User, Depends(get_current_staff_user)],
+) -> dict:
+    """Adds many catalog items at once (a list pasted in the admin), matched by item key."""
+    for item in payload.items:
+        try:
+            _check_qty(item.qty_min, item.qty_max)
+        except HTTPException as exc:
+            raise HTTPException(status_code=422, detail=f"{item.item_key}: {exc.detail}")
+    keys = [i.item_key for i in payload.items]
+    if len(set(keys)) != len(keys):
+        raise HTTPException(status_code=422, detail="В списке есть повторяющиеся предметы")
+    existing = {
+        row.item_key: row
+        for row in db.scalars(
+            select(TraderCatalogItem).where(TraderCatalogItem.server_id == server.id, TraderCatalogItem.item_key.in_(keys))
+        ).all()
+    }
+    created = updated = skipped = 0
+    for item in payload.items:
+        row = existing.get(item.item_key)
+        if row is None:
+            db.add(TraderCatalogItem(server_id=server.id, **item.model_dump()))
+            created += 1
+        elif payload.overwrite:
+            for field, value in item.model_dump(exclude={"item_key"}).items():
+                setattr(row, field, value)
+            updated += 1
+        else:
+            skipped += 1
+    record_audit(db, category="trader", action="catalog_import", actor=admin, server_id=server.id,
+                 meta={"created": created, "updated": updated, "skipped": skipped}, request=request, commit=False)
+    db.commit()
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
 @router.delete("/catalog/{item_id}", dependencies=[_MANAGE])
 def delete_catalog(
     item_id: UUID,
