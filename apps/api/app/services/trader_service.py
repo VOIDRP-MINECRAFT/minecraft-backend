@@ -481,12 +481,18 @@ class TraderService:
         return len(stale)
 
     def request_trade(self, player: PlayerAccount, stock_id: UUID, qty: int) -> TraderTransaction:
+        return self.reserve(player.minecraft_nickname, player.user_id, stock_id, qty)
+
+    def reserve(
+        self, name: str, user_id: UUID | None, stock_id: UUID, qty: int, *, queue: bool = True
+    ) -> TraderTransaction:
+        """Reserves stock for a trade. With ``queue`` the plugin learns of it from a web action (the
+        WebGUI page); without, the caller is the plugin itself and settles it right away."""
         if qty < 1 or qty > 6400:
             raise TraderError("Количество должно быть от 1 до 6400", 422)
         visit = self.active_visit(create=False)
         if visit is None:
             raise TraderError("Скупщик уже ушёл", 404)
-        name = player.minecraft_nickname
         if not self.has_session(name, visit):
             raise TraderError("Подойдите к скупщику на спавне и нажмите на него правой кнопкой", 403)
         self.expire_stale(visit.id)
@@ -517,7 +523,7 @@ class TraderService:
             server_id=self.server_id,
             visit_id=visit.id,
             stock_id=stock.id,
-            user_id=player.user_id,
+            user_id=user_id,
             player_name=name,
             side=stock.side,
             item_key=stock.item_key,
@@ -527,6 +533,8 @@ class TraderService:
         )
         self.session.add(tx)
         self.session.flush()
+        if not queue:
+            return tx
         action = PlayerMarketWebAction(
             server_id=self.server_id,
             player_name=name,

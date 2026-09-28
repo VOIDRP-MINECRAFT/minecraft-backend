@@ -52,6 +52,7 @@ def tick(
     service.expire_stale()
     service.announce(payload.online)
     visit = service.active_visit()
+    next_start = service.next_visit_start() if visit is None else None
     db.commit()
     return {
         "enabled": cfg.enabled,
@@ -60,6 +61,9 @@ def tick(
             "kind": visit.kind,
             "ends_at": _iso(visit.ends_at),
         },
+        "next_starts_at": _iso(next_start),
+        "duration_minutes": cfg.duration_minutes,
+        "interval_minutes": cfg.interval_minutes,
         "spawn": cfg.spawn.model_dump(),
         "interact_radius": cfg.interact_radius,
     }
@@ -157,34 +161,28 @@ def _active_with_session(service: TraderService, player: PlayerAccount) -> Trade
     return visit
 
 
-@ui_router.get("/state")
-def state(
-    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
-    server: Annotated[GameServer, Depends(resolve_server)],
-    db: Annotated[Session, Depends(get_db_session)],
-) -> dict:
-    service = TraderService(db, server.id)
-    visit = _active_with_session(service, player)
+def _state(db: Session, server: GameServer, service: TraderService, visit: TraderVisit, name: str) -> dict:
+    """What one player sees at the trader: the visit, the shared stock with their own limits,
+    and their last trades."""
     cfg = service.config()
     service.expire_stale(visit.id)
     stock = service.stock(visit)
-    used = service.player_used([s.id for s in stock], player.minecraft_nickname)
+    used = service.player_used([s.id for s in stock], name)
     balance = db.scalar(
         select(PlayerStatCache.current_balance).where(
             PlayerStatCache.server_id == server.id,
-            PlayerStatCache.minecraft_nickname_normalized == player.minecraft_nickname.strip().lower(),
+            PlayerStatCache.minecraft_nickname_normalized == name.strip().lower(),
         )
     )
     recent = db.scalars(
         select(TraderTransaction)
         .where(
             TraderTransaction.visit_id == visit.id,
-            TraderTransaction.player_name == player.minecraft_nickname,
+            TraderTransaction.player_name == name,
         )
         .order_by(TraderTransaction.created_at.desc())
         .limit(10)
     ).all()
-    db.commit()
     return {
         "visit": {
             "id": str(visit.id),
@@ -213,6 +211,19 @@ def state(
         ],
         "transactions": [_tx_out(tx) for tx in recent],
     }
+
+
+@ui_router.get("/state")
+def state(
+    player: Annotated[PlayerAccount, Depends(get_webgui_player)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    service = TraderService(db, server.id)
+    visit = _active_with_session(service, player)
+    out = _state(db, server, service, visit, player.minecraft_nickname)
+    db.commit()
+    return out
 
 
 class TradeRequest(BaseModel):
@@ -250,6 +261,59 @@ def transaction(
     TraderService(db, server.id).expire_stale(tx.visit_id)
     db.commit()
     db.refresh(tx)
+    return _tx_out(tx)
+
+
+# ── game server pages (a plugin draws the trade screen itself, e.g. VoidRP: Origins) ─────────
+# Same rules as the WebGUI page: only after right-clicking the NPC (a session from /open), the same
+# shared stock and per-player caps. The plugin is the one moving items and money, so the trade is
+# not queued as a web action: the plugin settles it at once via /transactions/{id}/result.
+class PlayerRequest(BaseModel):
+    player_name: str = Field(min_length=1, max_length=16)
+
+
+@plugin_router.post("/player-state")
+def player_state(
+    payload: PlayerRequest,
+    server: Annotated[GameServer, Depends(require_game_server)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    service = TraderService(db, server.id)
+    visit = service.active_visit(create=False)
+    if visit is None:
+        raise HTTPException(status_code=404, detail="Скупщик ушёл. Он регулярно приходит на спавн — следите за уведомлениями.")
+    if not service.has_session(payload.player_name, visit):
+        raise HTTPException(status_code=403, detail="Торговля открывается только у скупщика: подойдите к нему на спавне и нажмите правой кнопкой.")
+    out = _state(db, server, service, visit, payload.player_name)
+    db.commit()
+    return out
+
+
+class PlayerTradeRequest(BaseModel):
+    player_name: str = Field(min_length=1, max_length=16)
+    stock_id: UUID
+    qty: int = Field(ge=1, le=6400)
+
+
+@plugin_router.post("/player-trade")
+def player_trade(
+    payload: PlayerTradeRequest,
+    server: Annotated[GameServer, Depends(require_game_server)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """Reserves the stock; the plugin moves items and money and reports what went through."""
+    service = TraderService(db, server.id)
+    user_id = db.scalar(
+        select(PlayerAccount.user_id).where(
+            PlayerAccount.minecraft_nickname_normalized == payload.player_name.strip().lower()
+        )
+    )
+    try:
+        tx = service.reserve(payload.player_name, user_id, payload.stock_id, payload.qty, queue=False)
+    except TraderError as exc:
+        db.rollback()
+        raise _fail(exc)
+    db.commit()
     return _tx_out(tx)
 
 
