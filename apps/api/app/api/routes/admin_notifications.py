@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -31,7 +32,7 @@ def _count_since(session: Session, model, since: datetime) -> int:
 def list_notifications(
     session: Annotated[Session, Depends(get_db_session)],
     perms: Annotated[set[str], Depends(caller_permissions)],
-    _: Annotated[User, Depends(get_current_staff_user)],
+    me: Annotated[User, Depends(get_current_staff_user)],
 ) -> AdminNotificationsResponse:
     """Actionable, permission-scoped notifications for the admin banner.
 
@@ -108,13 +109,17 @@ def list_notifications(
                 link="/admin/server",
             ))
 
-    if "monitoring.view" in perms:
+    # Servers whose monitoring this person may see — the watchdog's news is per server.
+    from apps.api.app.core.permissions import servers_with_permission
+    watch_ids = servers_with_permission(me, "monitoring.view", [i for (i,) in session.execute(select(GameServer.id)).all()])
+    if watch_ids:
         # What the watchdog did or could not do in the last day, per server: a restart is
         # worth knowing about, a server it could not bring back needs someone.
         rows = session.execute(
             select(GameServer.name, ServerWatchdogEvent.kind, func.count(), func.max(ServerWatchdogEvent.created_at))
             .join(GameServer, GameServer.id == ServerWatchdogEvent.server_id)
             .where(ServerWatchdogEvent.created_at >= since,
+                   ServerWatchdogEvent.server_id.in_([UUID(i) for i in watch_ids]),
                    ServerWatchdogEvent.kind.in_(("restart", "hang", "limit", "down")))
             .group_by(GameServer.name, ServerWatchdogEvent.kind)
         ).all()

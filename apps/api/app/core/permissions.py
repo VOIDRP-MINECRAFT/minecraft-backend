@@ -132,6 +132,25 @@ PERMISSION_CATALOG: list[dict] = [
     },
 ]
 
+# Which permissions are given per server (a moderator can have the market on Origins
+# and nothing on the main server) and which are one for the whole platform (news of the
+# site as a whole, the launcher, accounts). Checked against the server a request is about
+# — ``?server=``, ``?server_id=`` or ``X-Server-Slug``, else the default server; decided
+# from which routes each key guards (the 2026-09-29 audit).
+SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
+    "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
+    "salary.", "backups.", "punishments.", "battlepass.", "voxel.", "upgrader.",
+    "trader.", "news.",
+)
+
+for _group in PERMISSION_CATALOG:
+    for _p in _group["permissions"]:
+        _p["scope"] = "server" if _p["key"].startswith(SERVER_SCOPED_PREFIXES) else "global"
+
+SERVER_KEYS: frozenset[str] = frozenset(
+    p["key"] for group in PERMISSION_CATALOG for p in group["permissions"] if p["scope"] == "server"
+)
+
 # Grants sight of ``game_servers.staff_only`` servers in the public catalogue
 # (/servers) that feeds the site and the launcher. Full admins bypass it.
 HIDDEN_SERVERS_PERMISSION = "servers.hidden.view"
@@ -163,20 +182,47 @@ def sanitize_permissions(keys: list[str] | None) -> list[str]:
     return [k for k in _ORDERED_KEYS if k in given]
 
 
-def resolve_user_permissions(user) -> set[str]:
-    """Effective permission set for a User object.
+def sanitize_server_permissions(grants: dict | None) -> dict[str, list[str]]:
+    """``{server_id: [keys]}`` keeping only per-server keys, dropping empty servers."""
+    out: dict[str, list[str]] = {}
+    for server_id, keys in (grants or {}).items():
+        kept = [k for k in sanitize_permissions(keys) if k in SERVER_KEYS]
+        if kept:
+            out[str(server_id)] = kept
+    return out
 
-    Full admins get every key; moderators get their sanitized granted subset;
-    everyone else gets nothing. Shared by the admin API (``caller_permissions``)
-    and the Telegram bot so both agree on what a user can do.
+
+def resolve_user_permissions(user, server_id=None) -> set[str]:
+    """Effective permission set for a User object on one server.
+
+    Full admins get every key. A moderator gets their platform-wide grants
+    (``staff_permissions`` — global keys, and per-server keys granted on every
+    server) plus, when ``server_id`` is given, the per-server keys granted on that
+    server (``staff_server_permissions``). Everyone else gets nothing. Shared by
+    the admin API (``caller_permissions``) and the Telegram bot.
     """
     if user is None or not getattr(user, "is_active", True):
         return set()
     if getattr(user, "is_admin", False):
         return set(ALL_KEYS)
     if getattr(user, "is_moderator", False):
-        return set(sanitize_permissions(user.staff_permissions or []))
+        keys = set(sanitize_permissions(user.staff_permissions or []))
+        if server_id is not None:
+            per = (getattr(user, "staff_server_permissions", None) or {}).get(str(server_id)) or []
+            keys |= {k for k in sanitize_permissions(per) if k in SERVER_KEYS}
+        return keys
     return set()
+
+
+def servers_with_permission(user, key: str, all_server_ids) -> set[str]:
+    """The servers (ids as strings) on which the user holds ``key``."""
+    ids = {str(i) for i in all_server_ids}
+    if user is None or not getattr(user, "is_active", True):
+        return set()
+    if getattr(user, "is_admin", False) or key in (user.staff_permissions or []):
+        return ids
+    per = getattr(user, "staff_server_permissions", None) or {}
+    return {sid for sid, keys in per.items() if key in (keys or []) and sid in ids}
 
 
 _ORDERED_KEYS: list[str] = [

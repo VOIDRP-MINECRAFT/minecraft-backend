@@ -14,9 +14,11 @@ from apps.api.app.core.permissions import (
     MODERATOR_PRESET,
     PERMISSION_CATALOG,
     sanitize_permissions,
+    sanitize_server_permissions,
 )
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import get_current_staff_user, require_admin_access
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 from apps.api.app.utils.normalization import normalize_site_login
 
@@ -34,7 +36,10 @@ class ModeratorRead(BaseModel):
     id: str
     site_login: str
     email: str
+    # Platform-wide: global keys, and per-server keys granted on every server.
     permissions: list[str]
+    # Per-server grants, by server slug.
+    server_permissions: dict[str, list[str]] = {}
     # owner | admin | moderator
     role: str
     staff_since: str | None = None
@@ -48,10 +53,12 @@ class ModeratorListResponse(BaseModel):
 class ModeratorAssignRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=32)
     permissions: list[str] = Field(default_factory=list)
+    server_permissions: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ModeratorUpdateRequest(BaseModel):
     permissions: list[str] = Field(default_factory=list)
+    server_permissions: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class AdminAssignRequest(BaseModel):
@@ -69,10 +76,28 @@ def _role(u: User) -> str:
     return "admin" if u.is_admin else "moderator"
 
 
-def _read(u: User) -> ModeratorRead:
+def _slugs(session: Session) -> dict[str, str]:
+    return {str(i): slug for i, slug in session.query(GameServer.id, GameServer.slug).all()}
+
+
+def _by_slug(session: Session, grants: dict | None) -> dict[str, list[str]]:
+    slug_of = _slugs(session)
+    return {slug_of[sid]: keys for sid, keys in sanitize_server_permissions(grants).items() if sid in slug_of}
+
+
+def _by_id(session: Session, by_slug: dict[str, list[str]]) -> dict[str, list[str]]:
+    id_of = {slug: sid for sid, slug in _slugs(session).items()}
+    unknown = [slug for slug in by_slug if slug not in id_of]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Нет такого сервера: {', '.join(unknown)}")
+    return sanitize_server_permissions({id_of[slug]: keys for slug, keys in by_slug.items()})
+
+
+def _read(u: User, session: Session | None = None) -> ModeratorRead:
     return ModeratorRead(
         id=str(u.id), site_login=u.site_login, email=u.email,
         permissions=[] if u.is_admin else list(u.staff_permissions or []),
+        server_permissions={} if (u.is_admin or session is None) else _by_slug(session, u.staff_server_permissions),
         role=_role(u),
         staff_since=u.staff_since.isoformat() if u.staff_since else None,
         granted_by=u.staff_granted_by,
@@ -105,7 +130,7 @@ def list_staff(session: Annotated[Session, Depends(get_db_session)]) -> Moderato
     ).all()
     order = {"owner": 0, "admin": 1, "moderator": 2}
     rows = sorted(rows, key=lambda u: (order[_role(u)], u.site_login.lower()))
-    return ModeratorListResponse(items=[_read(u) for u in rows])
+    return ModeratorListResponse(items=[_read(u, session) for u in rows])
 
 
 @router.post("", response_model=ModeratorRead, status_code=status.HTTP_201_CREATED)
@@ -118,15 +143,18 @@ def assign_moderator(
     if user.is_admin:
         raise HTTPException(status_code=400, detail="Пользователь — админ, роль модератора не нужна")
     before = list(user.staff_permissions or []) if user.is_moderator else None
+    before_servers = _by_slug(session, user.staff_server_permissions) if user.is_moderator else None
     user.is_moderator = True
     user.staff_permissions = sanitize_permissions(payload.permissions)
+    user.staff_server_permissions = _by_id(session, payload.server_permissions)
     if before is None:
         user.staff_since = datetime.now(timezone.utc)
         user.staff_granted_by = actor.site_login
     session.commit()
     session.refresh(user)
-    _audit(session, actor, "assign", user, before=before, after=user.staff_permissions)
-    return _read(user)
+    _audit(session, actor, "assign", user, before=before, after=user.staff_permissions,
+           before_servers=before_servers, after_servers=payload.server_permissions or None)
+    return _read(user, session)
 
 
 @router.patch("/{user_id}", response_model=ModeratorRead)
@@ -140,13 +168,22 @@ def update_moderator(
     if user is None or not user.is_moderator or user.is_admin:
         raise HTTPException(status_code=404, detail="Модератор не найден")
     before = list(user.staff_permissions or [])
+    before_servers = _by_slug(session, user.staff_server_permissions)
     user.staff_permissions = sanitize_permissions(payload.permissions)
+    user.staff_server_permissions = _by_id(session, payload.server_permissions)
     session.commit()
     session.refresh(user)
+    after_servers = _by_slug(session, user.staff_server_permissions)
     added = [k for k in user.staff_permissions if k not in before]
     removed = [k for k in before if k not in user.staff_permissions]
-    _audit(session, actor, "update", user, added=added, removed=removed)
-    return _read(user)
+    per_server = {}
+    for slug in set(before_servers) | set(after_servers):
+        b, a = before_servers.get(slug, []), after_servers.get(slug, [])
+        diff = {"added": [k for k in a if k not in b], "removed": [k for k in b if k not in a]}
+        if diff["added"] or diff["removed"]:
+            per_server[slug] = diff
+    _audit(session, actor, "update", user, added=added, removed=removed, servers=per_server or None)
+    return _read(user, session)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -161,6 +198,7 @@ def revoke_moderator(
     before = list(user.staff_permissions or [])
     user.is_moderator = False
     user.staff_permissions = []
+    user.staff_server_permissions = {}
     user.staff_since = None
     user.staff_granted_by = None
     session.commit()
@@ -191,12 +229,13 @@ def appoint_admin(
     user.is_admin = True
     user.is_moderator = False
     user.staff_permissions = []
+    user.staff_server_permissions = {}
     user.staff_since = datetime.now(timezone.utc)
     user.staff_granted_by = actor.site_login
     session.commit()
     session.refresh(user)
     _audit(session, actor, "appoint_admin", user, was_moderator_with=was)
-    return _read(user)
+    return _read(user, session)
 
 
 @router.delete("/admins/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

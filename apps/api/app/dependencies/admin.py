@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -47,21 +47,49 @@ def _user_from_credentials(
     return user
 
 
+def request_server_id(request: Request, session: Session):
+    """The server a request is about, the way the admin panel says it: ``?server=<slug>``,
+    ``?server_id=<uuid>`` (news) or the ``X-Server-Slug`` header, else the default server.
+    None for a server that does not exist — then no per-server permission applies."""
+    from uuid import UUID as _UUID
+
+    from apps.api.app.models.game_server import GameServer
+
+    slug = request.query_params.get("server") or request.headers.get("x-server-slug")
+    raw_id = request.query_params.get("server_id")
+    if raw_id:
+        try:
+            server = session.get(GameServer, _UUID(raw_id))
+        except ValueError:
+            return None
+        return server.id if server else None
+    if slug:
+        found = session.query(GameServer.id).filter(GameServer.slug == slug).first()
+        return found[0] if found else None
+    default = session.query(GameServer.id).filter(GameServer.is_default.is_(True)).first()
+    return default[0] if default else None
+
+
 def caller_permissions(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_optional_bearer)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> set[str]:
-    """Effective permission set of the caller.
+    """Effective permission set of the caller, on the server the request is about.
 
-    Full admins get every key; moderators get their granted subset. Raises
-    401/403 if the caller is not staff at all.
+    Full admins get every key; moderators get their platform-wide grants plus what
+    they were given on this server (see resolve_user_permissions). Every
+    ``require_permission`` goes through here, so each admin route is checked for
+    the server it acts on. Raises 401/403 if the caller is not staff at all.
     """
     user = _user_from_credentials(credentials, session)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin access required")
     if not (user.is_admin or user.is_moderator):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
-    return resolve_user_permissions(user)
+    if user.is_admin:
+        return resolve_user_permissions(user)
+    return resolve_user_permissions(user, request_server_id(request, session))
 
 
 def require_permission(key: str):

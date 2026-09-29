@@ -27,6 +27,14 @@ class UserRead(ORMModel):
     # Granted moderator permission keys (empty for full admins — the frontend
     # applies an is_admin bypass). Reads from the ORM ``staff_permissions`` column.
     permissions: list[str] = Field(default_factory=list, validation_alias="staff_permissions")
+    # A moderator's per-server grants, by server slug; the admin panel checks a key
+    # against ``permissions`` (every server) and the entry of the server it shows.
+    server_permissions: dict[str, list[str]] = Field(default_factory=dict)
+    # The server the panel means when none is chosen.
+    default_server: str | None = None
+    # Servers a moderator can pick in the admin panel (null = all of them: admins, or a
+    # moderator with a per-server permission granted on every server).
+    admin_servers: list[str] | None = None
     created_at: datetime
 
 

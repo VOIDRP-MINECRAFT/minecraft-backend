@@ -44,6 +44,9 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # (is_admin) bypass all permission checks.
     is_moderator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     staff_permissions: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    # Per-server grants on top of staff_permissions: {"<game_servers.id>": [keys]} —
+    # only keys whose scope is "server" (core/permissions.py SERVER_KEYS).
+    staff_server_permissions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     # The one person who appoints and removes full admins (admins manage moderators only).
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # When the person became staff (admin or moderator), and who made them so.

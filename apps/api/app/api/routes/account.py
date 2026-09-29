@@ -13,6 +13,7 @@ from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.refresh_session import RefreshSession
 from apps.api.app.models.user import User
 from apps.api.app.schemas.account import (
+    UserRead,
     AccountSecurityRead,
     AccountSkinResponse,
     MeResponse,
@@ -58,8 +59,26 @@ def _build_me_response(
         and player_account.legacy_hash_algo
     )
 
+    from apps.api.app.core.permissions import SERVER_KEYS, sanitize_server_permissions
+    from apps.api.app.models.game_server import GameServer
+
+    servers = session.query(GameServer.id, GameServer.slug, GameServer.is_default).all()
+    slug_of = {str(i): slug for i, slug, _ in servers}
+    per_server = {}
+    if current_user.is_moderator and not current_user.is_admin:
+        per_server = {slug_of[sid]: keys for sid, keys in
+                      sanitize_server_permissions(current_user.staff_server_permissions).items() if sid in slug_of}
+    admin_servers = None
+    if current_user.is_moderator and not current_user.is_admin:
+        if not SERVER_KEYS & set(current_user.staff_permissions or []):
+            admin_servers = [slug for _, slug, _ in servers if slug in per_server]
+    user = UserRead.model_validate(current_user).model_copy(update={
+        "server_permissions": per_server,
+        "admin_servers": admin_servers,
+        "default_server": next((slug for _, slug, d in servers if d), None),
+    })
     return MeResponse(
-        user=current_user,
+        user=user,
         player_account=player_account,
         security=AccountSecurityRead(
             active_refresh_sessions=active_refresh_sessions,
