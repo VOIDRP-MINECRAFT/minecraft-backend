@@ -55,6 +55,13 @@ _EXACT_MESSAGES: dict[str, str] = {
     "Radius must be from 0 to 1000 blocks": "Радиус — от 0 до 1000 блоков.",
     "A radius needs a place: world and coordinates": "Для радиуса нужно место: мир и координаты.",
     "Action not found": "Действие не найдено.",
+    "A backup of this server is already being made": "Бэкап этого сервера уже создаётся — дождитесь окончания.",
+    "Backup not found": "Бэкап не найден.",
+    "This backup is not ready or its file is missing": "Бэкап ещё не готов или его файл пропал.",
+    "A restore of this server is already in progress": "Сервер уже откатывается — дождитесь окончания.",
+    "This backup is still being made": "Бэкап ещё создаётся.",
+    "The server is being restored from this backup": "Из этого бэкапа сейчас идёт откат.",
+    "The backup file is outside the backup folder": "Файл бэкапа лежит вне папки бэкапов — удалять не буду.",
 }
 
 _CONTAINS_RULES: list[tuple[str, str]] = [

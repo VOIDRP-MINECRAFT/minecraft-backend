@@ -39,6 +39,16 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
     {
+        "group": "Бэкапы",
+        "permissions": [
+            {"key": "backups.view", "label": "Бэкапы (список, расписание)"},
+            {"key": "backups.create", "label": "Бэкапы: создавать вручную", "sensitive": True},
+            {"key": "backups.restore", "label": "Бэкапы: откатывать мир (перезапуск сервера)", "sensitive": True},
+            {"key": "backups.delete", "label": "Бэкапы: удалять", "sensitive": True},
+            {"key": "backups.settings", "label": "Бэкапы: менять расписание", "sensitive": True},
+        ],
+    },
+    {
         "group": "Платформа",
         "permissions": [
             {"key": "players.view", "label": "Игроки (поиск, просмотр)", "sensitive": True},

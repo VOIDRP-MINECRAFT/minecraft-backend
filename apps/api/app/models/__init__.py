@@ -28,6 +28,7 @@ from apps.api.app.models.player_playtime_daily import PlayerPlaytimeDaily
 from apps.api.app.models.void_upgrader import VoidUpgraderReward, VoidUpgraderSpin
 from apps.api.app.models.void_upgrader_settings import VoidUpgraderSettings
 from apps.api.app.models.void_upgrader_winning import VoidUpgraderWinning
+from apps.api.app.models.server_backup import ServerBackup, ServerBackupRestore, ServerBackupSettings
 from apps.api.app.models.void_upgrader_jackpot import VoidUpgraderJackpot
 from apps.api.app.models.void_upgrader_daily import VoidUpgraderDaily
 from apps.api.app.models.void_upgrader_seed import VoidUpgraderSeed
