@@ -142,12 +142,14 @@ def ingest_violation(
     session.commit()
 
 
-@router.post("/mod-snapshot", status_code=204)
+@router.post("/mod-snapshot")
 def ingest_mod_snapshot(
     req: ModSnapshotRequest,
     session: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(require_game_server)],
-) -> None:
+) -> dict[str, list[str]]:
+    """Stores what a client joined with and answers with what of it looks like a cheat,
+    so the server can tell its staff there and then (the mod ignores the body)."""
     suspicious = _find_suspicious(req.mods, session)
     record = AnticheatModSnapshot(
         id=str(uuid4()),
@@ -160,6 +162,7 @@ def ingest_mod_snapshot(
     )
     session.add(record)
     session.commit()
+    return {"suspicious": suspicious}
 
 
 class InjectionReportRequest(BaseModel):
