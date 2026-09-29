@@ -45,8 +45,8 @@ class Authority:
         self.platform = self.access.platform_admin
         self.admin_servers = self.access.admin_servers
         self.top = top_position(actor)
-        self.can_manage_roles = self.platform or bool(self.admin_servers) or self.access.holds_everywhere("roles.manage")
-        self.can_assign_roles = self.platform or bool(self.admin_servers) or self.access.holds_everywhere("roles.assign")
+        self.can_manage_roles = self.platform or self._somewhere("roles.manage")
+        self.can_assign_roles = self.platform or self._somewhere("roles.assign")
         # The «Сотрудники» tab (personal grants); appointing admins stays with the owner and
         # platform admins.
         self.can_staff = self.platform or self.access.holds_everywhere("staff.manage")
@@ -86,10 +86,15 @@ class Authority:
         return self.top is not None and position < self.top
 
     def may_edit_role(self, position: int, server_ids, permissions, key: str = "roles.manage") -> bool:
-        if self.platform or self._within_admin_servers(server_ids):
+        """``key`` (roles.manage / roles.assign) on every server of the role (everywhere for
+        a role of all servers), every permission of the role held by the actor there, and
+        the role below the actor's own — admins of all the role's servers stand above any
+        role of theirs."""
+        if self.platform:
             return True
-        return (self.access.holds_everywhere(key) and self._below(position)
-                and self._covers(permissions, server_ids))
+        if not self._holds_on(key, server_ids) or not self._covers(permissions, server_ids):
+            return False
+        return self._within_admin_servers(server_ids) or self._below(position)
 
     def is_member(self, role) -> bool:
         return role is not None and any(r.id == role.id for r in (getattr(self.actor, "staff_roles", None) or []))

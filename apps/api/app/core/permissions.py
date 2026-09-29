@@ -75,8 +75,8 @@ PERMISSION_CATALOG: list[dict] = [
         "group": "Сотрудники",
         "permissions": [
             {"key": "staff.manage", "label": "Сотрудники: вкладка и личные права (выдавать можно только те, что есть у тебя)", "sensitive": True},
-            {"key": "roles.manage", "label": "Роли: создавать и править роли ниже своей (только с правами, что есть у тебя)", "sensitive": True},
-            {"key": "roles.assign", "label": "Роли: выдавать и снимать роли ниже своей", "sensitive": True},
+            {"key": "roles.manage", "label": "Роли: создавать и править роли этого сервера (ниже своей, только с правами, что есть у тебя)", "sensitive": True},
+            {"key": "roles.assign", "label": "Роли: выдавать и снимать роли этого сервера (ниже своей)", "sensitive": True},
             {"key": "badges.manage", "label": "Значки: создавать и править (роли без прав)"},
             {"key": "badges.assign", "label": "Значки: выдавать и снимать — себе тоже"},
         ],
@@ -167,7 +167,8 @@ SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
 )
 # Per-server keys outside those prefixes. Crash reports carry the server picked in the
 # launcher; the crash *rules* stay platform-wide, their buttons touch players' files.
-SERVER_SCOPED_KEYS: frozenset[str] = frozenset({"crashes.view", "crashes.manage", "servers.manage", "dashboard.view"})
+SERVER_SCOPED_KEYS: frozenset[str] = frozenset({"crashes.view", "crashes.manage", "servers.manage", "dashboard.view",
+                                               "roles.manage", "roles.assign"})
 
 for _group in PERMISSION_CATALOG:
     for _p in _group["permissions"]:
