@@ -114,7 +114,10 @@ def get_dashboard_stats(
         d = (trend_start + timedelta(days=i)).strftime("%Y-%m-%d")
         reg_trend.append({"date": d, "count": trend_map[d]})
 
-    result: dict = {
+    result: dict = {}
+    # Accounts are platform-wide: shown with players.view only (a server's admin sees
+    # their server's figures, not the whole platform's sign-ups).
+    platform = {
         "users": {
             "total": total_users,
             "active": active_users,
@@ -126,6 +129,10 @@ def get_dashboard_stats(
         "players": {
             "total": total_players,
         },
+    }
+    if "players.view" in perms:
+        result.update(platform)
+    result |= {
         "nations": {
             "total": total_nations,
         },
@@ -188,7 +195,7 @@ def get_server_status(server: Annotated[GameServer, Depends(resolve_server)]) ->
         return {**base, "online": False, "reason": str(exc) or "не отвечает"}
 
 
-@router.get("/recent-users")
+@router.get("/recent-users", dependencies=[Depends(require_permission("players.view"))])
 def get_recent_users(
     session: Annotated[Session, Depends(_get_admin_db_service)],
 ) -> dict:
