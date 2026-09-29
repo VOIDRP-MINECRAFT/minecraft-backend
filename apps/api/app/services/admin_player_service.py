@@ -334,3 +334,6 @@ class AdminPlayerService:
         for refresh_session in sessions:
             refresh_session.revoked_at = now
             refresh_session.last_used_at = now
+        from apps.api.app.core.sign_ins import revoke_devices
+
+        revoke_devices(self.session, user_id)

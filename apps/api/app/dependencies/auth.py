@@ -71,3 +71,32 @@ def get_optional_current_user(
         return user
     except jwt.PyJWTError:
         return None
+
+
+def device_from_token(token: str, session: Session):
+    """The sign-in (auth_devices row) an access token belongs to, or None (a token from
+    before devices existed, or a signed-out device)."""
+    from apps.api.app.models.auth_device import AuthDevice
+
+    try:
+        sid = decode_access_token(token).get("sid")
+    except jwt.PyJWTError:
+        return None
+    if not sid:
+        return None
+    try:
+        device = session.get(AuthDevice, UUID(sid))
+    except ValueError:
+        return None
+    return device if device is not None and device.revoked_at is None else None
+
+
+def get_current_device(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db_session)],
+):
+    device = device_from_token(credentials.credentials, session)
+    if device is None or device.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session_revoked")
+    return device

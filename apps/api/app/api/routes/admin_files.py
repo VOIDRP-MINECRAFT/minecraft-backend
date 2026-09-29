@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.core import server_ops
 from apps.api.app.core.audit import record_audit
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import caller_permissions, get_current_staff_user, require_permission
+from apps.api.app.dependencies.admin import caller_permissions, get_current_staff_user, reauth_is_fresh, require_permission
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.file_revision import FileRevision
 from apps.api.app.models.game_server import GameServer
@@ -67,8 +67,9 @@ def _running(server: GameServer) -> bool:
     return props.get("ActiveState") == "active" and int(props.get("MainPID") or 0) > 0
 
 
-def _secrets_ok(perms: set[str]) -> bool:
-    return "files.secrets" in perms
+def _secrets_ok(perms: set[str], reauthed: bool = True) -> bool:
+    """Secrets in the clear: the permission, and the password re-entered in the last 5 minutes."""
+    return "files.secrets" in perms and reauthed
 
 
 def _audit(session: Session, actor: User, server: GameServer, action: str, path: str, **meta) -> None:
@@ -132,13 +133,16 @@ def list_folder(
 def read_file(
     server: Annotated[GameServer, Depends(resolve_server)],
     perms: Annotated[set[str], Depends(caller_permissions)],
+    reauthed: Annotated[bool, Depends(reauth_is_fresh)],
     path: str = Query(...),
 ) -> dict:
     root = _root(server)
     target = _path(root, path)
     if target.is_dir():
         raise HTTPException(status_code=400, detail="Это папка")
-    if sf.is_secret_file(target) and not _secrets_ok(perms):
+    if sf.is_secret_file(target) and not _secrets_ok(perms, reauthed):
+        if "files.secrets" in perms:
+            raise HTTPException(status_code=403, detail="reauth_required")
         raise HTTPException(status_code=403, detail="Этот файл — секрет; нужно право «Файлы: видеть пароли и секреты»")
     size = target.stat().st_size
     if size > sf.EDIT_LIMIT or not sf.is_text(target):
@@ -146,9 +150,11 @@ def read_file(
     text = _read_text(target)
     masked = 0
     shown = text
-    if not _secrets_ok(perms):
+    if not _secrets_ok(perms, reauthed):
         shown, masked = sf.mask(text)
     return {
+        # With the permission but no fresh password: masked, the site offers «показать».
+        "secrets_locked": bool(masked) and "files.secrets" in perms,
         "path": sf.rel_of(root, target),
         "content": shown,
         "etag": sf.etag(text),
@@ -164,6 +170,7 @@ def read_file(
 def download(
     server: Annotated[GameServer, Depends(resolve_server)],
     perms: Annotated[set[str], Depends(caller_permissions)],
+    reauthed: Annotated[bool, Depends(reauth_is_fresh)],
     session: Annotated[Session, Depends(get_db_session)],
     actor: Annotated[User, Depends(get_current_staff_user)],
     path: str = Query(...),
@@ -171,7 +178,7 @@ def download(
     root = _root(server)
     target = _path(root, path)
     rel = sf.rel_of(root, target)
-    secrets = _secrets_ok(perms)
+    secrets = _secrets_ok(perms, reauthed)
     if target.is_file():
         if sf.is_secret_file(target) and not secrets:
             raise HTTPException(status_code=403, detail="Этот файл — секрет; нужно право «Файлы: видеть пароли и секреты»")
@@ -247,6 +254,7 @@ def write_file(
     req: WriteRequest,
     server: Annotated[GameServer, Depends(resolve_server)],
     perms: Annotated[set[str], Depends(caller_permissions)],
+    reauthed: Annotated[bool, Depends(reauth_is_fresh)],
     session: Annotated[Session, Depends(get_db_session)],
     actor: Annotated[User, Depends(get_current_staff_user)],
 ) -> dict:
@@ -261,18 +269,19 @@ def write_file(
     target = _path(root, req.path)
     if target.is_dir():
         raise HTTPException(status_code=400, detail="Это папка")
-    if sf.is_secret_file(target) and not _secrets_ok(perms):
-        raise HTTPException(status_code=403, detail="Этот файл — секрет; нужно право «Файлы: видеть пароли и секреты»")
+    if sf.is_secret_file(target) and not _secrets_ok(perms, reauthed):
+        raise HTTPException(status_code=403, detail="reauth_required" if "files.secrets" in perms
+                            else "Этот файл — секрет; нужно право «Файлы: видеть пароли и секреты»")
     current = _read_text(target)
     if req.etag and req.etag != sf.etag(current):
         raise HTTPException(status_code=409, detail="Файл изменился, пока он был открыт (сервер или кто-то ещё). "
                                                     "Откройте его заново, чтобы не затереть чужие правки.")
-    new_text = req.content
-    if not _secrets_ok(perms):
-        try:
-            new_text = sf.unmask(new_text, current)
-        except sf.FileError as exc:
-            raise HTTPException(status_code=exc.status, detail=str(exc))
+    # Masked secrets are always put back (only lines still carrying the mask are touched),
+    # so a mask can never overwrite a real password — whoever saved and however they saw it.
+    try:
+        new_text = sf.unmask(req.content, current)
+    except sf.FileError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
     if new_text == current:
         return {"path": sf.rel_of(root, target), "etag": sf.etag(current), "unchanged": True,
                 "lines_added": 0, "lines_removed": 0, "running": _running(server)}

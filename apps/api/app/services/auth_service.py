@@ -25,6 +25,8 @@ from apps.api.app.models.player_public_profile import PlayerPublicProfile
 from apps.api.app.models.referral_code import ReferralCode
 from apps.api.app.models.referral_link import ReferralLink
 from apps.api.app.models.referral_reward_period import ReferralRewardPeriod
+from apps.api.app.core.devices import locate
+from apps.api.app.models.auth_device import AuthDevice
 from apps.api.app.models.refresh_session import RefreshSession
 from apps.api.app.models.user import User
 from apps.api.app.repositories.user_repository import UserRepository
@@ -166,7 +168,8 @@ class AuthService:
 
         return user, player_account
 
-    def login(self, *, login: str, password: str, device_name: str) -> LoginResult:
+    def login(self, *, login: str, password: str, device_name: str,
+              ip: str | None = None, user_agent: str | None = None) -> LoginResult:
         normalized_login = normalize_email(login)
         user = self.user_repository.get_by_login_or_email_normalized_with_player_account(normalized_login)
 
@@ -176,9 +179,11 @@ class AuthService:
         if not user.is_active:
             raise AuthenticationError("account is disabled")
 
-        return self._issue_session(user=user, device_name=device_name)
+        device = self._new_device(user, device_name, ip, user_agent)
+        return self._issue_session(user=user, device_name=device_name, device=device)
 
-    def refresh(self, *, raw_refresh_token: str, device_name: str) -> LoginResult:
+    def refresh(self, *, raw_refresh_token: str, device_name: str,
+                ip: str | None = None, user_agent: str | None = None) -> LoginResult:
         refresh_session = self.session.execute(
             select(RefreshSession).where(RefreshSession.token_hash == hash_opaque_token(raw_refresh_token))
         ).scalar_one_or_none()
@@ -194,11 +199,24 @@ class AuthService:
         if user is None:
             raise AuthenticationError("user is not available")
 
+        # The sign-in this token belongs to: signed out from «Активные входы» → no refresh.
+        device = self.session.get(AuthDevice, refresh_session.device_id) if refresh_session.device_id else None
+        if device is not None and device.revoked_at is not None:
+            raise AuthenticationError("refresh token is revoked")
+        if device is None:  # a session from before devices existed
+            device = self._new_device(user, device_name, ip, user_agent)
+        else:
+            device.last_seen_at = utc_now()
+            if ip and ip != device.last_ip:
+                device.last_ip, device.last_location = ip, locate(ip)
+            if user_agent:
+                device.user_agent = user_agent[:400]
+
         refresh_session.revoked_at = utc_now()
         refresh_session.last_used_at = utc_now()
         self.session.flush()
 
-        return self._issue_session(user=user, device_name=device_name)
+        return self._issue_session(user=user, device_name=device_name, device=device)
 
     def logout(self, *, raw_refresh_token: str) -> None:
         refresh_session = self.session.execute(
@@ -210,6 +228,10 @@ class AuthService:
 
         refresh_session.revoked_at = utc_now()
         refresh_session.last_used_at = utc_now()
+        if refresh_session.device_id:
+            device = self.session.get(AuthDevice, refresh_session.device_id)
+            if device is not None and device.revoked_at is None:
+                device.revoked_at = utc_now()
         self.session.commit()
 
     def verify_email(self, *, raw_token: str) -> User:
@@ -257,19 +279,35 @@ class AuthService:
         for refresh_session in refresh_sessions:
             refresh_session.revoked_at = now
             refresh_session.last_used_at = now
+        for device in self.session.scalars(select(AuthDevice).where(AuthDevice.user_id == user.id, AuthDevice.revoked_at.is_(None))):
+            device.revoked_at = now
 
         self.session.commit()
         self.session.refresh(user)
         return user
 
-    def _issue_session(self, *, user: User, device_name: str) -> LoginResult:
+    def _new_device(self, user: User, device_name: str, ip: str | None, user_agent: str | None) -> AuthDevice:
+        device = AuthDevice(
+            user_id=user.id, device_name=(device_name or "")[:120], user_agent=(user_agent or None) and user_agent[:400],
+            ip=ip, location=locate(ip), last_ip=ip, last_location=locate(ip),
+            created_at=utc_now(), last_seen_at=utc_now(),
+            expires_at=utc_now() + timedelta(days=self.settings.refresh_token_expire_days),
+        )
+        self.session.add(device)
+        self.session.flush()
+        return device
+
+    def _issue_session(self, *, user: User, device_name: str, device: AuthDevice | None = None) -> LoginResult:
         player_account = user.player_account
-        access_token, access_expires_at = build_access_token(user.id)
+        access_token, access_expires_at = build_access_token(user.id, device.id if device else None)
         raw_refresh_token = generate_opaque_token()
         refresh_expires_at = utc_now() + timedelta(days=self.settings.refresh_token_expire_days)
+        if device is not None:
+            device.expires_at = refresh_expires_at
 
         refresh_session = RefreshSession(
             user_id=user.id,
+            device_id=device.id if device else None,
             token_hash=hash_opaque_token(raw_refresh_token),
             device_name=device_name,
             issued_at=utc_now(),

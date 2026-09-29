@@ -19,7 +19,7 @@ from apps.api.app.core.permissions import (
 )
 from apps.api.app.db import get_db_session
 from apps.api.app.core.staff_authority import Authority, top_position
-from apps.api.app.dependencies.admin import get_current_staff_user
+from apps.api.app.dependencies.admin import get_current_staff_user, require_reauth
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.staff_role import StaffRoleMember
 from apps.api.app.models.user import User
@@ -58,6 +58,9 @@ class ModeratorRead(BaseModel):
     # grants (None = all of them, incl. the platform-wide list; [] = none).
     editable: bool = False
     personal_scope: list[str] | None = []
+    # 2FA set up, and how many devices are signed in.
+    mfa_enabled: bool = False
+    devices: int = 0
 
 
 class ManagerInfo(BaseModel):
@@ -176,7 +179,23 @@ def _read(u: User, session: Session, authority: Authority | None = None) -> Mode
         granted_by=u.staff_granted_by,
         editable=editable,
         personal_scope=scope,
+        mfa_enabled=u.mfa_enabled,
+        devices=_device_counts(session).get(u.id, 0),
     )
+
+
+def _device_counts(session: Session) -> dict:
+    from sqlalchemy import func
+
+    from apps.api.app.core.security import utc_now
+    from apps.api.app.models.auth_device import AuthDevice
+
+    info = session.info.setdefault("device_counts", None)
+    if info is None:
+        rows = session.execute(select(AuthDevice.user_id, func.count()).where(
+            AuthDevice.revoked_at.is_(None), AuthDevice.expires_at > utc_now()).group_by(AuthDevice.user_id)).all()
+        info = session.info["device_counts"] = dict(rows)
+    return info
 
 
 def _find(session: Session, username: str) -> User:
@@ -375,7 +394,7 @@ def revoke_moderator(
 
 # ── Admins: of the whole platform (the owner's call) or of single servers ───
 
-@router.post("/admins", response_model=ModeratorRead, status_code=status.HTTP_201_CREATED)
+@router.post("/admins", response_model=ModeratorRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_reauth)])
 def appoint_admin(
     payload: AdminAssignRequest,
     session: Annotated[Session, Depends(get_db_session)],
@@ -416,7 +435,7 @@ def appoint_admin(
     return _read(user, session, authority)
 
 
-@router.put("/admins/{user_id}", response_model=ModeratorRead)
+@router.put("/admins/{user_id}", response_model=ModeratorRead, dependencies=[Depends(require_reauth)])
 def set_admin_servers(
     user_id: UUID,
     payload: AdminServersRequest,
@@ -442,7 +461,7 @@ def set_admin_servers(
     return _read(user, session, authority)
 
 
-@router.delete("/admins/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/admins/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_reauth)])
 def remove_admin(
     user_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
@@ -471,3 +490,70 @@ def remove_admin(
     refresh_staff_flag(session, user)
     session.commit()
     _audit(session, authority.actor, "remove_admin", user, scope="servers", before=was)
+
+
+# ── Sign-ins and 2FA of a staff member ───────────────────────────────────────
+
+def _target(session: Session, authority: Authority, user_id: UUID) -> User:
+    user = session.get(User, user_id)
+    if user is None or not (user.is_moderator or user.is_admin or user.admin_server_ids):
+        raise HTTPException(status_code=404, detail="Сотрудник не найден")
+    if user.id != authority.actor.id and not authority.outranks(user):
+        raise HTTPException(status_code=403, detail="Этого человека менять может только тот, кто выше")
+    return user
+
+
+@router.get("/{user_id}/devices")
+def staff_devices(
+    user_id: UUID,
+    session: Annotated[Session, Depends(get_db_session)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
+) -> dict:
+    from apps.api.app.api.routes.security import active_devices, device_view
+
+    user = _target(session, authority, user_id)
+    return {"items": [device_view(d, None) for d in active_devices(session, user.id)], "mfa_enabled": user.mfa_enabled}
+
+
+@router.post("/{user_id}/end-sessions")
+def staff_end_sessions(
+    user_id: UUID,
+    session: Annotated[Session, Depends(get_db_session)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
+) -> dict:
+    """Signs the person out everywhere — the site, the launcher, the admin panel."""
+    from apps.api.app.core.sign_ins import revoke_devices
+
+    user = _target(session, authority, user_id)
+    if user.id == authority.actor.id:
+        raise HTTPException(status_code=400, detail="Свои входы завершай в профиле — «Активные входы»")
+    n = revoke_devices(session, user.id)
+    session.commit()
+    _audit(session, authority.actor, "end_sessions", user, count=n)
+    return {"ended": n}
+
+
+@router.post("/{user_id}/mfa-reset", dependencies=[Depends(require_reauth)])
+def staff_mfa_reset(
+    user_id: UUID,
+    session: Annotated[Session, Depends(get_db_session)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
+) -> dict:
+    """Lost phone: turns the person's 2FA off and signs them out; on the next visit to the
+    admin panel they set it up again. The owner and platform admins only."""
+    from apps.api.app.core.sign_ins import revoke_devices
+
+    if not authority.platform:
+        raise HTTPException(status_code=403, detail="Сбросить 2FA может владелец или админ платформы")
+    user = _target(session, authority, user_id)
+    if user.is_owner and not authority.owner:
+        raise HTTPException(status_code=403, detail="2FA владельца сбрасывает только он сам")
+    user.mfa_totp_secret = None
+    user.mfa_totp_enabled_at = None
+    user.mfa_totp_last_step = None
+    user.mfa_telegram_enabled_at = None
+    user.mfa_backup_hashes = []
+    n = revoke_devices(session, user.id)
+    session.commit()
+    _audit(session, authority.actor, "mfa_reset", user, devices_signed_out=n)
+    return {"ok": True}

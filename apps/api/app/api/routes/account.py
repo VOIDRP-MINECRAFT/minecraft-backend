@@ -130,24 +130,18 @@ def revoke_other_sessions(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> RevokeSessionsResponse:
-    current_refresh_token_hash = hash_opaque_token(payload.refresh_token)
+    current = session.scalar(select(RefreshSession).where(RefreshSession.token_hash == hash_opaque_token(payload.refresh_token)))
+    from apps.api.app.core.sign_ins import revoke_devices
+
+    revoked_sessions = revoke_devices(session, current_user.id, keep=current.device_id if current else None)
+    # Tokens from before devices existed.
     now = utc_now()
-
-    refresh_sessions = session.execute(
-        select(RefreshSession).where(
-            RefreshSession.user_id == current_user.id,
-            RefreshSession.revoked_at.is_(None),
-            RefreshSession.expires_at > now,
-            RefreshSession.token_hash != current_refresh_token_hash,
-        )
-    ).scalars().all()
-
-    revoked_sessions = 0
-    for refresh_session in refresh_sessions:
+    for refresh_session in session.execute(select(RefreshSession).where(
+        RefreshSession.user_id == current_user.id, RefreshSession.revoked_at.is_(None),
+        RefreshSession.device_id.is_(None), RefreshSession.token_hash != hash_opaque_token(payload.refresh_token),
+    )).scalars():
         refresh_session.revoked_at = now
-        refresh_session.last_used_at = now
         revoked_sessions += 1
-
     session.commit()
 
     return RevokeSessionsResponse(

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String
+from sqlalchemy import BigInteger, Boolean, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -55,6 +55,17 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # Servers (game_servers.id as strings) this person is an admin of: every per-server
     # permission there, plus managing that server's staff and roles.
     admin_server_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    # 2FA (required for the admin panel): TOTP secret (encrypted, core/mfa.py), codes from
+    # the Telegram bot, hashed one-time backup codes; the last TOTP step used (no replay).
+    mfa_totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mfa_totp_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mfa_telegram_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mfa_backup_hashes: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    mfa_totp_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    @property
+    def mfa_enabled(self) -> bool:
+        return bool(self.mfa_totp_enabled_at or (self.mfa_telegram_enabled_at and self.telegram_user_id))
 
     # Telegram account link (for the aiogram bot: news publishing / admin).
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True, index=True)

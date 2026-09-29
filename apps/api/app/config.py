@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # Global Telegram bot token (one bot for all servers). Per-server chat_id and
     # Discord webhook URL live on game_servers. Empty → Telegram auto-post skipped.
     telegram_bot_token: str = ""
+    # 2FA for the admin panel (emergency switch: STAFF_MFA_REQUIRED=false) and the key the
+    # TOTP secrets are encrypted with (empty = derived from JWT_SECRET_KEY).
+    staff_mfa_required: bool = True
+    mfa_encryption_key: str = ""
 
     # Outbound HTTP(S) proxy for external calls (Telegram/Discord). This host has
     # no direct egress — traffic must go through the local proxy. Empty → direct.

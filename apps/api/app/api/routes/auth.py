@@ -106,6 +106,7 @@ def register(
 @router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
+    request: Request,
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> LoginResponse:
     try:
@@ -113,6 +114,8 @@ def login(
             login=payload.login,
             password=payload.password,
             device_name=payload.device_name,
+            ip=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
         )
     except AuthenticationError as exc:
         raise HTTPException(
@@ -133,12 +136,15 @@ def login(
 @router.post("/refresh", response_model=RefreshResponse)
 def refresh(
     payload: RefreshRequest,
+    request: Request,
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> RefreshResponse:
     try:
         result = auth_service.refresh(
             raw_refresh_token=payload.refresh_token,
             device_name=payload.device_name,
+            ip=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
         )
     except AuthenticationError as exc:
         raise HTTPException(

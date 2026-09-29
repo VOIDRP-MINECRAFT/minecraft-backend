@@ -44,7 +44,56 @@ def _user_from_credentials(
         return None
     if user is None or not user.is_active:
         return None
+    if user.is_admin or user.is_moderator or user.admin_server_ids:
+        _require_staff_mfa(user, credentials.credentials, session)
     return user
+
+
+def _require_staff_mfa(user: User, token: str, session: Session) -> None:
+    """The admin panel needs 2FA: set up on the account, and passed on this device within
+    the last 12 hours. The site answers ``mfa_setup_required`` / ``mfa_required`` with its
+    own screens; a signed-out device gets 401 ``session_revoked``."""
+    from apps.api.app.config import get_settings
+    from apps.api.app.core.mfa import MFA_TTL
+    from apps.api.app.core.security import utc_now
+    from apps.api.app.dependencies.auth import device_from_token
+
+    if not getattr(get_settings(), "staff_mfa_required", True):
+        return
+    device = device_from_token(token, session)
+    if device is None or device.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session_revoked")
+    if not user.mfa_enabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="mfa_setup_required")
+    if device.mfa_at is None or utc_now() - device.mfa_at >= MFA_TTL:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="mfa_required")
+
+
+def reauth_is_fresh(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_optional_bearer)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> bool:
+    from apps.api.app.core.mfa import REAUTH_TTL
+    from apps.api.app.core.security import utc_now
+    from apps.api.app.dependencies.auth import device_from_token
+
+    device = device_from_token(credentials.credentials, session) if credentials else None
+    return bool(device and device.reauth_at and utc_now() - device.reauth_at < REAUTH_TTL)
+
+
+def require_reauth(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_optional_bearer)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> None:
+    """Dangerous actions: the password re-entered on this device within 5 minutes
+    (POST /auth/reauth). The site answers ``reauth_required`` with a password dialog."""
+    from apps.api.app.core.mfa import REAUTH_TTL
+    from apps.api.app.core.security import utc_now
+    from apps.api.app.dependencies.auth import device_from_token
+
+    device = device_from_token(credentials.credentials, session) if credentials else None
+    if device is None or device.reauth_at is None or utc_now() - device.reauth_at >= REAUTH_TTL:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="reauth_required")
 
 
 def request_server_id(request: Request, session: Session):

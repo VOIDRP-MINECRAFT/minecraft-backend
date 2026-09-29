@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.core import server_ops
 from apps.api.app.core.audit import record_audit
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import get_current_staff_user, require_permission
+from apps.api.app.dependencies.admin import get_current_staff_user, require_permission, require_reauth
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.server_backup import (
@@ -145,7 +145,7 @@ class RestoreRequest(BaseModel):
     warn_seconds: int = Field(default=30, ge=0, le=300)
 
 
-@router.post("/{backup_id}/restore", dependencies=[Depends(require_permission("backups.restore"))])
+@router.post("/{backup_id}/restore", dependencies=[Depends(require_permission("backups.restore")), Depends(require_reauth)])
 def restore_backup(
     backup_id: UUID,
     req: RestoreRequest,
@@ -177,7 +177,7 @@ def restore_backup(
     return _restore_out(restore)
 
 
-@router.delete("/{backup_id}", dependencies=[Depends(require_permission("backups.delete"))])
+@router.delete("/{backup_id}", dependencies=[Depends(require_permission("backups.delete")), Depends(require_reauth)])
 def delete_backup(
     backup_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],

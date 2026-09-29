@@ -26,7 +26,9 @@ def verify_password(password: str, password_hash: str) -> bool:
     return password_hasher.verify(password, password_hash)
 
 
-def build_access_token(subject_user_id: UUID) -> tuple[str, datetime]:
+def build_access_token(subject_user_id: UUID, sid: UUID | None = None) -> tuple[str, datetime]:
+    """``sid`` — the sign-in (auth_devices.id) the token belongs to: the admin panel checks
+    it is not signed out and has passed 2FA."""
     settings = get_settings()
     expires_at = utc_now() + timedelta(minutes=settings.access_token_expire_minutes)
     payload: dict[str, Any] = {
@@ -34,6 +36,8 @@ def build_access_token(subject_user_id: UUID) -> tuple[str, datetime]:
         "type": "access",
         "exp": expires_at,
     }
+    if sid is not None:
+        payload["sid"] = str(sid)
     token = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
     return token, expires_at
 

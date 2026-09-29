@@ -17,6 +17,8 @@ class RefreshSession(UuidPrimaryKeyMixin, Base):
     __tablename__ = "refresh_sessions"
 
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # The sign-in this token belongs to (kept across rotations).
+    device_id: Mapped[UUID | None] = mapped_column(ForeignKey("auth_devices.id", ondelete="CASCADE"), nullable=True, index=True)
     token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     device_name: Mapped[str] = mapped_column(String(120), nullable=False)
 

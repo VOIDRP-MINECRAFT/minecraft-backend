@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import get_settings
 from apps.api.app.core import server_provision
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import PermittedServers, require_permission_somewhere
+from apps.api.app.dependencies.admin import PermittedServers, require_permission_somewhere, require_reauth
 from apps.api.app.models.game_server import (
     AUTH_SETTINGS_BOUNDS,
     DEFAULT_AUTH_SETTINGS,
@@ -271,7 +271,7 @@ def update_auth_settings(
     )
 
 
-@router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_reauth)])
 def delete_server(
     server_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
