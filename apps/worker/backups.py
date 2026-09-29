@@ -234,7 +234,7 @@ def restore(session: Session, server: GameServer, job: ServerBackupRestore) -> N
         # 1. A backup of the world as it is, so this restore can be undone.
         step("Делаю бэкап текущего мира, чтобы откат можно было отменить")
         pre = ServerBackup(server_id=server.id, kind="pre_restore", status="pending", worlds=[],
-                           note=f"Перед откатом на бэкап от {backup.created_at.astimezone().strftime('%d.%m %H:%M')}",
+                           note=f"Перед откатом на бэкап от {(backup.finished_at or backup.created_at).astimezone().strftime('%d.%m %H:%M')}",
                            created_by=job.requested_by)
         session.add(pre)
         session.commit()
