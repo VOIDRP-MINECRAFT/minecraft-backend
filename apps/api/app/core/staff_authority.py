@@ -72,14 +72,14 @@ class Authority:
             return self.owner
         if self.platform:
             return True
-        target_admin = {str(s) for s in (target.admin_server_ids or [])}
-        if target_admin and not target_admin <= self.admin_servers:
-            # An admin of a server the actor does not run is not the actor's to change.
+        # Admins of servers answer only to platform admins — never to one another, even
+        # two admins of the same server (equals cannot strip each other's roles or rights).
+        if target.admin_server_ids:
             return False
         if self.admin_servers:
             return True
         target_top = top_position(target)
-        return self.top is not None and (target_top is None or target_top < self.top) and not target_admin
+        return self.top is not None and (target_top is None or target_top < self.top)
 
     def personal_servers(self) -> set[str] | None:
         """Servers whose personal grants the actor may edit (None: all, and the global list)."""
