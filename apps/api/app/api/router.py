@@ -26,6 +26,7 @@ from apps.api.app.api.routes.servers import router as servers_router
 from apps.api.app.api.routes.admin_servers import router as admin_servers_router
 from apps.api.app.api.routes.admin_server_ops import router as admin_server_ops_router
 from apps.api.app.api.routes.admin_backups import router as admin_backups_router
+from apps.api.app.api.routes.playtime_pay import admin_router as salary_admin_router, plugin_router as salary_plugin_router
 from apps.api.app.api.routes.admin_audit import router as admin_audit_router
 from apps.api.app.api.routes.admin_punishments import router as admin_punishments_router
 from apps.api.app.api.routes.admin_player_overview import router as admin_player_overview_router
@@ -207,6 +208,8 @@ api_router.include_router(servers_router)
 api_router.include_router(admin_servers_router)
 api_router.include_router(admin_server_ops_router)
 api_router.include_router(admin_backups_router)
+api_router.include_router(salary_admin_router)
+api_router.include_router(salary_plugin_router)
 api_router.include_router(admin_audit_router)
 api_router.include_router(admin_punishments_router)
 api_router.include_router(admin_player_overview_router)

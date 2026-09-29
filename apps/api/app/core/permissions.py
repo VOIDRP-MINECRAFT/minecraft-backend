@@ -36,6 +36,8 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "nations.manage", "label": "Государства (изменение)", "sensitive": True},
             {"key": "anticheat.view", "label": "Античит (просмотр)", "sensitive": True},
             {"key": "anticheat.manage", "label": "Античит: действия/вердикты/конфиг", "sensitive": True},
+            {"key": "salary.view", "label": "Зарплата за игру (выплаты, настройки)"},
+            {"key": "salary.manage", "label": "Зарплата за игру: менять суммы и лимиты", "sensitive": True},
         ],
     },
     {
