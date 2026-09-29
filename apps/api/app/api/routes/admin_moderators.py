@@ -73,6 +73,8 @@ class ManagerInfo(BaseModel):
 class ModeratorListResponse(BaseModel):
     items: list[ModeratorRead]
     me: ManagerInfo
+    # slug → name of every server, so tags read right even for servers hidden from the viewer.
+    server_names: dict[str, str] = {}
 
 
 class ModeratorAssignRequest(BaseModel):
@@ -241,7 +243,10 @@ def list_staff(
     ).all()
     order = {"owner": 0, "admin": 1, "server_admin": 2, "moderator": 3}
     rows = sorted(rows, key=lambda u: (order[_role(u)], -(top_position(u) if top_position(u) is not None else -10**9), u.site_login.lower()))
-    return ModeratorListResponse(items=[_read(u, session, authority) for u in rows], me=_me(authority, session))
+    return ModeratorListResponse(
+        items=[_read(u, session, authority) for u in rows], me=_me(authority, session),
+        server_names={slug: name for slug, name in session.query(GameServer.slug, GameServer.name).all()},
+    )
 
 
 def _may_touch_personal(authority: Authority, user: User | None) -> None:
