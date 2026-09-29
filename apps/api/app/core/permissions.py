@@ -241,6 +241,8 @@ class Access:
         for sid, keys in (getattr(user, "staff_server_permissions", None) or {}).items():
             self._add(str(sid), keys)
         for role in getattr(user, "staff_roles", None) or []:
+            if getattr(role, "is_badge", False):
+                continue
             if role.server_ids is None:
                 self.everywhere |= set(sanitize_permissions(role.permissions or []))
             else:

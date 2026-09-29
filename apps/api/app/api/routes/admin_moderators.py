@@ -35,6 +35,7 @@ class RoleBadge(BaseModel):
     name: str
     color: str
     position: int
+    is_badge: bool = False
 
 
 class ModeratorRead(BaseModel):
@@ -148,7 +149,7 @@ def _read(u: User, session: Session, authority: Authority | None = None) -> Mode
         server_permissions={} if u.is_admin else _by_slug(session, u.staff_server_permissions),
         role=_role(u),
         admin_servers=[] if u.is_admin else sorted(slug_of[s] for s in (u.admin_server_ids or []) if s in slug_of),
-        roles=[RoleBadge(id=str(r.id), name=r.name, color=r.color, position=r.position) for r in (u.staff_roles or [])],
+        roles=[RoleBadge(id=str(r.id), name=r.name, color=r.color, position=r.position, is_badge=r.is_badge) for r in (u.staff_roles or [])],
         staff_since=u.staff_since.isoformat() if u.staff_since else None,
         granted_by=u.staff_granted_by,
         editable=editable,
@@ -185,7 +186,8 @@ def refresh_staff_flag(session: Session, user: User) -> None:
         return
     session.flush()
     session.refresh(user)
-    if not (user.staff_permissions or user.staff_server_permissions or user.admin_server_ids or user.staff_roles):
+    real_roles = [r for r in (user.staff_roles or []) if not r.is_badge]
+    if not (user.staff_permissions or user.staff_server_permissions or user.admin_server_ids or real_roles):
         user.is_moderator = False
         user.staff_since = None
         user.staff_granted_by = None

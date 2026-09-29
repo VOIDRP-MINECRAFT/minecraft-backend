@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,9 @@ class StaffRole(UuidPrimaryKeyMixin, TimestampMixin, Base):
     server_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     permissions: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # A badge: a label about the person (like a fun Discord role) — never any permission,
+    # no weight in seniority.
+    is_badge: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class StaffRoleMember(Base):

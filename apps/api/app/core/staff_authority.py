@@ -17,7 +17,8 @@ from apps.api.app.core.permissions import SERVER_KEYS, Access, access_of
 
 
 def top_position(user) -> int | None:
-    positions = [r.position for r in (getattr(user, "staff_roles", None) or [])]
+    # Badges carry no rights and no seniority.
+    positions = [r.position for r in (getattr(user, "staff_roles", None) or []) if not getattr(r, "is_badge", False)]
     return max(positions) if positions else None
 
 
@@ -73,7 +74,15 @@ class Authority:
                 and self._covers(permissions, server_ids))
 
     def may_assign_role(self, role) -> bool:
+        if getattr(role, "is_badge", False):
+            # A badge grants nothing: whoever hands out roles may hand it out anywhere it
+            # applies (the target still has to be below them).
+            return (self.platform or self._within_admin_servers(role.server_ids)
+                    or self.access.holds_everywhere("roles.assign"))
         return self.may_edit_role(role.position, role.server_ids, role.permissions, key="roles.assign")
+
+    def may_edit_badge(self, server_ids) -> bool:
+        return self.platform or self._within_admin_servers(server_ids) or self.access.holds_everywhere("roles.manage")
 
     # ── people ───────────────────────────────────────────────────────────────
 

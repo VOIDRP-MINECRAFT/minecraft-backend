@@ -42,6 +42,8 @@ class RoleRead(BaseModel):
     # None = every server (and platform keys); slugs = only those servers.
     servers: list[str] | None
     permissions: list[str]
+    # A badge: a label about the person, never any permission, no seniority.
+    is_badge: bool = False
     members: list[RoleMember]
     editable: bool
     assignable: bool
@@ -57,6 +59,7 @@ class RoleBody(BaseModel):
     color: str = "#99aab5"
     servers: list[str] | None = None
     permissions: list[str] = Field(default_factory=list)
+    badge: bool = False
 
 
 class RoleOrder(BaseModel):
@@ -86,10 +89,17 @@ def _read(role: StaffRole, session: Session, authority: Authority, members=None)
         id=str(role.id), name=role.name, color=role.color, position=role.position,
         servers=None if role.server_ids is None else [slug_of[s] for s in role.server_ids if s in slug_of],
         permissions=list(role.permissions or []),
+        is_badge=role.is_badge,
         members=(members if members is not None else _members(session)).get(role.id, []),
-        editable=authority.may_edit_role(role.position, role.server_ids, role.permissions),
+        editable=_may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions),
         assignable=authority.may_assign_role(role),
     )
+
+
+def _may_edit(authority: Authority, badge: bool, position: int, server_ids, permissions) -> bool:
+    if badge:
+        return authority.may_edit_badge(server_ids)
+    return authority.may_edit_role(position, server_ids, permissions)
 
 
 def _validated(session: Session, body: RoleBody) -> tuple[str, str, list[str] | None, list[str]]:
@@ -98,7 +108,7 @@ def _validated(session: Session, body: RoleBody) -> tuple[str, str, list[str] | 
     server_ids = None if body.servers is None else _ids(session, body.servers)
     if server_ids is not None and not server_ids:
         raise HTTPException(status_code=400, detail="Выберите хотя бы один сервер или «все серверы»")
-    keys = sanitize_permissions(body.permissions)
+    keys = [] if body.badge else sanitize_permissions(body.permissions)
     if server_ids is not None:
         platform = [k for k in keys if k not in SERVER_KEYS]
         if platform:
@@ -142,10 +152,10 @@ def create_role(
     name, color, server_ids, keys = _validated(session, body)
     lowest = session.scalar(select(StaffRole.position).order_by(StaffRole.position.asc()).limit(1))
     position = (lowest - 10) if lowest is not None else 0
-    if not authority.may_edit_role(position, server_ids, keys):
+    if not _may_edit(authority, body.badge, position, server_ids, keys):
         raise HTTPException(status_code=403, detail="Такую роль создать нельзя: в ней права, которых у тебя нет, или серверы не твои")
     role = StaffRole(name=name, color=color, position=position, server_ids=server_ids, permissions=keys,
-                     created_by=authority.actor.site_login)
+                     created_by=authority.actor.site_login, is_badge=body.badge)
     session.add(role)
     session.commit()
     session.refresh(role)
@@ -161,10 +171,11 @@ def update_role(
     authority: Annotated[Authority, Depends(get_authority)],
 ) -> RoleRead:
     role = _get(session, role_id)
-    if not authority.may_edit_role(role.position, role.server_ids, role.permissions):
+    if not _may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions):
         raise _deny_edit()
+    body.badge = role.is_badge  # a badge stays a badge, a role stays a role
     name, color, server_ids, keys = _validated(session, body)
-    if not authority.may_edit_role(role.position, server_ids, keys):
+    if not _may_edit(authority, role.is_badge, role.position, server_ids, keys):
         raise HTTPException(status_code=403, detail="Так изменить нельзя: в роли права, которых у тебя нет, или серверы не твои")
     before = {"name": role.name, "permissions": list(role.permissions or []), "servers": role.server_ids}
     role.name, role.color, role.server_ids, role.permissions = name, color, server_ids, keys
@@ -184,7 +195,7 @@ def delete_role(
     authority: Annotated[Authority, Depends(get_authority)],
 ) -> None:
     role = _get(session, role_id)
-    if not authority.may_edit_role(role.position, role.server_ids, role.permissions):
+    if not _may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions):
         raise _deny_edit()
     member_ids = [uid for (uid,) in session.execute(select(StaffRoleMember.user_id).where(StaffRoleMember.role_id == role.id)).all()]
     _log(session, authority, "delete", role, permissions=list(role.permissions or []), members=len(member_ids))
@@ -206,7 +217,8 @@ def reorder_roles(
     """The whole list, most senior first. Roles the caller may not change keep their
     places; the ones they may change move only among the places below the caller's own
     highest role."""
-    roles = {r.id: r for r in session.scalars(select(StaffRole)).all()}
+    # Only roles carry seniority; badges are listed apart and keep no order.
+    roles = {r.id: r for r in session.scalars(select(StaffRole).where(StaffRole.is_badge.is_(False))).all()}
     if set(body.ids) != set(roles) or len(body.ids) != len(roles):
         raise HTTPException(status_code=400, detail="Список ролей устарел — обновите страницу")
     current = sorted(roles.values(), key=lambda r: (-r.position, r.name))
@@ -226,9 +238,7 @@ def reorder_roles(
     session.commit()
     record_audit(session, actor=authority.actor, category="roles", action="reorder",
                  meta={"order": [roles[rid].name for rid in body.ids]})
-    members = _members(session)
-    fresh = sorted(roles.values(), key=lambda r: -r.position)
-    return RoleListResponse(items=[_read(r, session, authority, members) for r in fresh], me=_me(authority, session))
+    return list_roles(session, authority)
 
 
 @router.post("/{role_id}/members", response_model=RoleRead)
@@ -246,13 +256,19 @@ def add_member(
         raise HTTPException(status_code=400, detail="Аккаунт пользователя заблокирован")
     if user.is_admin:
         raise HTTPException(status_code=400, detail="Это админ платформы — у него и так все права")
-    if (user.is_moderator or user.admin_server_ids) and user.id != authority.actor.id and not authority.outranks(user):
+    myself = user.id == authority.actor.id
+    if (user.is_moderator or user.admin_server_ids) and not myself and not authority.outranks(user):
         raise HTTPException(status_code=403, detail="Этого человека менять может только тот, кто выше")
-    if user.id == authority.actor.id and not authority.platform:
-        raise HTTPException(status_code=403, detail="Себе роли выдавать нельзя")
+    if role.is_badge:
+        # A badge is a label on a staff member; it neither grants access nor makes staff.
+        if not (user.is_moderator or user.is_admin or user.admin_server_ids):
+            raise HTTPException(status_code=400, detail="Значки выдаются только сотрудникам")
+    elif myself and not authority.platform:
+        raise HTTPException(status_code=403, detail="Себе роли выдавать нельзя — только значки")
     exists = session.get(StaffRoleMember, (role.id, user.id))
     if exists is None:
-        _become_staff(user, authority.actor)
+        if not role.is_badge:
+            _become_staff(user, authority.actor)
         session.add(StaffRoleMember(role_id=role.id, user_id=user.id, granted_by=authority.actor.site_login))
         session.commit()
         _audit(session, authority.actor, "role_add", user, role=role.name)
@@ -270,7 +286,8 @@ def remove_member(
     user = session.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-    if not authority.may_assign_role(role) or not authority.outranks(user):
+    myself = user.id == authority.actor.id and role.is_badge
+    if not authority.may_assign_role(role) or not (myself or authority.outranks(user)):
         raise HTTPException(status_code=403, detail="Снять эту роль может только тот, кто выше")
     session.execute(delete(StaffRoleMember).where(StaffRoleMember.role_id == role.id, StaffRoleMember.user_id == user.id))
     refresh_staff_flag(session, user)
