@@ -34,9 +34,10 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from apps.api.app.core import server_ops
+from apps.api.app.core import server_changes, server_ops
 from apps.api.app.db import SessionLocal
 from apps.api.app.models.game_server import GameServer
+from apps.api.app.models.server_change import ServerRestartJob
 from apps.api.app.models.server_backup import (
     ServerBackup,
     ServerBackupRestore,
@@ -353,6 +354,107 @@ def restore(session: Session, server: GameServer, job: ServerBackupRestore) -> N
             flag.unlink(missing_ok=True)
 
 
+# ── Mods and plugins: applying the queue in a restart ─────────────────────────
+
+def restart_apply(session: Session, server: GameServer, job: ServerRestartJob) -> None:
+    """Warn, stop, put the queued jar changes in place while the server is down (in the
+    15 s before systemd starts it again), wait until it answers. The same way a backup
+    is restored — the jars are never touched under a running JVM."""
+    job.status = "running"
+    job.started_at = now()
+    session.commit()
+
+    def step(text: str) -> None:
+        job.step = text
+        session.commit()
+        log.info("%s: restart job %s: %s", server.slug, job.id, text)
+
+    data_dir = server_ops.resolve_data_dir(server)
+    flag = Path(data_dir or "/nonexistent") / "maintenance.flag"
+    set_flag = False
+    try:
+        if not server_changes.pending(session, server):
+            raise Failed("Очередь пуста — применять нечего")
+        if flag.parent.is_dir() and not flag.exists():
+            flag.write_text(f"restart to apply mods/plugins {job.id}\n")
+            set_flag = True
+        was_running = running(server)
+        if was_running:
+            warn = max(0, job.warn_seconds)
+            step(f"Предупреждаю игроков ({warn} с) и останавливаю сервер")
+            if warn:
+                say(server, f"§e§lСервер перезапустится через {warn} с — обновление модов и плагинов.")
+                for left in (30, 10, 5):
+                    if left < warn:
+                        time.sleep(warn - left)
+                        warn = left
+                        say(server, f"§eПерезапуск через {left} с.")
+                time.sleep(warn)
+            rcon_quiet(server, "stop", timeout=30)
+            deadline = time.monotonic() + 900
+            while unit_state(server)[2] > 0:
+                if time.monotonic() > deadline:
+                    raise Failed("Сервер не остановился за 15 минут — ничего не менял, проверьте его")
+                time.sleep(0.5)
+        state, sub, pid = unit_state(server)
+        if pid:
+            raise Failed(f"Сервер снова запущен ({state}/{sub}) раньше подмены — ничего не менял, очередь сохранена")
+        step("Применяю изменения")
+        applied = server_changes.apply_pending(session, server)
+        failed = [c for c in applied if c.status == "failed"]
+        summary = f"применено {len(applied) - len(failed)} из {len(applied)}"
+        if was_running:
+            step(f"Изменения: {summary}. Жду запуска сервера")
+            deadline = time.monotonic() + 1800
+            up = False
+            while time.monotonic() < deadline:
+                if running(server):
+                    try:
+                        rcon(server, "list", timeout=5)
+                        up = True
+                        break
+                    except Exception:  # noqa: BLE001 — still booting
+                        pass
+                time.sleep(5)
+            if not up:
+                raise Failed(f"Изменения: {summary}, но сервер не поднялся за 30 минут — проверьте его")
+            done_text = f"Готово: {summary}, сервер запущен"
+        else:
+            done_text = f"Готово: {summary}. Сервер был выключен — запустите его"
+        if failed:
+            done_text += ". Не удалось: " + "; ".join(f"{c.filename}: {c.result}" for c in failed)
+        job.status = "done"
+        job.step = done_text
+    except Exception as exc:  # noqa: BLE001
+        job.status = "failed"
+        job.error = str(exc) if isinstance(exc, Failed) else f"{type(exc).__name__}: {exc}"
+        if not isinstance(exc, Failed):
+            traceback.print_exc()
+    finally:
+        job.finished_at = now()
+        session.commit()
+        if set_flag:
+            flag.unlink(missing_ok=True)
+
+
+def apply_when_stopped(session: Session) -> None:
+    """Queued jar changes of a server found stopped are applied there and then."""
+    from apps.api.app.models.server_change import ServerFileChange
+
+    ids = {sid for (sid,) in session.query(ServerFileChange.server_id).filter(ServerFileChange.status == "pending").distinct()}
+    for server_id in ids:
+        server = session.get(GameServer, server_id)
+        if server is None or not server.systemd_unit:
+            continue
+        busy = session.query(ServerRestartJob).filter(
+            ServerRestartJob.server_id == server_id, ServerRestartJob.status.in_(("pending", "running"))).first()
+        if busy is None and unit_state(server)[2] == 0:
+            state, _sub, _pid = unit_state(server)
+            if state in ("inactive", "failed"):
+                applied = server_changes.apply_pending(session, server)
+                log.info("%s: server stopped, applied %d queued jar changes", server.slug, len(applied))
+
+
 # ── Schedule and pruning ──────────────────────────────────────────────────────
 
 def settings_of(session: Session, server: GameServer) -> dict:
@@ -413,6 +515,10 @@ def recover(session: Session) -> None:
         b.status = "failed"
         b.error = "Исполнитель прервался посреди бэкапа (перезапуск машины или бэкенда)"
         b.finished_at = now()
+    for j in session.query(ServerRestartJob).filter(ServerRestartJob.status == "running").all():
+        j.status = "failed"
+        j.error = f"Исполнитель прервался на шаге «{j.step}». Очередь изменений сохранена — проверьте сервер"
+        j.finished_at = now()
     for r in session.query(ServerBackupRestore).filter(ServerBackupRestore.status == "running").all():
         r.status = "failed"
         r.error = f"Исполнитель прервался на шаге «{r.step}». Проверьте папку сервера: {STAGING}* / {OLD}*"
@@ -428,6 +534,11 @@ def run_once(session: Session) -> bool:
            .order_by(ServerBackupRestore.created_at).first())
     if job is not None:
         restore(session, session.get(GameServer, job.server_id), job)
+        return True
+    rj = (session.query(ServerRestartJob).filter(ServerRestartJob.status == "pending")
+          .order_by(ServerRestartJob.created_at).first())
+    if rj is not None:
+        restart_apply(session, session.get(GameServer, rj.server_id), rj)
         return True
     backup = (session.query(ServerBackup).filter(ServerBackup.status == "pending")
               .order_by(ServerBackup.created_at).first())
@@ -450,6 +561,7 @@ def main() -> int:
     session = SessionLocal()
     try:
         recover(session)
+        apply_when_stopped(session)
         schedule_due(session)
         while run_once(session):
             schedule_due(session)

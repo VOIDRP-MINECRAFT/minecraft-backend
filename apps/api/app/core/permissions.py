@@ -28,6 +28,8 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "monitoring.rcon", "label": "RCON-консоль (команды)", "sensitive": True},
             {"key": "mods.view", "label": "Моды (просмотр списка)"},
             {"key": "mods.manage", "label": "Моды: добавлять/удалять/заменять, пересборка", "sensitive": True},
+            {"key": "plugins.view", "label": "Плагины (список, версии, очередь изменений)"},
+            {"key": "plugins.manage", "label": "Плагины: загружать/обновлять/выключать/удалять, применять с перезапуском", "sensitive": True},
             {"key": "players.online.view", "label": "Онлайн игроки (просмотр)"},
             {"key": "players.online.moderate", "label": "Онлайн: кик/бан/оп", "sensitive": True},
             {"key": "market.view", "label": "Рынок (просмотр)", "sensitive": True},
@@ -150,7 +152,7 @@ PERMISSION_CATALOG: list[dict] = [
 SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
     "salary.", "backups.", "punishments.", "battlepass.", "voxel.", "upgrader.",
-    "trader.", "news.", "files.",
+    "trader.", "news.", "files.", "plugins.",
 )
 
 for _group in PERMISSION_CATALOG:

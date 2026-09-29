@@ -138,12 +138,15 @@ def set_targets(
     filename: str,
     server: Annotated[GameServer, Depends(resolve_server)],
     payload: TargetsRequest,
+    session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
 ) -> dict:
     # Partner (external) server: its mods folder is on someone else's machine — never place
     # a mod server-side there. Keep only the client-pack target.
     on_server = payload.on_server and not getattr(server, "is_external", False)
     try:
-        return mod_ops.set_targets(server, filename, payload.on_client, on_server)
+        return mod_ops.set_targets(server, filename, payload.on_client, on_server,
+                                   session=session, updated_by=getattr(actor, "site_login", None))
     except mod_ops.ModOpsError as exc:
         raise _fail(exc)
 

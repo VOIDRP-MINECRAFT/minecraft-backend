@@ -318,8 +318,12 @@ def apply_staged(
     updated_by: str | None,
 ) -> dict:
     """Copy each staged jar into the chosen dirs and record its metadata."""
+    from apps.api.app.core import server_changes  # (server_changes imports this module)
+
     staging = _staging_dir(server.slug, token)
     applied: list[str] = []
+    queued: list[str] = []
+    live = server_changes.running(server)
     for sel in selections:
         base = sanitize_jar(sel["filename"])
         src = os.path.join(staging, base)
@@ -332,7 +336,14 @@ def apply_staged(
         if on_client:
             _atomic_copy(src, os.path.join(client_mods_dir(server), base))
         if on_server:
-            _atomic_copy(src, os.path.join(server_mods_dir(server), base))
+            # Never under a running server: the change waits in the queue for a stop.
+            if live:
+                server_changes.queue(session, server, kind="mod", op="add", filename=base,
+                                     source_path=server_changes.keep_source(server, src, base),
+                                     label=f"мод {base}", created_by=updated_by)
+                queued.append(base)
+            else:
+                _atomic_copy(src, os.path.join(server_mods_dir(server), base))
         upsert_meta(
             session, server, base,
             optional=bool(sel.get("optional")),
@@ -344,11 +355,14 @@ def apply_staged(
         applied.append(base)
     # Best-effort cleanup of the whole staging token dir.
     shutil.rmtree(staging, ignore_errors=True)
-    return {"applied": applied, "count": len(applied)}
+    return {"applied": applied, "count": len(applied), "queued": queued}
 
 
 # ── Toggle client/server presence for an existing mod ────────────────────────
-def set_targets(server: GameServer, filename: str, on_client: bool, on_server: bool) -> dict:
+def set_targets(server: GameServer, filename: str, on_client: bool, on_server: bool,
+                session: Session | None = None, updated_by: str | None = None) -> dict:
+    from apps.api.app.core import server_changes
+
     base = sanitize_jar(filename)
     cpath = os.path.join(client_mods_dir(server), base)
     spath = os.path.join(server_mods_dir(server), base) if _has_server_dir(server) else None
@@ -367,10 +381,22 @@ def set_targets(server: GameServer, filename: str, on_client: bool, on_server: b
     elif not on_client and has_c:
         _trash(server.slug, "client", cpath); changed.append("client-")
     if spath is not None:
+        live = session is not None and server_changes.running(server)
         if on_server and not has_s:
-            _atomic_copy(source, spath); changed.append("server+")
+            if live:
+                server_changes.queue(session, server, kind="mod", op="add", filename=base,
+                                     source_path=server_changes.keep_source(server, source, base),
+                                     label=f"мод {base} на сервер", created_by=updated_by)
+                changed.append("server+ (в очереди)")
+            else:
+                _atomic_copy(source, spath); changed.append("server+")
         elif not on_server and has_s:
-            _trash(server.slug, "server", spath); changed.append("server-")
+            if live:
+                server_changes.queue(session, server, kind="mod", op="remove", filename=base,
+                                     label=f"мод {base} с сервера", created_by=updated_by)
+                changed.append("server- (в очереди)")
+            else:
+                _trash(server.slug, "server", spath); changed.append("server-")
     return {"filename": base, "changed": changed}
 
 
@@ -383,9 +409,16 @@ def remove_mod(session: Session, server: GameServer, filename: str, target: str)
         if os.path.isfile(cpath):
             _trash(server.slug, "client", cpath); removed.append("client")
     if target in ("server", "both") and _has_server_dir(server):
+        from apps.api.app.core import server_changes
+
         spath = os.path.join(server_mods_dir(server), base)
         if os.path.isfile(spath):
-            _trash(server.slug, "server", spath); removed.append("server")
+            if server_changes.running(server):
+                server_changes.queue(session, server, kind="mod", op="remove", filename=base,
+                                     label=f"мод {base} с сервера")
+                removed.append("server (в очереди)")
+            else:
+                _trash(server.slug, "server", spath); removed.append("server")
     if not removed:
         raise ModOpsError(f"Файл мода не найден для удаления: {base}")
     if target == "both":
