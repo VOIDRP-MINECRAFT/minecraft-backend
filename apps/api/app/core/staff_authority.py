@@ -47,6 +47,9 @@ class Authority:
         self.top = top_position(actor)
         self.can_manage_roles = self.platform or bool(self.admin_servers) or self.access.holds_everywhere("roles.manage")
         self.can_assign_roles = self.platform or bool(self.admin_servers) or self.access.holds_everywhere("roles.assign")
+        # The «Сотрудники» tab (personal grants); appointing admins stays with the owner and
+        # platform admins.
+        self.can_staff = self.platform or self.access.holds_everywhere("staff.manage")
         self.can_manage_badges = self.platform or self._somewhere("badges.manage")
         self.can_assign_badges = self.platform or self._somewhere("badges.assign")
 
@@ -62,7 +65,8 @@ class Authority:
 
     @property
     def opens_staff_pages(self) -> bool:
-        return self.can_manage_roles or self.can_assign_roles or self.can_manage_badges or self.can_assign_badges
+        return (self.can_manage_roles or self.can_assign_roles or self.can_manage_badges
+                or self.can_assign_badges or self.can_staff)
 
     # ── roles ────────────────────────────────────────────────────────────────
 
@@ -116,11 +120,14 @@ class Authority:
         target_top = top_position(target)
         return self.top is not None and (target_top is None or target_top < self.top)
 
-    def personal_servers(self) -> set[str] | None:
-        """Servers whose personal grants the actor may edit (None: all, and the global list)."""
+    def may_grant(self, key: str, server_id=None) -> bool:
+        """A personal grant the actor may give or take away: a platform admin any; anyone
+        else only what they hold themselves (everywhere, or on that server)."""
         if self.platform:
-            return None
-        return set(self.admin_servers)
+            return True
+        if server_id is None:
+            return key in self.access.everywhere
+        return key in self.access.on(server_id)
 
     @staticmethod
     def server_keys_only(keys) -> list[str]:

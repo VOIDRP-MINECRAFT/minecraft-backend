@@ -66,6 +66,7 @@ class ManagerInfo(BaseModel):
     admin_servers: list[str]
     can_manage_roles: bool
     can_assign_roles: bool
+    can_staff: bool = False
     can_manage_badges: bool = False
     can_assign_badges: bool = False
     top_position: int | None
@@ -111,6 +112,13 @@ def get_authority(actor: Annotated[User, Depends(get_current_staff_user)]) -> Au
     return authority
 
 
+def get_staff_authority(authority: Annotated[Authority, Depends(get_authority)]) -> Authority:
+    """The «Сотрудники» tab: platform admins and holders of staff.manage."""
+    if not authority.can_staff:
+        raise HTTPException(status_code=403, detail="Вкладка «Сотрудники» — по праву «Сотрудники: вкладка и личные права»")
+    return authority
+
+
 def _role(u: User) -> str:
     if u.is_owner:
         return "owner"
@@ -145,9 +153,8 @@ def _read(u: User, session: Session, authority: Authority | None = None) -> Mode
     slug_of = _slugs(session)
     editable = bool(authority and authority.outranks(u))
     scope: list[str] | None = []
-    if editable and not u.is_admin:
-        own = authority.personal_servers()
-        scope = None if own is None else sorted(slug_of[s] for s in own if s in slug_of)
+    if editable and not u.is_admin and authority.can_staff:
+        scope = None  # which keys exactly: Authority.may_grant, mirrored on the site
     return ModeratorRead(
         id=str(u.id), site_login=u.site_login, email=u.email,
         permissions=[] if u.is_admin else list(u.staff_permissions or []),
@@ -200,25 +207,25 @@ def refresh_staff_flag(session: Session, user: User) -> None:
 
 def _set_personal(session: Session, authority: Authority, user: User, permissions: list[str],
                   server_permissions: dict[str, list[str]]) -> None:
-    """Personal grants: a platform admin sets them all; an admin of servers only the
-    entries of their servers — the rest stays as it was."""
-    scope = authority.personal_servers()
-    # Servers the person is an admin of already give every per-server key: personal
-    # grants there would only duplicate it.
-    own_admin = {str(s) for s in (user.admin_server_ids or [])}
-    wanted = {}
-    for sid, keys in _by_id(session, server_permissions).items():
-        kept = [k for k in keys if sid not in own_admin or k not in SERVER_ADMIN_KEYS]
-        if kept:
-            wanted[sid] = kept
-    if scope is None:
-        user.staff_permissions = sanitize_permissions(permissions)
-        user.staff_server_permissions = wanted
-        return
-    current = sanitize_server_permissions(user.staff_server_permissions)
-    merged = {sid: keys for sid, keys in current.items() if sid not in scope}
-    merged.update({sid: keys for sid, keys in wanted.items() if sid in scope})
-    user.staff_server_permissions = sanitize_server_permissions(merged)
+    """Personal grants: a platform admin sets them as sent; anyone else changes only the
+    keys they hold themselves — every other key stays as it was."""
+    wanted_global = set(sanitize_permissions(permissions))
+    wanted_servers = {sid: set(keys) for sid, keys in _by_id(session, server_permissions).items()}
+    if authority.platform:
+        user.staff_permissions = sanitize_permissions(list(wanted_global))
+    else:
+        current = set(user.staff_permissions or [])
+        user.staff_permissions = sanitize_permissions(
+            [k for k in current if not authority.may_grant(k)] + [k for k in wanted_global if authority.may_grant(k)])
+    current_servers = {sid: set(keys) for sid, keys in sanitize_server_permissions(user.staff_server_permissions).items()}
+    merged: dict[str, list[str]] = {}
+    for sid in set(current_servers) | set(wanted_servers):
+        cur, want = current_servers.get(sid, set()), wanted_servers.get(sid, set())
+        keep = {k for k in cur if not authority.may_grant(k, sid)} | {k for k in want if authority.may_grant(k, sid)}
+        if keep:
+            merged[sid] = sorted(keep)
+    user.staff_server_permissions = merged
+    user.staff_server_permissions = _drop_admin_dupes(user)
 
 
 def _drop_admin_dupes(user: User) -> dict:
@@ -238,7 +245,7 @@ def _me(authority: Authority, session: Session) -> ManagerInfo:
         owner=authority.owner, platform_admin=authority.platform,
         admin_servers=sorted(slug_of[s] for s in authority.admin_servers if s in slug_of),
         can_manage_roles=authority.can_manage_roles, can_assign_roles=authority.can_assign_roles,
-        can_manage_badges=authority.can_manage_badges, can_assign_badges=authority.can_assign_badges,
+        can_staff=authority.can_staff, can_manage_badges=authority.can_manage_badges, can_assign_badges=authority.can_assign_badges,
         top_position=authority.top,
     )
 
@@ -251,7 +258,7 @@ def get_catalog() -> PermissionCatalogResponse:
 @router.get("", response_model=ModeratorListResponse)
 def list_staff(
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_authority)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
 ) -> ModeratorListResponse:
     """Everyone with admin-panel access: the owner, admins, server admins, then the rest."""
     rows = session.scalars(
@@ -266,8 +273,6 @@ def list_staff(
 
 
 def _may_touch_personal(authority: Authority, user: User | None) -> None:
-    if authority.personal_servers() is not None and not authority.admin_servers:
-        raise HTTPException(status_code=403, detail="Личные права выдают админы — ты можешь выдавать только роли")
     if user is not None and (user.is_moderator or user.admin_server_ids) and not authority.outranks(user):
         raise HTTPException(status_code=403, detail="Этого человека менять может только тот, кто выше")
 
@@ -276,7 +281,7 @@ def _may_touch_personal(authority: Authority, user: User | None) -> None:
 def assign_moderator(
     payload: ModeratorAssignRequest,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_authority)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
 ) -> ModeratorRead:
     actor = authority.actor
     user = _find(session, payload.username)
@@ -301,7 +306,7 @@ def update_moderator(
     user_id: UUID,
     payload: ModeratorUpdateRequest,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_authority)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
 ) -> ModeratorRead:
     user = session.get(User, user_id)
     if user is None or not user.is_moderator or user.is_admin:
@@ -329,14 +334,15 @@ def update_moderator(
 def revoke_moderator(
     user_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_authority)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
 ) -> None:
-    """A platform admin removes someone from the staff altogether; an admin of servers
-    takes away what the person had on those servers (grants, roles bound to them)."""
+    """A platform admin removes someone from the staff altogether; anyone else with the
+    «Сотрудники» right takes away what they could have given (their own keys, roles they
+    may hand out)."""
     user = session.get(User, user_id)
     if user is None or not user.is_moderator or user.is_admin:
         raise HTTPException(status_code=404, detail="Сотрудник не найден")
-    if not authority.outranks(user) or not (authority.platform or authority.admin_servers):
+    if not authority.outranks(user):
         raise HTTPException(status_code=403, detail="Снять этого человека может только тот, кто выше")
     before = {"permissions": list(user.staff_permissions or []),
               "servers": _by_slug(session, user.staff_server_permissions),
@@ -347,14 +353,14 @@ def revoke_moderator(
         user.staff_server_permissions = {}
         user.admin_server_ids = []
     else:
-        scope = authority.admin_servers
-        user.staff_server_permissions = {sid: k for sid, k in (user.staff_server_permissions or {}).items() if sid not in scope}
-        mine = [r.id for r in user.staff_roles if r.server_ids and {str(s) for s in r.server_ids} <= scope]
+        # Takes away what the actor could have given: their own keys, roles they may hand out.
+        _set_personal(session, authority, user, [], {})
+        mine = [r.id for r in user.staff_roles if authority.may_assign_role(r)]
         if mine:
             session.execute(delete(StaffRoleMember).where(StaffRoleMember.user_id == user.id, StaffRoleMember.role_id.in_(mine)))
     refresh_staff_flag(session, user)
     session.commit()
-    _audit(session, authority.actor, "revoke", user, before=before, scope="all" if authority.platform else "own_servers")
+    _audit(session, authority.actor, "revoke", user, before=before, scope="all" if authority.platform else "what_actor_holds")
 
 
 # ── Admins: of the whole platform (the owner's call) or of single servers ───
@@ -363,7 +369,7 @@ def revoke_moderator(
 def appoint_admin(
     payload: AdminAssignRequest,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_authority)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
 ) -> ModeratorRead:
     """``servers`` empty/None → admin of the platform: every permission everywhere (the
     owner only). A list of slugs → admin of those servers: every per-server permission
@@ -405,7 +411,7 @@ def set_admin_servers(
     user_id: UUID,
     payload: AdminServersRequest,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_authority)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
 ) -> ModeratorRead:
     """The servers someone is an admin of; an empty list ends it."""
     if not authority.platform:
@@ -430,7 +436,7 @@ def set_admin_servers(
 def remove_admin(
     user_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_authority)],
+    authority: Annotated[Authority, Depends(get_staff_authority)],
 ) -> None:
     """Takes admin away: of the platform — the owner only (the owner cannot be removed);
     of servers — the owner and platform admins."""

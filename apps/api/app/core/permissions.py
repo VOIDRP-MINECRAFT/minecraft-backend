@@ -74,6 +74,7 @@ PERMISSION_CATALOG: list[dict] = [
     {
         "group": "Сотрудники",
         "permissions": [
+            {"key": "staff.manage", "label": "Сотрудники: вкладка и личные права (выдавать можно только те, что есть у тебя)", "sensitive": True},
             {"key": "roles.manage", "label": "Роли: создавать и править роли ниже своей (только с правами, что есть у тебя)", "sensitive": True},
             {"key": "roles.assign", "label": "Роли: выдавать и снимать роли ниже своей", "sensitive": True},
             {"key": "badges.manage", "label": "Значки: создавать и править (роли без прав)"},
