@@ -28,10 +28,6 @@ class Settings(BaseSettings):
         default="CHANGE_ME_TO_STRONG_GAME_AUTH_SECRET",
         min_length=16,
     )
-    admin_api_secret: str = Field(
-        default="CHANGE_ME_TO_STRONG_ADMIN_SECRET",
-        min_length=16,
-    )
 
     # HMAC-SHA256 key used to sign launcher proofs embedded in play tickets.
     # Must match the value configured in the VoidRP launcher.
@@ -170,7 +166,6 @@ class Settings(BaseSettings):
             critical = {
                 "jwt_secret_key": self.jwt_secret_key,
                 "game_auth_shared_secret": self.game_auth_shared_secret,
-                "admin_api_secret": self.admin_api_secret,
             }
             for field, value in critical.items():
                 if value.upper().startswith("CHANGE_ME"):

@@ -42,7 +42,15 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             session.close()
 
     app.dependency_overrides[get_db_session] = override_db
-    admin_secret = get_settings().admin_api_secret
+    # The admin endpoints take a signed-in admin; stand one in (there is no shared
+    # admin secret any more). The header the helpers still send is ignored.
+    from types import SimpleNamespace
+    from apps.api.app.core.permissions import ALL_KEYS
+    from apps.api.app.dependencies import admin as admin_deps
+    app.dependency_overrides[admin_deps.caller_permissions] = lambda: set(ALL_KEYS)
+    app.dependency_overrides[admin_deps.get_current_staff_user] = lambda: SimpleNamespace(
+        id=None, site_login="test-admin", is_admin=True, is_moderator=False)
+    admin_secret = "unused"
 
     with TestClient(app) as client:
         yield client, admin_secret, TestingSessionLocal
