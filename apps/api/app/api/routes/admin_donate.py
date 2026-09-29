@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.app.config import get_settings
 from apps.api.app.dependencies.admin import require_permission
+from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.services.easydonate_service import EasyDonateError, EasyDonateService
 
 router = APIRouter(
@@ -15,8 +17,10 @@ router = APIRouter(
 )
 
 
-def get_service() -> EasyDonateService:
-    return EasyDonateService(settings=get_settings())
+def get_service(server: Annotated[GameServer, Depends(resolve_server)]) -> EasyDonateService:
+    """The shop of the server chosen in the admin panel (its own key, else the global)."""
+    return EasyDonateService(settings=get_settings(), server_id=server.easydonate_server_id,
+                             shop_key=server.easydonate_shop_key)
 
 
 @router.get("/overview")

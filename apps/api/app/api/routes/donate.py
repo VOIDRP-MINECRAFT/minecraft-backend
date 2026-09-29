@@ -27,7 +27,8 @@ def get_donate_service(
 ) -> EasyDonateService:
     # Scope products/payment to the active server's EasyDonate shop so commands
     # are delivered to that server; falls back to the global default when unset.
-    return EasyDonateService(settings=get_settings(), server_id=server.easydonate_server_id)
+    return EasyDonateService(settings=get_settings(), server_id=server.easydonate_server_id,
+                             shop_key=server.easydonate_shop_key)
 
 
 class PaymentCreateRequest(BaseModel):
@@ -177,8 +178,17 @@ def create_payment(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
 
 
+def _callback_services(db: Session) -> list[EasyDonateService]:
+    """A service per shop there is: each server's own key, and the global one. EasyDonate
+    calls one URL for every shop, so the payment is checked against each until one signs."""
+    keys = {k for (k,) in db.query(GameServer.easydonate_shop_key).filter(GameServer.easydonate_shop_key.isnot(None)).all() if k}
+    services = [EasyDonateService(settings=get_settings(), shop_key=k) for k in keys]
+    services.append(EasyDonateService(settings=get_settings()))
+    return services
+
+
 @router.post("/callback", status_code=status.HTTP_200_OK)
-async def callback(request: Request, service: Annotated[EasyDonateService, Depends(get_donate_service)]):
+async def callback(request: Request, db: Annotated[Session, Depends(get_db_session)]):
     try:
         body = await request.json()
     except Exception:
@@ -191,12 +201,13 @@ async def callback(request: Request, service: Annotated[EasyDonateService, Depen
     except ValidationError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
 
-    if not service.verify_callback_signature(
+    service = next((svc for svc in _callback_services(db) if svc.verify_callback_signature(
         payment_id=payload.payment_id,
         cost=payload.cost,
         customer=payload.customer,
         signature=payload.signature,
-    ):
+    )), None)
+    if service is None:
         logger.warning("EasyDonate callback: invalid signature for payment_id=%s", payload.payment_id)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
 

@@ -38,13 +38,20 @@ class EasyDonateError(Exception):
 
 
 class EasyDonateService:
-    def __init__(self, settings: Settings | None = None, server_id: int | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, server_id: int | None = None,
+                 shop_key: str | None = None) -> None:
         s = settings or get_settings()
-        self._key = s.easydonate_shop_key
+        # A server's own shop key (game_servers.easydonate_shop_key) wins over the global one.
+        self._key = shop_key or s.easydonate_shop_key
+        # Caches are per shop: two shops must never see each other's payments.
+        self._shop = hashlib.sha256((self._key or "").encode()).hexdigest()[:10]
         # Per-server override (from game_servers.easydonate_server_id) falls back
         # to the global default so single-server setups keep working.
         self._server_id = server_id if server_id is not None else s.easydonate_server_id
         self._headers = {**_HEADERS, "Shop-Key": self._key}
+
+    def _ck(self, key: str) -> str:
+        return f"{self._shop}:{key}"
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         url = f"{_BASE}{path}"
@@ -77,28 +84,28 @@ class EasyDonateService:
 
     def get_products(self) -> list:
         key = f"products:{self._server_id}"
-        cached = _cache_get(key)
+        cached = _cache_get(self._ck(key))
         if cached is not None:
             return cached  # type: ignore[return-value]
         result = self._get("/shop/products", params={"server_id": self._server_id})
-        _cache_set(key, result, ttl=300)
+        _cache_set(self._ck(key), result, ttl=300)
         return result
 
     def get_product(self, product_id: int) -> dict:
         key = f"product:{product_id}"
-        cached = _cache_get(key)
+        cached = _cache_get(self._ck(key))
         if cached is not None:
             return cached  # type: ignore[return-value]
         result = self._get(f"/shop/product/{product_id}")
-        _cache_set(key, result, ttl=300)
+        _cache_set(self._ck(key), result, ttl=300)
         return result
 
     def get_servers(self) -> list:
-        cached = _cache_get("servers")
+        cached = _cache_get(self._ck("servers"))
         if cached is not None:
             return cached  # type: ignore[return-value]
         result = self._get("/shop/servers")
-        _cache_set("servers", result, ttl=300)
+        _cache_set(self._ck("servers"), result, ttl=300)
         return result
 
     def create_payment(
@@ -136,19 +143,19 @@ class EasyDonateService:
         return safe
 
     def get_last_payments(self) -> list:
-        cached = _cache_get("last_payments")
+        cached = _cache_get(self._ck("last_payments"))
         if cached is not None:
             return cached  # type: ignore[return-value]
         result = self._get("/shop/payments", params={"paginate": 10, "page": 1})
         data = result.get("data", result) if isinstance(result, dict) else result
         data = self._strip_payment_pii(data if isinstance(data, list) else [])
-        _cache_set("last_payments", data, ttl=60)
+        _cache_set(self._ck("last_payments"), data, ttl=60)
         return data
 
     def get_top_donors(self, limit: int = 8) -> list:
         """Aggregate recent paid payments into a PII-free top-donors board:
         [{nickname, total, count}] sorted by total spend. Cached 5 min."""
-        cached = _cache_get(f"top_donors:{limit}")
+        cached = _cache_get(self._ck(f"top_donors:{limit}"))
         if cached is not None:
             return cached  # type: ignore[return-value]
         result = self._get("/shop/payments", params={"paginate": 100, "page": 1})
@@ -167,7 +174,7 @@ class EasyDonateService:
         top = sorted(agg.values(), key=lambda r: r["total"], reverse=True)[:limit]
         for r in top:
             r["total"] = round(r["total"])
-        _cache_set(f"top_donors:{limit}", top, ttl=300)
+        _cache_set(self._ck(f"top_donors:{limit}"), top, ttl=300)
         return top
 
     def get_payments_paginated(self, page: int = 1, per_page: int = 20) -> dict:
@@ -176,7 +183,7 @@ class EasyDonateService:
 
     def get_admin_overview(self) -> dict:
         """Single call that returns stats + first-page payments + products. Cached 5 min."""
-        cached = _cache_get("admin_overview")
+        cached = _cache_get(self._ck("admin_overview"))
         if cached is not None:
             return cached  # type: ignore[return-value]
         from datetime import datetime
@@ -210,7 +217,7 @@ class EasyDonateService:
             "products": products,
             "chart_payments": data,  # all fetched payments for charts
         }
-        _cache_set("admin_overview", overview, ttl=300)
+        _cache_set(self._ck("admin_overview"), overview, ttl=300)
         return overview
 
     def verify_callback_signature(self, payment_id: int, cost, customer: str, signature: str) -> bool:
@@ -242,5 +249,7 @@ class EasyDonateService:
     def invalidate_payment_caches(self) -> None:
         """Drop cached payment views so a fresh purchase shows up right away
         (donor wall, shop payments feed, admin overview)."""
-        for key in ("last_payments", "top_donors", "admin_overview"):
-            _cache.pop(key, None)
+        for name in ("last_payments", "top_donors", "admin_overview"):
+            prefix = self._ck(name)
+            for key in [k for k in _cache if k == prefix or k.startswith(prefix + ":")]:
+                _cache.pop(key, None)

@@ -183,6 +183,8 @@ def update_server(
     # Never null out the NOT NULL features column.
     if "features" in updates and updates["features"] is None:
         updates.pop("features")
+    if "easydonate_shop_key" in updates:
+        updates["easydonate_shop_key"] = (updates["easydonate_shop_key"] or "").strip() or None
     for field, value in updates.items():
         setattr(server, field, value)
 

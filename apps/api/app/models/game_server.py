@@ -161,6 +161,13 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # EasyDonate server id this game server maps to. Products/commands for a
     # purchase are delivered to this EasyDonate server. Null → use the global default.
     easydonate_server_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # This server's own EasyDonate shop (each shop has its key); empty → the global key.
+    # Never sent back by the API — only whether it is set.
+    easydonate_shop_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    @property
+    def easydonate_shop_key_set(self) -> bool:
+        return bool(self.easydonate_shop_key)
     # Feature flags controlling which tabs/sections appear in launcher & site.
     features: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=default_features)
 

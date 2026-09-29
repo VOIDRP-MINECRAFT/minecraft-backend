@@ -65,6 +65,8 @@ class GameServerAdmin(GameServerPublic):
     status_host: str | None = None
     status_port: int | None = None
     easydonate_server_id: int | None = None
+    # Whether the server has its own EasyDonate shop key (the key itself is never sent).
+    easydonate_shop_key_set: bool = False
     news_channels: dict = Field(default_factory=dict)
     # Resolved (defaults merged, clamped) — never the raw column, which may
     # be partial. Reading the ORM object prefers the model's resolved property.
@@ -122,6 +124,8 @@ class GameServerCreate(BaseModel):
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     features: dict[str, bool] | None = None
     easydonate_server_id: int | None = None
+    # Write-only: a new key; "" clears it (the global key is used again).
+    easydonate_shop_key: str | None = Field(default=None, max_length=128)
     news_channels: dict = Field(default_factory=dict)
 
     systemd_unit: str | None = None
@@ -172,6 +176,8 @@ class GameServerUpdate(BaseModel):
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     features: dict[str, bool] | None = None
     easydonate_server_id: int | None = None
+    # Write-only: a new key; "" clears it (the global key is used again).
+    easydonate_shop_key: str | None = Field(default=None, max_length=128)
     news_channels: dict = Field(default_factory=dict)
 
     systemd_unit: str | None = None

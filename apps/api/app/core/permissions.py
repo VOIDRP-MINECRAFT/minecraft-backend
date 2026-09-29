@@ -152,7 +152,7 @@ PERMISSION_CATALOG: list[dict] = [
 SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
     "salary.", "backups.", "punishments.", "battlepass.", "voxel.", "upgrader.",
-    "trader.", "news.", "files.", "plugins.",
+    "trader.", "news.", "files.", "plugins.", "donate.",
 )
 
 for _group in PERMISSION_CATALOG:
