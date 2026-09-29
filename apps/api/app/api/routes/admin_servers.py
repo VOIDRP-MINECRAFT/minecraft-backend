@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import get_settings
 from apps.api.app.core import server_provision
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_permission
+from apps.api.app.dependencies.admin import PermittedServers, require_permission_somewhere
 from apps.api.app.models.game_server import (
     AUTH_SETTINGS_BOUNDS,
     DEFAULT_AUTH_SETTINGS,
@@ -32,8 +32,26 @@ from apps.api.app.schemas.game_server import (
 router = APIRouter(
     prefix="/admin/servers",
     tags=["admin", "servers"],
-    dependencies=[Depends(require_permission("servers.manage"))],
 )
+
+# ``servers.manage`` is granted per server: with it on a server one edits that server's
+# showcase, connection and features. Creating and deleting servers, and the fields that
+# point at the machine itself (folders, systemd unit, RCON, pack paths, the build script,
+# the default flag), need it on the whole platform — through them one server's editor
+# could reach another server's files or process.
+_Where = Annotated[PermittedServers, Depends(require_permission_somewhere("servers.manage"))]
+PLATFORM_FIELDS = frozenset({
+    "is_default", "systemd_unit", "data_dir", "log_path", "rcon_host", "rcon_port",
+    "rcon_password", "pack_root", "manifest_build_script",
+})
+
+
+def _check(where: PermittedServers, server_id: UUID | None = None) -> None:
+    if server_id is None and not where.all:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Missing permission: servers.manage (all servers)")
+    if server_id is not None and not where.allows(server_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing permission: servers.manage")
 
 _ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}
 _MAX_BYTES = 8 * 1024 * 1024
@@ -48,8 +66,8 @@ def _get_or_404(repo: GameServerRepository, server_id: UUID) -> GameServer:
 
 
 @router.get("", response_model=list[GameServerAdmin])
-def list_servers(session: Annotated[Session, Depends(get_db_session)]) -> list[GameServer]:
-    return GameServerRepository(session).list_all()
+def list_servers(session: Annotated[Session, Depends(get_db_session)], where: _Where) -> list[GameServer]:
+    return [s for s in GameServerRepository(session).list_all() if where.allows(s.id)]
 
 
 def _next_free_rcon_port(session: Session) -> int:
@@ -64,6 +82,7 @@ def _next_free_rcon_port(session: Session) -> int:
 @router.get("/suggest-paths")
 def suggest_paths(
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
     slug: Annotated[str, Query(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")],
     neoforge_version: Annotated[str | None, Query()] = None,
     mc_version: Annotated[str | None, Query()] = None,
@@ -74,6 +93,7 @@ def suggest_paths(
     version). The create form calls this to prefill blank fields; everything
     stays editable. Runtime is reused from a same-engine server if one exists,
     else flagged as new-engine (runtime_needs_build)."""
+    _check(where)
     fields = server_provision.suggested_fields(slug, neoforge_version, mc_version)
     fields["rcon_port"] = _next_free_rcon_port(session)
     existing = GameServerRepository(session).list_all()
@@ -87,7 +107,9 @@ def suggest_paths(
 def create_server(
     payload: GameServerCreate,
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
 ) -> GameServer:
+    _check(where)
     repo = GameServerRepository(session)
     if repo.get_by_slug(payload.slug) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slug already exists")
@@ -164,7 +186,9 @@ def create_server(
 def get_server(
     server_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
 ) -> GameServer:
+    _check(where, server_id)
     return _get_or_404(GameServerRepository(session), server_id)
 
 
@@ -173,11 +197,16 @@ def update_server(
     server_id: UUID,
     payload: GameServerUpdate,
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
 ) -> GameServer:
+    _check(where, server_id)
     repo = GameServerRepository(session)
     server = _get_or_404(repo, server_id)
 
     updates = payload.model_dump(exclude_unset=True)
+    if not where.all and (locked := sorted(PLATFORM_FIELDS & {k for k, v in updates.items() if v != getattr(server, k)})):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"Only with servers.manage on all servers: {', '.join(locked)}")
     if updates.get("is_default") is True:
         repo.clear_default_flag(except_id=server.id)
     # Never null out the NOT NULL features column.
@@ -197,9 +226,11 @@ def update_server(
 def get_auth_settings(
     server_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
 ) -> AuthSettingsAdmin:
     """Current login timeouts for a server, with defaults merged in."""
 
+    _check(where, server_id)
     repo = GameServerRepository(session)
     server = _get_or_404(repo, server_id)
     return AuthSettingsAdmin(
@@ -214,6 +245,7 @@ def update_auth_settings(
     server_id: UUID,
     payload: AuthSettingsUpdate,
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
 ) -> AuthSettingsAdmin:
     """Change login timeouts. Applied live — the auth-bridge mod polls them.
 
@@ -221,6 +253,7 @@ def update_auth_settings(
     silently reset the rest.
     """
 
+    _check(where, server_id)
     repo = GameServerRepository(session)
     server = _get_or_404(repo, server_id)
 
@@ -242,7 +275,9 @@ def update_auth_settings(
 def delete_server(
     server_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
 ) -> None:
+    _check(where)
     repo = GameServerRepository(session)
     server = _get_or_404(repo, server_id)
     if server.is_default:
@@ -258,7 +293,9 @@ def delete_server(
 def regenerate_secret(
     server_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
 ) -> GameServer:
+    _check(where, server_id)
     repo = GameServerRepository(session)
     server = _get_or_404(repo, server_id)
     server.game_auth_secret = secrets.token_urlsafe(32)
@@ -271,9 +308,11 @@ def regenerate_secret(
 async def upload_image(
     server_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
     kind: Annotated[str, Query(pattern=r"^(icon|banner)$")] = "icon",
     file: UploadFile = File(...),
 ) -> GameServer:
+    _check(where, server_id)
     repo = GameServerRepository(session)
     server = _get_or_404(repo, server_id)
 

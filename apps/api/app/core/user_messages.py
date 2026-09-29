@@ -65,6 +65,8 @@ _EXACT_MESSAGES: dict[str, str] = {
 }
 
 _CONTAINS_RULES: list[tuple[str, str]] = [
+    ("only with servers.manage on all servers", "Эти поля (папки, systemd, RCON, пути пака) меняет только тот, у кого право «Серверы» на всю платформу."),
+    ("servers.manage (all servers)", "Создавать и удалять серверы можно только с правом «Серверы» на всю платформу."),
     ("unknown social link platform", "Такая соцсеть не поддерживается."),
     ("link must point to", "Ссылка ведёт не на тот сайт — проверь, что она от нужной соцсети."),
     ("link must lead to a channel or profile", "Ссылка должна вести на канал или профиль, а не на главную страницу."),
