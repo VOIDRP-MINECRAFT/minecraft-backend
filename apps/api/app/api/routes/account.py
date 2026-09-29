@@ -27,6 +27,39 @@ from apps.api.app.services.redis_cache_service import RedisCacheService
 router = APIRouter(tags=["account"])
 
 
+def staff_user_read(session: Session, current_user: User) -> UserRead:
+    """The user as the site sees it, with admin-panel access from every source (personal
+    grants, roles, admin of servers). Used by /me and by login / refresh, so a fresh
+    session knows at once which sections and servers the person may open."""
+    from apps.api.app.core.permissions import SERVER_KEYS, access_of
+    from apps.api.app.models.game_server import GameServer
+
+    servers = session.query(GameServer.id, GameServer.slug, GameServer.is_default).all()
+    access = access_of(current_user)
+    # hasPermission() on the site reads `permissions` (everywhere) and `server_permissions[slug]`.
+    everywhere = sorted(access.everywhere)
+    per_server = {}
+    admin_servers = None
+    if not current_user.is_admin and access.is_staff:
+        for sid, slug, _ in servers:
+            extra = access.on(sid) - access.everywhere
+            if extra:
+                per_server[slug] = sorted(extra)
+        # The admin panel's server switcher offers only servers where the person holds at
+        # least one per-server permission (from any source); null = all of them.
+        usable = [slug for sid, slug, _ in servers if access.on(sid) & SERVER_KEYS]
+        if len(usable) < len(servers):
+            admin_servers = usable
+    return UserRead.model_validate(current_user).model_copy(update={
+        "permissions": [] if current_user.is_admin else everywhere,
+        "server_permissions": per_server,
+        "administered_servers": [slug for sid, slug, _ in servers if str(sid) in access.admin_servers],
+        "roles": [{"name": r.name, "color": r.color} for r in (current_user.staff_roles or [])],
+        "admin_servers": admin_servers,
+        "default_server": next((slug for _, slug, d in servers if d), None),
+    })
+
+
 def _get_player_account(*, session: Session, user_id) -> PlayerAccount:
     return session.execute(select(PlayerAccount).where(PlayerAccount.user_id == user_id)).scalar_one()
 
@@ -59,34 +92,7 @@ def _build_me_response(
         and player_account.legacy_hash_algo
     )
 
-    from apps.api.app.core.permissions import SERVER_KEYS, access_of
-    from apps.api.app.models.game_server import GameServer
-
-    servers = session.query(GameServer.id, GameServer.slug, GameServer.is_default).all()
-    access = access_of(current_user)
-    # Effective grants from every source (personal, roles, server-admin): the site's
-    # hasPermission() reads `permissions` (everywhere) and `server_permissions[slug]`.
-    everywhere = sorted(access.everywhere)
-    per_server = {}
-    admin_servers = None
-    if not current_user.is_admin and access.is_staff:
-        for sid, slug, _ in servers:
-            extra = access.on(sid) - access.everywhere
-            if extra:
-                per_server[slug] = sorted(extra)
-        # The admin panel's server switcher offers only servers where the person holds at
-        # least one per-server permission (from any source); null = all of them.
-        usable = [slug for sid, slug, _ in servers if access.on(sid) & SERVER_KEYS]
-        if len(usable) < len(servers):
-            admin_servers = usable
-    user = UserRead.model_validate(current_user).model_copy(update={
-        "permissions": [] if current_user.is_admin else everywhere,
-        "server_permissions": per_server,
-        "administered_servers": [slug for sid, slug, _ in servers if str(sid) in access.admin_servers],
-        "roles": [{"name": r.name, "color": r.color} for r in (current_user.staff_roles or [])],
-        "admin_servers": admin_servers,
-        "default_server": next((slug for _, slug, d in servers if d), None),
-    })
+    user = staff_user_read(session, current_user)
     return MeResponse(
         user=user,
         player_account=player_account,

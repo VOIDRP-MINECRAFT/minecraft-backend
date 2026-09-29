@@ -3,6 +3,7 @@ from __future__ import annotations
 from html import escape
 from typing import Annotated
 
+from apps.api.app.api.routes.account import staff_user_read
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -124,7 +125,7 @@ def login(
         refresh_token=result.refresh_token,
         access_expires_in=result.access_expires_in,
         refresh_expires_in=result.refresh_expires_in,
-        user=result.user,
+        user=staff_user_read(auth_service.session, result.user),
         player_account=result.player_account,
     )
 
@@ -150,7 +151,7 @@ def refresh(
         refresh_token=result.refresh_token,
         access_expires_in=result.access_expires_in,
         refresh_expires_in=result.refresh_expires_in,
-        user=result.user,
+        user=staff_user_read(auth_service.session, result.user),
         player_account=result.player_account,
     )
 
