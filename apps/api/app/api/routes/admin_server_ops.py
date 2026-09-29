@@ -130,6 +130,39 @@ class RconRequest(BaseModel):
     command: str = Field(min_length=1, max_length=512)
 
 
+# What only a full admin may run through the console: anything that hands out power
+# (op, permission plugins), takes the server down or swaps plugins, lets someone past the
+# whitelist or wipes CoreProtect's history. A moderator with the console keeps the rest —
+# kick, ban, tp, give, say, list…
+RCON_ADMIN_ONLY = {
+    "op", "deop", "lp", "luckperms", "perm", "perms", "permissions", "pex", "ftbranks",
+    "stop", "restart", "reload", "rl", "plugman", "plugmanx", "save-off",
+    "whitelist", "ban-ip", "pardon-ip",
+}
+RCON_ADMIN_ONLY_PAIRS = {("co", "purge"), ("coreprotect", "purge"), ("core", "purge")}
+
+
+def rcon_forbidden_for_staff(command: str) -> str | None:
+    """The part of a console command a moderator may not run, or None. Looks through the
+    wrappers someone could hide it in: a leading slash, a namespace (minecraft:op),
+    ``execute … run <command>`` and Essentials' ``sudo <player> <command>``."""
+    words = command.strip().lstrip("/").split()
+    while words:
+        head = words[0].lower().split(":")[-1]
+        if head == "execute" and "run" in (w.lower() for w in words):
+            words = words[[w.lower() for w in words].index("run") + 1:]
+            continue
+        if head == "sudo" and len(words) > 2:
+            words = [words[2].lstrip("/").removeprefix("c:"), *words[3:]]
+            continue
+        if head in RCON_ADMIN_ONLY:
+            return head
+        if len(words) > 1 and (head, words[1].lower()) in RCON_ADMIN_ONLY_PAIRS:
+            return f"{head} {words[1].lower()}"
+        return None
+    return None
+
+
 @router.post("/rcon", dependencies=[Depends(require_permission("monitoring.rcon"))])
 def run_rcon(
     server: Annotated[GameServer, Depends(resolve_server)],
@@ -137,6 +170,12 @@ def run_rcon(
     actor: Annotated[User, Depends(get_current_staff_user)],
     payload: RconRequest,
 ) -> dict:
+    blocked = None if actor.is_admin else rcon_forbidden_for_staff(payload.command)
+    if blocked:
+        record_audit(session, actor=actor, category="monitoring", action="rcon_denied",
+                     target_type="server", target_id=server.slug, target_label=server.name,
+                     server_id=server.id, meta={"command": payload.command.strip()[:512], "blocked": blocked})
+        raise HTTPException(status_code=403, detail=f"Команда «{blocked}» доступна только администраторам")
     try:
         output = server_ops.rcon_command(server, payload.command.strip())
     except server_ops.RconNotConfigured:
