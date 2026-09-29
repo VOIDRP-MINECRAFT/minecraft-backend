@@ -4,11 +4,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_permission
+from apps.api.app.dependencies.admin import PermittedServers, require_permission_somewhere
 from apps.api.app.dependencies.auth import get_current_user
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
@@ -44,7 +44,7 @@ def create_suggestion(
 
 @router.get("/admin/mod-suggestions/")
 def list_suggestions(
-    _: Annotated[None, Depends(require_permission("mod_suggestions.view"))],
+    where: Annotated[PermittedServers, Depends(require_permission_somewhere("mod_suggestions.view"))],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> ModSuggestionListResponse:
     rows = session.execute(
@@ -52,6 +52,9 @@ def list_suggestions(
         .join(User, ModSuggestion.user_id == User.id)
         .outerjoin(PlayerAccount, PlayerAccount.user_id == User.id)
         .outerjoin(GameServer, GameServer.id == ModSuggestion.server_id)
+        # Per server: only what came from servers this person may see (untagged ones
+        # only with the permission on every server).
+        .where(true() if where.all else ModSuggestion.server_id.in_(where.ids))
         .order_by(ModSuggestion.created_at.desc())
     ).all()
 
@@ -73,12 +76,14 @@ def list_suggestions(
 @router.delete("/admin/mod-suggestions/{suggestion_id}")
 def delete_suggestion(
     suggestion_id: UUID,
-    _: Annotated[None, Depends(require_permission("mod_suggestions.manage"))],
+    where: Annotated[PermittedServers, Depends(require_permission_somewhere("mod_suggestions.manage"))],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     suggestion = session.get(ModSuggestion, suggestion_id)
     if not suggestion:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if not where.allows(suggestion.server_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing permission: mod_suggestions.manage")
     session.delete(suggestion)
     session.commit()
     return {"message": "Deleted"}

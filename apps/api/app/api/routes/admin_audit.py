@@ -8,20 +8,20 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_permission
+from apps.api.app.dependencies.admin import PermittedServers, require_permission_somewhere
 from apps.api.app.models.admin_audit_log import AdminAuditLog
 from apps.api.app.models.game_server import GameServer
 
 router = APIRouter(
     prefix="/admin/audit",
     tags=["admin", "audit"],
-    dependencies=[Depends(require_permission("audit.view"))],
 )
 
 
 @router.get("")
 def list_audit(
     session: Annotated[Session, Depends(get_db_session)],
+    where: Annotated[PermittedServers, Depends(require_permission_somewhere("audit.view"))],
     q: Annotated[str | None, Query(max_length=120)] = None,
     category: Annotated[str | None, Query(max_length=48)] = None,
     days: Annotated[int, Query(ge=0, le=365)] = 30,
@@ -30,6 +30,10 @@ def list_audit(
 ) -> dict:
     """Paginated staff-action log, newest first. ``days=0`` = no time limit."""
     conds = []
+    # Per server: only the entries of servers this person may audit; entries tied to
+    # no server (platform-wide actions) only with the permission on every server.
+    if not where.all:
+        conds.append(AdminAuditLog.server_id.in_(where.ids))
     if days:
         conds.append(AdminAuditLog.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
     if category:

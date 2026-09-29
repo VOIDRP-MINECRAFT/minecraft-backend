@@ -44,25 +44,35 @@ def list_notifications(
     since = datetime.now(timezone.utc) - _WINDOW
     items: list[AdminNotification] = []
 
-    if "feedback.view" in perms:
-        n = _count_since(session, PlayerFeedback, since)
-        if n:
-            items.append(AdminNotification(
-                id="feedback-new", level="info", count=n,
-                title="Новые обращения",
-                message=f"{n} новых обращений за сутки — загляни в раздел «Обращения».",
-                link="/admin/feedback",
-            ))
+    # Feedback and suggestions come from every server: count those of the servers this
+    # person may see (untagged ones only with the permission on every server).
+    from apps.api.app.core.permissions import servers_with_permission
+    all_ids = [i for (i,) in session.execute(select(GameServer.id)).all()]
 
-    if "mod_suggestions.view" in perms:
-        n = _count_since(session, ModSuggestion, since)
-        if n:
-            items.append(AdminNotification(
-                id="mod-suggestions-new", level="info", count=n,
-                title="Новые предложения модов",
-                message=f"{n} новых предложений модов за сутки.",
-                link="/admin/mod-suggestions",
-            ))
+    def _count_on(model, key: str) -> int:
+        if me.is_admin or key in (me.staff_permissions or []):
+            return _count_since(session, model, since)
+        ids = [UUID(i) for i in servers_with_permission(me, key, all_ids)]
+        if not ids:
+            return 0
+        return session.scalar(select(func.count()).select_from(model).where(
+            model.created_at >= since, model.server_id.in_(ids))) or 0
+
+    if n := _count_on(PlayerFeedback, "feedback.view"):
+        items.append(AdminNotification(
+            id="feedback-new", level="info", count=n,
+            title="Новые обращения",
+            message=f"{n} новых обращений за сутки — загляни в раздел «Обращения».",
+            link="/admin/feedback",
+        ))
+
+    if n := _count_on(ModSuggestion, "mod_suggestions.view"):
+        items.append(AdminNotification(
+            id="mod-suggestions-new", level="info", count=n,
+            title="Новые предложения модов",
+            message=f"{n} новых предложений модов за сутки.",
+            link="/admin/mod-suggestions",
+        ))
 
     if "crashes.view" in perms:
         n = _count_since(session, LauncherCrashReport, since)

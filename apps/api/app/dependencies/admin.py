@@ -130,3 +130,47 @@ def get_current_staff_user(
     if not (user.is_admin or user.is_moderator):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
     return user
+
+class PermittedServers:
+    """Where the caller holds a permission: everywhere (``all``: a full admin, or the key
+    granted on every server — which also covers records tied to no server), or on the
+    servers in ``ids``. For pages that list records of all servers at once (audit log,
+    feedback, mod suggestions, launcher crashes): the list keeps to these servers."""
+
+    def __init__(self, all_: bool, ids: set):
+        self.all = all_
+        self.ids = ids
+
+    def allows(self, server_id) -> bool:
+        return self.all or (server_id is not None and server_id in self.ids)
+
+    def filter(self, query, column):
+        return query if self.all else query.filter(column.in_(self.ids or {None}))
+
+
+def require_permission_somewhere(key: str):
+    """Dependency factory: 403 unless the caller holds ``key`` on at least one server;
+    returns the PermittedServers to filter by."""
+
+    def _dep(
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_optional_bearer)],
+        session: Annotated[Session, Depends(get_db_session)],
+    ) -> PermittedServers:
+        from apps.api.app.core.permissions import servers_with_permission
+        from apps.api.app.models.game_server import GameServer
+
+        user = _user_from_credentials(credentials, session)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin access required")
+        if not (user.is_admin or user.is_moderator):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
+        if user.is_admin or key in (user.staff_permissions or []):
+            return PermittedServers(True, set())
+        all_ids = [i for (i,) in session.query(GameServer.id).all()]
+        from uuid import UUID as _UUID
+        ids = {_UUID(i) for i in servers_with_permission(user, key, all_ids)}
+        if not ids:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing permission: {key}")
+        return PermittedServers(False, ids)
+
+    return _dep
