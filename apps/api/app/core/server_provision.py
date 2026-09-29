@@ -63,7 +63,9 @@ def suggested_fields(slug: str, neoforge_version: str | None = None,
         "runtime_seed_url": "",
         "runtime_manifest_url": "",
         "data_dir": f"{NVME_ROOT}/{slug}",
-        "systemd_unit": f"{slug}.service",
+        # mc-<slug>.service: the polkit rule (scripts/polkit) lets the panel start/stop
+        # units of this shape without a password — no rule edit for a new server.
+        "systemd_unit": f"mc-{slug}.service",
         "rcon_host": "127.0.0.1",
         "log_path": "",
     }

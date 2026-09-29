@@ -376,6 +376,9 @@ def power_action(server: "GameServer", action: str, timeout: float = 15.0,
         raise PowerError(str(exc))
     if res.returncode != 0:
         msg = (res.stderr or res.stdout or "").strip() or f"код выхода {res.returncode}"
+        if "authentication required" in msg.lower():
+            msg = (f"Панели не разрешено управлять {unit}: добавьте юнит в scripts/polkit/49-voidrp-server-power.rules "
+                   f"(или назовите его mc-<slug>.service) и выполните sudo scripts/polkit/install.sh. Ответ systemd: {msg}")
         raise PowerError(msg)
     return (res.stdout or "").strip()
 
