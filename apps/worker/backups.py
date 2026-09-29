@@ -48,6 +48,7 @@ from apps.api.app.services import backups as svc
 log = logging.getLogger("backup-worker")
 
 LOCK = "/tmp/voidrp-backup-worker.lock"
+BACKGROUND = ["nice", "-n", "19", "ionice", "-c", "3"]
 STAGING = ".voidrp-restore-"
 OLD = ".voidrp-replaced-"
 
@@ -158,11 +159,14 @@ def _archive(session: Session, server: GameServer, backup: ServerBackup) -> None
             rcon(server, "save-all flush", timeout=900)
         backup.progress = f"Архивирую {', '.join(worlds)} ({raw // 1024**2} МБ)"
         session.commit()
+        # Lowest CPU and disk priority, two compression threads: the game server on the
+        # same machine comes first — a 55 GB world at full tilt made it lag.
         tar = subprocess.Popen(
-            ["tar", "-C", data_dir, "--warning=no-file-changed", "--warning=no-file-removed", "-cf", "-", *worlds],
+            [*BACKGROUND, "tar", "-C", data_dir, "--warning=no-file-changed", "--warning=no-file-removed",
+             "-cf", "-", *worlds],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        zst = subprocess.run(["zstd", "-T0", "-3", "-q", "-f", "-o", str(tmp)], stdin=tar.stdout,
+        zst = subprocess.run([*BACKGROUND, "zstd", "-T2", "-3", "-q", "-f", "-o", str(tmp)], stdin=tar.stdout,
                              capture_output=True)
         tar.stdout.close()
         tar_err = tar.stderr.read().decode(errors="replace")
@@ -249,7 +253,8 @@ def restore(session: Session, server: GameServer, job: ServerBackupRestore) -> N
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir()
         unpack = subprocess.run(
-            f"zstd -dc -q '{backup.path}' | tar -xf - -C '{staging}'", shell=True, capture_output=True, text=True,
+            f"nice -n 19 zstd -dc -q '{backup.path}' | nice -n 19 tar -xf - -C '{staging}'",
+            shell=True, capture_output=True, text=True,
         )
         if unpack.returncode != 0:
             raise Failed(f"Не удалось распаковать: {unpack.stderr[:300]}")
