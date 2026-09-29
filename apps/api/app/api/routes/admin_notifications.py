@@ -14,6 +14,7 @@ from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.launcher_crash_report import LauncherCrashReport
 from apps.api.app.models.mod_suggestion import ModSuggestion
 from apps.api.app.models.player_feedback import PlayerFeedback
+from apps.api.app.models.server_watchdog import ServerWatchdogEvent
 from apps.api.app.models.user import User
 from apps.api.app.schemas.admin_notification import AdminNotification, AdminNotificationsResponse
 
@@ -105,6 +106,32 @@ def list_notifications(
                 title="Технические работы",
                 message=f"Сервер «{s.name}» в режиме тех. работ.",
                 link="/admin/server",
+            ))
+
+    if "monitoring.view" in perms:
+        # What the watchdog did or could not do in the last day, per server: a restart is
+        # worth knowing about, a server it could not bring back needs someone.
+        rows = session.execute(
+            select(GameServer.name, ServerWatchdogEvent.kind, func.count(), func.max(ServerWatchdogEvent.created_at))
+            .join(GameServer, GameServer.id == ServerWatchdogEvent.server_id)
+            .where(ServerWatchdogEvent.created_at >= since,
+                   ServerWatchdogEvent.kind.in_(("restart", "hang", "limit", "down")))
+            .group_by(GameServer.name, ServerWatchdogEvent.kind)
+        ).all()
+        words = {
+            "restart": ("warning", "перезапускал зависший сервер", "раз"),
+            "hang": ("error", "сервер завис и не перезапущен", "раз"),
+            "limit": ("error", "сервер зависает снова и снова — перезапуски остановлены", "раз"),
+            "down": ("error", "сервер был выключен", "раз"),
+        }
+        for name, kind, n, last in rows:
+            level, what, _unit = words[kind]
+            items.append(AdminNotification(
+                id=f"watchdog-{kind}-{name}", level=level, count=n,
+                title=f"Вотчдог · {name}",
+                message=f"За сутки: {what} ({n}). Последний раз — {last.astimezone().strftime('%d.%m %H:%M')}. "
+                        "Подробности и дамп потоков — «Мониторинг» → «Присмотр за сервером».",
+                link="/admin/monitoring",
             ))
 
     return AdminNotificationsResponse(items=items)
