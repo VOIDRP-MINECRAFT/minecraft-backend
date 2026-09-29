@@ -47,10 +47,22 @@ class Authority:
         self.top = top_position(actor)
         self.can_manage_roles = self.platform or bool(self.admin_servers) or self.access.holds_everywhere("roles.manage")
         self.can_assign_roles = self.platform or bool(self.admin_servers) or self.access.holds_everywhere("roles.assign")
+        self.can_manage_badges = self.platform or self._somewhere("badges.manage")
+        self.can_assign_badges = self.platform or self._somewhere("badges.assign")
+
+    def _somewhere(self, key: str) -> bool:
+        return self.access.holds_everywhere(key) or any(key in keys for keys in self.access.per_server.values()) \
+            or (key in SERVER_KEYS and bool(self.admin_servers))
+
+    def _holds_on(self, key: str, server_ids) -> bool:
+        """``key`` on every server of a scope (None = everywhere)."""
+        if server_ids is None:
+            return self.access.holds_everywhere(key)
+        return len(server_ids) > 0 and all(key in self.access.on(sid) for sid in server_ids)
 
     @property
     def opens_staff_pages(self) -> bool:
-        return self.can_manage_roles or self.can_assign_roles
+        return self.can_manage_roles or self.can_assign_roles or self.can_manage_badges or self.can_assign_badges
 
     # ── roles ────────────────────────────────────────────────────────────────
 
@@ -75,14 +87,13 @@ class Authority:
 
     def may_assign_role(self, role) -> bool:
         if getattr(role, "is_badge", False):
-            # A badge grants nothing: whoever hands out roles may hand it out anywhere it
-            # applies (the target still has to be below them).
-            return (self.platform or self._within_admin_servers(role.server_ids)
-                    or self.access.holds_everywhere("roles.assign"))
+            # A badge grants nothing: badges.assign on the badge's servers (everywhere for
+            # a common one) is enough; the person still has to be below the giver.
+            return self.platform or self._holds_on("badges.assign", role.server_ids)
         return self.may_edit_role(role.position, role.server_ids, role.permissions, key="roles.assign")
 
     def may_edit_badge(self, server_ids) -> bool:
-        return self.platform or self._within_admin_servers(server_ids) or self.access.holds_everywhere("roles.manage")
+        return self.platform or self._holds_on("badges.manage", server_ids)
 
     # ── people ───────────────────────────────────────────────────────────────
 

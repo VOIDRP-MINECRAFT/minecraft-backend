@@ -123,6 +123,9 @@ def _get(session: Session, role_id: UUID) -> StaffRole:
     return role
 
 
+_BADGE_DENY = "Нужно право «Значки: создавать и править» — на этом сервере, а для общего значка на всех"
+
+
 def _deny_edit() -> HTTPException:
     return HTTPException(status_code=403, detail="Эту роль менять нельзя: она не ниже твоей или даёт права, которых у тебя нет")
 
@@ -153,7 +156,7 @@ def create_role(
     lowest = session.scalar(select(StaffRole.position).order_by(StaffRole.position.asc()).limit(1))
     position = (lowest - 10) if lowest is not None else 0
     if not _may_edit(authority, body.badge, position, server_ids, keys):
-        raise HTTPException(status_code=403, detail="Такую роль создать нельзя: в ней права, которых у тебя нет, или серверы не твои")
+        raise HTTPException(status_code=403, detail=_BADGE_DENY if body.badge else "Такую роль создать нельзя: в ней права, которых у тебя нет, или серверы не твои")
     role = StaffRole(name=name, color=color, position=position, server_ids=server_ids, permissions=keys,
                      created_by=authority.actor.site_login, is_badge=body.badge)
     session.add(role)
@@ -172,7 +175,7 @@ def update_role(
 ) -> RoleRead:
     role = _get(session, role_id)
     if not _may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions):
-        raise _deny_edit()
+        raise HTTPException(status_code=403, detail=_BADGE_DENY) if role.is_badge else _deny_edit()
     body.badge = role.is_badge  # a badge stays a badge, a role stays a role
     name, color, server_ids, keys = _validated(session, body)
     if not _may_edit(authority, role.is_badge, role.position, server_ids, keys):
@@ -250,7 +253,8 @@ def add_member(
 ) -> RoleRead:
     role = _get(session, role_id)
     if not authority.may_assign_role(role):
-        raise HTTPException(status_code=403, detail="Эту роль выдать нельзя: она не ниже твоей или даёт права, которых у тебя нет")
+        raise HTTPException(status_code=403, detail="Нужно право «Значки: выдавать» на серверах этого значка" if role.is_badge
+                            else "Эту роль выдать нельзя: она не ниже твоей или даёт права, которых у тебя нет")
     user = _find(session, body.username)
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Аккаунт пользователя заблокирован")

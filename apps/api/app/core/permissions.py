@@ -76,6 +76,8 @@ PERMISSION_CATALOG: list[dict] = [
         "permissions": [
             {"key": "roles.manage", "label": "Роли: создавать и править роли ниже своей (только с правами, что есть у тебя)", "sensitive": True},
             {"key": "roles.assign", "label": "Роли: выдавать и снимать роли ниже своей", "sensitive": True},
+            {"key": "badges.manage", "label": "Значки: создавать и править (роли без прав)"},
+            {"key": "badges.assign", "label": "Значки: выдавать и снимать — себе тоже"},
         ],
     },
     {
@@ -160,6 +162,7 @@ SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
     "salary.", "backups.", "punishments.", "battlepass.", "voxel.", "upgrader.",
     "trader.", "news.", "files.", "plugins.", "donate.", "audit.", "feedback.", "mod_suggestions.",
+    "badges.",
 )
 # Per-server keys outside those prefixes. Crash reports carry the server picked in the
 # launcher; the crash *rules* stay platform-wide, their buttons touch players' files.

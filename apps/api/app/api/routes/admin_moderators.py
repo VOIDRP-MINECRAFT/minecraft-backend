@@ -65,6 +65,8 @@ class ManagerInfo(BaseModel):
     admin_servers: list[str]
     can_manage_roles: bool
     can_assign_roles: bool
+    can_manage_badges: bool = False
+    can_assign_badges: bool = False
     top_position: int | None
 
 
@@ -218,6 +220,7 @@ def _me(authority: Authority, session: Session) -> ManagerInfo:
         owner=authority.owner, platform_admin=authority.platform,
         admin_servers=sorted(slug_of[s] for s in authority.admin_servers if s in slug_of),
         can_manage_roles=authority.can_manage_roles, can_assign_roles=authority.can_assign_roles,
+        can_manage_badges=authority.can_manage_badges, can_assign_badges=authority.can_assign_badges,
         top_position=authority.top,
     )
 
