@@ -125,13 +125,6 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
     {
-        "group": "Voxel Engine",
-        "permissions": [
-            {"key": "voxel.view", "label": "Voxel Engine: игры (просмотр)"},
-            {"key": "voxel.manage", "label": "Voxel Engine: создавать/править игры", "sensitive": True},
-        ],
-    },
-    {
         "group": "Апгрейдер",
         "permissions": [
             {"key": "upgrader.view", "label": "Апгрейдер: пул наград (просмотр)"},
@@ -161,7 +154,7 @@ PERMISSION_CATALOG: list[dict] = [
 # from which routes each key guards (the 2026-09-29 audit).
 SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
-    "salary.", "backups.", "punishments.", "battlepass.", "voxel.", "upgrader.",
+    "salary.", "backups.", "punishments.", "battlepass.", "upgrader.",
     "trader.", "news.", "files.", "plugins.", "donate.", "audit.", "feedback.", "mod_suggestions.",
     "badges.",
 )

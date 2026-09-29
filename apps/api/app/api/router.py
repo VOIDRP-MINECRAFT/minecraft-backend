@@ -30,6 +30,8 @@ from apps.api.app.api.routes.admin_watchdog import router as admin_watchdog_rout
 from apps.api.app.api.routes.admin_files import router as admin_files_router
 from apps.api.app.api.routes.admin_plugins import changes_router as server_changes_router, router as admin_plugins_router
 from apps.api.app.api.routes.playtime_pay import admin_router as salary_admin_router, plugin_router as salary_plugin_router
+# Voxel Engine (routes/voxel.py, admin_voxel.py, game_ui_voxel.py) — project dropped 29.09.2026;
+# the code and its tables stay, the routes are no longer served.
 from apps.api.app.api.routes.admin_audit import router as admin_audit_router
 from apps.api.app.api.routes.admin_roles import router as admin_roles_router
 from apps.api.app.api.routes.admin_punishments import router as admin_punishments_router
@@ -110,9 +112,6 @@ from apps.api.app.api.routes.game_sync_nation_checks import router as game_sync_
 from apps.api.app.api.routes.consents import router as consents_router
 from apps.api.app.api.routes.game_ui_battlepass import plugin_router as game_ui_battlepass_plugin_router
 from apps.api.app.api.routes.game_ui_alliance import router as game_ui_alliance_router
-from apps.api.app.api.routes.voxel import router as voxel_router
-from apps.api.app.api.routes.admin_voxel import router as admin_voxel_router
-from apps.api.app.api.routes.game_ui_voxel import router as game_ui_voxel_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -224,6 +223,3 @@ api_router.include_router(admin_punishments_router)
 api_router.include_router(admin_player_overview_router)
 api_router.include_router(monitoring_prometheus_router)
 api_router.include_router(admin_mods_router)
-api_router.include_router(voxel_router)
-api_router.include_router(admin_voxel_router)
-api_router.include_router(game_ui_voxel_router)
