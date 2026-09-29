@@ -196,7 +196,10 @@ def _set_personal(session: Session, authority: Authority, user: User, permission
     """Personal grants: a platform admin sets them all; an admin of servers only the
     entries of their servers — the rest stays as it was."""
     scope = authority.personal_servers()
-    wanted = _by_id(session, server_permissions)
+    # Servers the person is an admin of already give every per-server key: personal
+    # grants there would only duplicate it.
+    own_admin = {str(s) for s in (user.admin_server_ids or [])}
+    wanted = {sid: keys for sid, keys in _by_id(session, server_permissions).items() if sid not in own_admin}
     if scope is None:
         user.staff_permissions = sanitize_permissions(permissions)
         user.staff_server_permissions = wanted
@@ -364,6 +367,7 @@ def appoint_admin(
     ids = _ids(session, payload.servers)
     _become_staff(user, actor)
     user.admin_server_ids = sorted(set(user.admin_server_ids or []) | set(ids))
+    user.staff_server_permissions = {sid: k for sid, k in (user.staff_server_permissions or {}).items() if sid not in user.admin_server_ids}
     session.commit()
     session.refresh(user)
     _audit(session, actor, "appoint_admin", user, scope="servers", servers=payload.servers)
@@ -386,6 +390,7 @@ def set_admin_servers(
     before = _slugs(session)
     was = [before.get(s, s) for s in (user.admin_server_ids or [])]
     user.admin_server_ids = sorted(_ids(session, payload.servers))
+    user.staff_server_permissions = {sid: k for sid, k in (user.staff_server_permissions or {}).items() if sid not in user.admin_server_ids}
     if user.admin_server_ids:
         _become_staff(user, authority.actor)
     refresh_staff_flag(session, user)
