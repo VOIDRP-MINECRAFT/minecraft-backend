@@ -11,6 +11,7 @@ Design goals:
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from typing import Any
 from uuid import UUID
 
@@ -20,6 +21,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.models.admin_audit_log import AdminAuditLog
 
 logger = logging.getLogger(__name__)
+
+# Set by the admin-write audit middleware for the length of one request: an endpoint
+# that writes its own, richer row marks it, and the middleware then adds no generic one.
+audit_marker: ContextVar[dict | None] = ContextVar("audit_marker", default=None)
 
 
 def actor_name_of(user: Any) -> str:
@@ -70,6 +75,9 @@ def record_audit(
         session.add(row)
         if commit:
             session.commit()
+        marker = audit_marker.get()
+        if marker is not None:
+            marker["done"] = True
     except Exception:  # noqa: BLE001 — auditing must never break the action
         logger.exception("audit log write failed (category=%s action=%s)", category, action)
         try:

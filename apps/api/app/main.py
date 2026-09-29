@@ -25,6 +25,10 @@ def create_app() -> FastAPI:
         version="0.2.0",
     )
 
+    # Every POST/PUT/PATCH/DELETE under /api/v1/admin/ ends up in the audit log.
+    from apps.api.app.core.audit_middleware import AdminWriteAuditMiddleware
+    app.add_middleware(AdminWriteAuditMiddleware)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins,
