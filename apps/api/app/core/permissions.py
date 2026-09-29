@@ -67,7 +67,7 @@ PERMISSION_CATALOG: list[dict] = [
         "permissions": [
             {"key": "players.view", "label": "Игроки (поиск, просмотр)", "sensitive": True},
             {"key": "players.manage", "label": "Игроки: правки (legacy-вход и т.п.)", "sensitive": True},
-            {"key": "servers.manage", "label": "Серверы (создание/редактирование)", "sensitive": True},
+            {"key": "servers.manage", "label": "Серверы: настройки сервера (создавать и удалять — только с галочкой на всех)", "sensitive": True},
             {"key": "servers.hidden.view", "label": "Скрытые серверы: видеть на сайте и в лаунчере", "sensitive": True},
         ],
     },
