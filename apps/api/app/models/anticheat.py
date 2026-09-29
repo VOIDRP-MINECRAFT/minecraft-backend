@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Float, Integer, String, Text, UniqueConstraint
+from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.app.models.base import Base, ServerScopedMixin, TimestampMixin, UuidPrimaryKeyMixin
@@ -57,10 +61,22 @@ class AnticheatInjectionReport(UuidPrimaryKeyMixin, ServerScopedMixin, Timestamp
 
 
 class AnticheatThresholdConfig(UuidPrimaryKeyMixin, TimestampMixin, Base):
-    """Admin-editable check thresholds, synced to the game server mod."""
-    __tablename__ = "anticheat_threshold_configs"
-    __table_args__ = (UniqueConstraint("key", name="uq_anticheat_threshold_configs_key"),)
+    """Admin-editable check thresholds, synced to the game server mod or plugin.
 
+    A row without a server is the value every server gets; a row with one overrides it
+    for that server alone. One of each per key.
+    """
+    __tablename__ = "anticheat_threshold_configs"
+    __table_args__ = (
+        Index("uq_anticheat_threshold_configs_key_global", "key", unique=True,
+              postgresql_where=text("server_id IS NULL")),
+        Index("uq_anticheat_threshold_configs_key_server", "key", "server_id", unique=True,
+              postgresql_where=text("server_id IS NOT NULL")),
+    )
+
+    server_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("game_servers.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
     key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     value: Mapped[float] = mapped_column(Float, nullable=False)
     label: Mapped[str] = mapped_column(String(128), nullable=False, default="")
@@ -69,3 +85,24 @@ class AnticheatThresholdConfig(UuidPrimaryKeyMixin, TimestampMixin, Base):
     max_value: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
     step: Mapped[float] = mapped_column(Float, nullable=False, default=0.1)
     updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class AnticheatAction(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base):
+    """Something staff asked the game server to do, which its plugin picks up and runs.
+
+    ``kind`` is ``rollback`` or ``restore`` (undo a rollback), carried out through
+    CoreProtect; ``params`` holds what it needs — the player, how far back, the radius
+    and the place. The plugin moves it from ``pending`` through ``running`` to ``done``
+    or ``failed`` and writes what happened into ``result``.
+    """
+    __tablename__ = "anticheat_actions"
+
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    target_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    target_nick: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
