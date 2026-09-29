@@ -39,21 +39,34 @@ class EasyDonateError(Exception):
 
 class EasyDonateService:
     def __init__(self, settings: Settings | None = None, server_id: int | None = None,
-                 shop_key: str | None = None) -> None:
+                 shop_key: str | None = None, use_global: bool = True) -> None:
         s = settings or get_settings()
         # A server's own shop key (game_servers.easydonate_shop_key) wins over the global one.
-        self._key = shop_key or s.easydonate_shop_key
+        # The global key is the default server's shop: other servers without a key of their
+        # own have no shop at all (use_global=False) rather than showing the main one.
+        self._key = shop_key or (s.easydonate_shop_key if use_global else None)
         # Caches are per shop: two shops must never see each other's payments.
         self._shop = hashlib.sha256((self._key or "").encode()).hexdigest()[:10]
         # Per-server override (from game_servers.easydonate_server_id) falls back
         # to the global default so single-server setups keep working.
-        self._server_id = server_id if server_id is not None else s.easydonate_server_id
+        self._server_id = server_id if server_id is not None else (s.easydonate_server_id if use_global else None)
         self._headers = {**_HEADERS, "Shop-Key": self._key}
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._key)
+
+    @classmethod
+    def for_server(cls, server, settings: Settings | None = None) -> "EasyDonateService":
+        return cls(settings=settings, server_id=server.easydonate_server_id,
+                   shop_key=server.easydonate_shop_key, use_global=bool(server.is_default))
 
     def _ck(self, key: str) -> str:
         return f"{self._shop}:{key}"
 
     def _get(self, path: str, params: dict | None = None) -> dict:
+        if not self._key:
+            raise EasyDonateError(404, "Donations are not set up for this server")
         url = f"{_BASE}{path}"
         with httpx.Client(timeout=10) as client:
             r = client.get(url, headers=self._headers, params=params)

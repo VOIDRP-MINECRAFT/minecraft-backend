@@ -18,9 +18,12 @@ router = APIRouter(
 
 
 def get_service(server: Annotated[GameServer, Depends(resolve_server)]) -> EasyDonateService:
-    """The shop of the server chosen in the admin panel (its own key, else the global)."""
-    return EasyDonateService(settings=get_settings(), server_id=server.easydonate_server_id,
-                             shop_key=server.easydonate_shop_key)
+    """The shop of the server chosen in the admin panel: its own key; the global key only
+    for the default server."""
+    service = EasyDonateService.for_server(server, get_settings())
+    if not service.configured:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Donations are not set up for this server")
+    return service
 
 
 @router.get("/overview")

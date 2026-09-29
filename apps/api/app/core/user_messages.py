@@ -65,6 +65,7 @@ _EXACT_MESSAGES: dict[str, str] = {
 }
 
 _CONTAINS_RULES: list[tuple[str, str]] = [
+    ("donations are not set up for this server", "У этого сервера не подключён магазин EasyDonate — укажите его ключ и ID в «Серверах»."),
     ("only with servers.manage on all servers", "Эти поля (папки, systemd, RCON, пути пака) меняет только тот, у кого право «Серверы» на всю платформу."),
     ("servers.manage (all servers)", "Создавать и удалять серверы можно только с правом «Серверы» на всю платформу."),
     ("unknown social link platform", "Такая соцсеть не поддерживается."),

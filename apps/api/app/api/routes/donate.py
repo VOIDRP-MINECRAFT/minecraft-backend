@@ -27,8 +27,8 @@ def get_donate_service(
 ) -> EasyDonateService:
     # Scope products/payment to the active server's EasyDonate shop so commands
     # are delivered to that server; falls back to the global default when unset.
-    return EasyDonateService(settings=get_settings(), server_id=server.easydonate_server_id,
-                             shop_key=server.easydonate_shop_key)
+    # Only the default server falls back to the global shop key.
+    return EasyDonateService.for_server(server, get_settings())
 
 
 class PaymentCreateRequest(BaseModel):
@@ -78,6 +78,8 @@ def _public_payment(payment: dict) -> dict:
 
 @router.get("/products")
 def list_products(service: Annotated[EasyDonateService, Depends(get_donate_service)]):
+    if not service.configured:
+        return []
     try:
         products = service.get_products()
     except EasyDonateError as exc:
@@ -102,6 +104,8 @@ def get_product(
 
 @router.get("/servers")
 def list_servers(service: Annotated[EasyDonateService, Depends(get_donate_service)]):
+    if not service.configured:
+        return []
     try:
         return service.get_servers()
     except EasyDonateError as exc:
@@ -118,6 +122,8 @@ def last_payments(
     service: Annotated[EasyDonateService, Depends(get_donate_service)],
     db: Annotated[Session, Depends(get_db_session)],
 ):
+    if not service.configured:
+        return []
     try:
         payments = service.get_last_payments()
     except EasyDonateError as exc:
@@ -142,6 +148,8 @@ def top_donors(
     db: Annotated[Session, Depends(get_db_session)],
 ):
     """Leaderboard of top supporters: only buyers who allowed their nickname to be shown."""
+    if not service.configured:
+        return []
     try:
         top = service.get_top_donors(limit=50)
     except EasyDonateError as exc:
@@ -156,6 +164,8 @@ def create_payment(
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[EasyDonateService, Depends(get_donate_service)],
 ):
+    if not service.configured:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Donations are not set up for this server")
     if not current_user.player_account or not current_user.player_account.minecraft_nickname:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
