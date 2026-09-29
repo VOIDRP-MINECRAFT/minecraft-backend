@@ -49,20 +49,23 @@ def _ping_status(host: str, port: int) -> GameServerStatus:
 def _to_public(server: GameServer, with_status: bool = True) -> GameServerPublic:
     dto = GameServerPublic.model_validate(server)
     if with_status:
-        host = server.status_host
-        port = server.status_port
-        # For the default server, if no explicit status host is set, ping the
-        # configured internal MC address rather than the public domain — the
-        # backend runs on the same box and pinging the public domain fails
-        # (no NAT hairpin), which would wrongly report the server as offline.
-        if not host and server.is_default:
-            settings = get_settings()
-            host = settings.minecraft_server_host or server.host
-            port = port or settings.minecraft_server_port or server.port
-        host = host or server.host
-        port = port or server.port
-        dto.status = _ping_status(host, port)
+        dto.status = _ping_status(*status_address(server))
     return dto
+
+
+def status_address(server: GameServer) -> tuple[str, int]:
+    """Where to ping a server for its status (also used by the admin dashboard)."""
+    host = server.status_host
+    port = server.status_port
+    # For the default server, if no explicit status host is set, ping the
+    # configured internal MC address rather than the public domain — the
+    # backend runs on the same box and pinging the public domain fails
+    # (no NAT hairpin), which would wrongly report the server as offline.
+    if not host and server.is_default:
+        settings = get_settings()
+        host = settings.minecraft_server_host or server.host
+        port = port or settings.minecraft_server_port or server.port
+    return host or server.host, port or server.port
 
 
 @router.get("", response_model=list[GameServerPublic])

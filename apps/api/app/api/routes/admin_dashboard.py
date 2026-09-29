@@ -18,6 +18,7 @@ from apps.api.app.models.battlepass import BattlePassPremium, BattlePassProgress
 from apps.api.app.models.economy_market import EconomyMarketItem, EconomyShopTransaction
 from apps.api.app.models.mod_suggestion import ModSuggestion
 from apps.api.app.models.nation import Nation
+from apps.api.app.models.player_feedback import PlayerFeedback
 from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.user import User
 
@@ -64,7 +65,9 @@ def get_dashboard_stats(
     total_players = session.scalar(select(func.count()).select_from(PlayerAccount)) or 0
     total_nations = session.scalar(select(func.count()).select_from(Nation).where(Nation.server_id == server.id)) or 0
     total_alliances = session.scalar(select(func.count()).select_from(Alliance).where(Alliance.server_id == server.id)) or 0
-    total_mod_suggestions = session.scalar(select(func.count()).select_from(ModSuggestion)) or 0
+    total_mod_suggestions = session.scalar(select(func.count()).select_from(ModSuggestion).where(ModSuggestion.server_id == server.id)) or 0
+    week_feedback = session.scalar(select(func.count()).select_from(PlayerFeedback).where(
+        PlayerFeedback.server_id == server.id, PlayerFeedback.created_at >= week_ago)) or 0
 
     # Battle Pass
     bp_total = session.scalar(select(func.count()).select_from(BattlePassPremium).where(BattlePassPremium.server_id == server.id)) or 0
@@ -132,6 +135,9 @@ def get_dashboard_stats(
         "mod_suggestions": {
             "total": total_mod_suggestions,
         },
+        "feedback": {
+            "last_7d": week_feedback,
+        },
     }
     # Sensitive blocks — only for callers holding the matching permission, so a
     # moderator without them never receives the figures over the wire.
@@ -151,20 +157,21 @@ def get_dashboard_stats(
 
 
 @router.get("/server-status")
-def get_server_status() -> dict:
-    settings = get_settings()
-    host = settings.minecraft_server_host
-    port = settings.minecraft_server_port
+def get_server_status(server: Annotated[GameServer, Depends(resolve_server)]) -> dict:
+    """Live status of the server chosen in the admin panel (its own status address)."""
+    from apps.api.app.api.routes.servers import status_address
 
+    host, port = status_address(server)
+    base = {"server": server.name, "slug": server.slug}
     if not host:
-        return {"online": False, "reason": "server host not configured"}
+        return {**base, "online": False, "reason": "server host not configured"}
 
     try:
         from mcstatus import JavaServer  # type: ignore[import-untyped]
 
-        server = JavaServer(host, port, timeout=3)
-        status = server.status()
+        status = JavaServer(host, port, timeout=3).status()
         return {
+            **base,
             "online": True,
             "players_online": status.players.online,
             "players_max": status.players.max,
@@ -176,9 +183,9 @@ def get_server_status() -> dict:
             ],
         }
     except ImportError:
-        return {"online": False, "reason": "mcstatus not installed"}
+        return {**base, "online": False, "reason": "mcstatus not installed"}
     except Exception as exc:
-        return {"online": False, "reason": str(exc)}
+        return {**base, "online": False, "reason": str(exc) or "не отвечает"}
 
 
 @router.get("/recent-users")
