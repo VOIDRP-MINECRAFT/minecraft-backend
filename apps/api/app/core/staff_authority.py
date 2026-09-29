@@ -13,7 +13,7 @@ changes a person ranked at or above themselves.
 """
 from __future__ import annotations
 
-from apps.api.app.core.permissions import SERVER_KEYS, Access, access_of
+from apps.api.app.core.permissions import SERVER_ADMIN_KEYS, SERVER_KEYS, Access, access_of
 
 
 def top_position(user) -> int | None:
@@ -52,7 +52,7 @@ class Authority:
 
     def _somewhere(self, key: str) -> bool:
         return self.access.holds_everywhere(key) or any(key in keys for keys in self.access.per_server.values()) \
-            or (key in SERVER_KEYS and bool(self.admin_servers))
+            or (key in SERVER_ADMIN_KEYS and bool(self.admin_servers))
 
     def _holds_on(self, key: str, server_ids) -> bool:
         """``key`` on every server of a scope (None = everywhere)."""

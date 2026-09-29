@@ -13,6 +13,7 @@ from apps.api.app.core.audit import record_audit
 from apps.api.app.core.permissions import (
     MODERATOR_PRESET,
     PERMISSION_CATALOG,
+    SERVER_ADMIN_KEYS,
     sanitize_permissions,
     sanitize_server_permissions,
 )
@@ -205,7 +206,11 @@ def _set_personal(session: Session, authority: Authority, user: User, permission
     # Servers the person is an admin of already give every per-server key: personal
     # grants there would only duplicate it.
     own_admin = {str(s) for s in (user.admin_server_ids or [])}
-    wanted = {sid: keys for sid, keys in _by_id(session, server_permissions).items() if sid not in own_admin}
+    wanted = {}
+    for sid, keys in _by_id(session, server_permissions).items():
+        kept = [k for k in keys if sid not in own_admin or k not in SERVER_ADMIN_KEYS]
+        if kept:
+            wanted[sid] = kept
     if scope is None:
         user.staff_permissions = sanitize_permissions(permissions)
         user.staff_server_permissions = wanted
@@ -214,6 +219,17 @@ def _set_personal(session: Session, authority: Authority, user: User, permission
     merged = {sid: keys for sid, keys in current.items() if sid not in scope}
     merged.update({sid: keys for sid, keys in wanted.items() if sid in scope})
     user.staff_server_permissions = sanitize_server_permissions(merged)
+
+
+def _drop_admin_dupes(user: User) -> dict:
+    """Personal per-server grants minus what being admin of that server already gives."""
+    admin = {str(s) for s in (user.admin_server_ids or [])}
+    out = {}
+    for sid, keys in (user.staff_server_permissions or {}).items():
+        kept = [k for k in keys if sid not in admin or k not in SERVER_ADMIN_KEYS]
+        if kept:
+            out[sid] = kept
+    return out
 
 
 def _me(authority: Authority, session: Session) -> ManagerInfo:
@@ -377,7 +393,7 @@ def appoint_admin(
     ids = _ids(session, payload.servers)
     _become_staff(user, actor)
     user.admin_server_ids = sorted(set(user.admin_server_ids or []) | set(ids))
-    user.staff_server_permissions = {sid: k for sid, k in (user.staff_server_permissions or {}).items() if sid not in user.admin_server_ids}
+    user.staff_server_permissions = _drop_admin_dupes(user)
     session.commit()
     session.refresh(user)
     _audit(session, actor, "appoint_admin", user, scope="servers", servers=payload.servers)
@@ -400,7 +416,7 @@ def set_admin_servers(
     before = _slugs(session)
     was = [before.get(s, s) for s in (user.admin_server_ids or [])]
     user.admin_server_ids = sorted(_ids(session, payload.servers))
-    user.staff_server_permissions = {sid: k for sid, k in (user.staff_server_permissions or {}).items() if sid not in user.admin_server_ids}
+    user.staff_server_permissions = _drop_admin_dupes(user)
     if user.admin_server_ids:
         _become_staff(user, authority.actor)
     refresh_staff_flag(session, user)

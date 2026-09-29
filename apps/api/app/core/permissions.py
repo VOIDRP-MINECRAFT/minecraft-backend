@@ -176,6 +176,15 @@ SERVER_KEYS: frozenset[str] = frozenset(
     p["key"] for group in PERMISSION_CATALOG for p in group["permissions"] if p["scope"] == "server"
 )
 
+# Per-server keys an admin of a server does NOT get just by being its admin — they are
+# given separately (by a role or personally) when really needed.
+NOT_VIA_SERVER_ADMIN: frozenset[str] = frozenset({"servers.manage"})
+SERVER_ADMIN_KEYS: frozenset[str] = SERVER_KEYS - NOT_VIA_SERVER_ADMIN
+
+for _group in PERMISSION_CATALOG:
+    for _p in _group["permissions"]:
+        _p["via_admin"] = _p["key"] in SERVER_ADMIN_KEYS
+
 # Grants sight of ``game_servers.staff_only`` servers in the public catalogue
 # (/servers) that feeds the site and the launcher. Full admins bypass it.
 HIDDEN_SERVERS_PERMISSION = "servers.hidden.view"
@@ -269,7 +278,7 @@ class Access:
         if server_id is not None:
             sid = str(server_id)
             if sid in self.admin_servers:
-                keys |= SERVER_KEYS
+                keys |= SERVER_ADMIN_KEYS
             keys |= self.per_server.get(sid, set())
         return keys
 
@@ -281,7 +290,7 @@ class Access:
         if self.holds_everywhere(key):
             return ids
         out = {sid for sid, keys in self.per_server.items() if key in keys}
-        if key in SERVER_KEYS:
+        if key in SERVER_ADMIN_KEYS:
             out |= self.admin_servers
         return out & ids
 
