@@ -51,6 +51,8 @@ class Authority:
         # platform admins.
         self.can_staff = self.platform or self.access.holds_everywhere("staff.manage")
         self.can_manage_badges = self.platform or self._somewhere("badges.manage")
+        # Set by the page dependency: the actor's role owns badges (members hand them out).
+        self.owns_badges = False
         self.can_assign_badges = self.platform or self._somewhere("badges.assign")
 
     def _somewhere(self, key: str) -> bool:
@@ -66,7 +68,7 @@ class Authority:
     @property
     def opens_staff_pages(self) -> bool:
         return (self.can_manage_roles or self.can_assign_roles or self.can_manage_badges
-                or self.can_assign_badges or self.can_staff)
+                or self.can_assign_badges or self.can_staff or self.owns_badges)
 
     # ── roles ────────────────────────────────────────────────────────────────
 
@@ -89,15 +91,40 @@ class Authority:
         return (self.access.holds_everywhere(key) and self._below(position)
                 and self._covers(permissions, server_ids))
 
+    def is_member(self, role) -> bool:
+        return role is not None and any(r.id == role.id for r in (getattr(self.actor, "staff_roles", None) or []))
+
     def may_assign_role(self, role) -> bool:
         if getattr(role, "is_badge", False):
-            # A badge grants nothing: badges.assign on the badge's servers (everywhere for
-            # a common one) is enough; the person still has to be below the giver.
-            return self.platform or self._holds_on("badges.assign", role.server_ids)
+            # A badge grants nothing: badges.assign on its servers (everywhere for a common
+            # one), or membership of the role that owns it; the person still has to be
+            # below the giver.
+            return (self.platform or self._holds_on("badges.assign", role.scope_ids)
+                    or self.is_member(role.owner_role))
         return self.may_edit_role(role.position, role.server_ids, role.permissions, key="roles.assign")
 
-    def may_edit_badge(self, server_ids) -> bool:
-        return self.platform or self._holds_on("badges.manage", server_ids)
+    def may_edit_badge(self, server_ids, owner_role=None) -> bool:
+        if self.platform:
+            return True
+        if owner_role is not None:
+            return (self.is_member(owner_role) or self._holds_on("badges.manage", owner_role.server_ids)
+                    or self.may_edit_role(owner_role.position, owner_role.server_ids, owner_role.permissions))
+        return self._holds_on("badges.manage", server_ids)
+
+    def may_own_badge(self, owner_role) -> bool:
+        """A badge may be tied to a role the actor has, or one they manage."""
+        return self.platform or self.is_member(owner_role) or self.may_edit_role(
+            owner_role.position, owner_role.server_ids, owner_role.permissions)
+
+    def sees_role(self, role) -> bool:
+        """What the roles page lists: what the actor may change or hand out, and their own."""
+        if self.platform or self.is_member(role):
+            return True
+        if role.is_badge:
+            return (self.may_edit_badge(role.server_ids, role.owner_role) or self.may_assign_role(role)
+                    or self.is_member(role.owner_role))
+        return (self.may_edit_role(role.position, role.server_ids, role.permissions)
+                or self.may_assign_role(role))
 
     # ── people ───────────────────────────────────────────────────────────────
 

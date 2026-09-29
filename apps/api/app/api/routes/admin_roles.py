@@ -44,6 +44,10 @@ class RoleRead(BaseModel):
     permissions: list[str]
     # A badge: a label about the person, never any permission, no seniority.
     is_badge: bool = False
+    # For a badge: the role that owns it (its members hand it out).
+    owner_role: dict | None = None
+    # The viewer holds this role / badge.
+    mine: bool = False
     members: list[RoleMember]
     editable: bool
     assignable: bool
@@ -60,6 +64,8 @@ class RoleBody(BaseModel):
     servers: list[str] | None = None
     permissions: list[str] = Field(default_factory=list)
     badge: bool = False
+    # Badges only: tie it to a role (id) whose members then own it; None = not tied.
+    owner_role_id: UUID | None = None
 
 
 class RoleOrder(BaseModel):
@@ -90,15 +96,18 @@ def _read(role: StaffRole, session: Session, authority: Authority, members=None)
         servers=None if role.server_ids is None else [slug_of[s] for s in role.server_ids if s in slug_of],
         permissions=list(role.permissions or []),
         is_badge=role.is_badge,
+        owner_role={"id": str(role.owner_role.id), "name": role.owner_role.name, "color": role.owner_role.color}
+        if role.is_badge and role.owner_role is not None else None,
+        mine=authority.is_member(role),
         members=(members if members is not None else _members(session)).get(role.id, []),
-        editable=_may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions),
+        editable=_may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions, role.owner_role),
         assignable=authority.may_assign_role(role),
     )
 
 
-def _may_edit(authority: Authority, badge: bool, position: int, server_ids, permissions) -> bool:
+def _may_edit(authority: Authority, badge: bool, position: int, server_ids, permissions, owner_role=None) -> bool:
     if badge:
-        return authority.may_edit_badge(server_ids)
+        return authority.may_edit_badge(server_ids, owner_role)
     return authority.may_edit_role(position, server_ids, permissions)
 
 
@@ -114,6 +123,17 @@ def _validated(session: Session, body: RoleBody) -> tuple[str, str, list[str] | 
         if platform:
             raise HTTPException(status_code=400, detail="Роль отдельных серверов не может давать права платформы: " + ", ".join(platform))
     return body.name.strip(), body.color.lower(), server_ids, keys
+
+
+def _owner_role(session: Session, authority: Authority, body: RoleBody) -> StaffRole | None:
+    if not body.badge or body.owner_role_id is None:
+        return None
+    owner = session.get(StaffRole, body.owner_role_id)
+    if owner is None or owner.is_badge:
+        raise HTTPException(status_code=400, detail="Значок можно привязать только к существующей роли")
+    if not authority.may_own_badge(owner):
+        raise HTTPException(status_code=403, detail="Привязать значок можно к своей роли или к роли, которой управляешь")
+    return owner
 
 
 def _get(session: Session, role_id: UUID) -> StaffRole:
@@ -142,7 +162,9 @@ def list_roles(
 ) -> RoleListResponse:
     roles = session.scalars(select(StaffRole).order_by(StaffRole.position.desc(), StaffRole.name)).all()
     members = _members(session)
-    return RoleListResponse(items=[_read(r, session, authority, members) for r in roles], me=_me(authority, session))
+    # Only what the viewer may change or hand out, and their own roles and badges.
+    return RoleListResponse(items=[_read(r, session, authority, members) for r in roles if authority.sees_role(r)],
+                            me=_me(authority, session))
 
 
 @router.post("", response_model=RoleRead, status_code=status.HTTP_201_CREATED)
@@ -153,12 +175,18 @@ def create_role(
 ) -> RoleRead:
     """A new role goes to the bottom of the list, as in Discord."""
     name, color, server_ids, keys = _validated(session, body)
+    owner = _owner_role(session, authority, body)
     lowest = session.scalar(select(StaffRole.position).order_by(StaffRole.position.asc()).limit(1))
     position = (lowest - 10) if lowest is not None else 0
-    if not _may_edit(authority, body.badge, position, server_ids, keys):
+    # A badge tied to a role lives on that role's servers; making one still needs badges.manage.
+    if body.badge and owner is not None:
+        server_ids = owner.server_ids
+    if body.badge and not authority.can_manage_badges:
+        raise HTTPException(status_code=403, detail=_BADGE_DENY)
+    if not _may_edit(authority, body.badge, position, server_ids, keys, owner):
         raise HTTPException(status_code=403, detail=_BADGE_DENY if body.badge else "Такую роль создать нельзя: в ней права, которых у тебя нет, или серверы не твои")
     role = StaffRole(name=name, color=color, position=position, server_ids=server_ids, permissions=keys,
-                     created_by=authority.actor.site_login, is_badge=body.badge)
+                     created_by=authority.actor.site_login, is_badge=body.badge, owner_role_id=owner.id if owner else None)
     session.add(role)
     session.commit()
     session.refresh(role)
@@ -174,14 +202,19 @@ def update_role(
     authority: Annotated[Authority, Depends(get_authority)],
 ) -> RoleRead:
     role = _get(session, role_id)
-    if not _may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions):
+    if not _may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions, role.owner_role):
         raise HTTPException(status_code=403, detail=_BADGE_DENY) if role.is_badge else _deny_edit()
     body.badge = role.is_badge  # a badge stays a badge, a role stays a role
     name, color, server_ids, keys = _validated(session, body)
-    if not _may_edit(authority, role.is_badge, role.position, server_ids, keys):
+    owner = _owner_role(session, authority, body) if body.owner_role_id != role.owner_role_id else role.owner_role
+    if role.is_badge and owner is not None:
+        server_ids = owner.server_ids
+    if not _may_edit(authority, role.is_badge, role.position, server_ids, keys, owner):
         raise HTTPException(status_code=403, detail="Так изменить нельзя: в роли права, которых у тебя нет, или серверы не твои")
     before = {"name": role.name, "permissions": list(role.permissions or []), "servers": role.server_ids}
     role.name, role.color, role.server_ids, role.permissions = name, color, server_ids, keys
+    if role.is_badge:
+        role.owner_role_id = owner.id if owner else None
     session.commit()
     session.refresh(role)
     added = [k for k in keys if k not in before["permissions"]]
@@ -198,7 +231,7 @@ def delete_role(
     authority: Annotated[Authority, Depends(get_authority)],
 ) -> None:
     role = _get(session, role_id)
-    if not _may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions):
+    if not _may_edit(authority, role.is_badge, role.position, role.server_ids, role.permissions, role.owner_role):
         raise _deny_edit()
     member_ids = [uid for (uid,) in session.execute(select(StaffRoleMember.user_id).where(StaffRoleMember.role_id == role.id)).all()]
     _log(session, authority, "delete", role, permissions=list(role.permissions or []), members=len(member_ids))
@@ -217,30 +250,35 @@ def reorder_roles(
     session: Annotated[Session, Depends(get_db_session)],
     authority: Annotated[Authority, Depends(get_authority)],
 ) -> RoleListResponse:
-    """The whole list, most senior first. Roles the caller may not change keep their
-    places; the ones they may change move only among the places below the caller's own
-    highest role."""
-    # Only roles carry seniority; badges are listed apart and keep no order.
+    """The roles the caller sees, most senior first. They swap among their own places;
+    roles the caller does not see keep theirs. Only roles the caller may change move, and
+    only to places below the caller's own highest role."""
     roles = {r.id: r for r in session.scalars(select(StaffRole).where(StaffRole.is_badge.is_(False))).all()}
-    if set(body.ids) != set(roles) or len(body.ids) != len(roles):
+    ids = list(dict.fromkeys(body.ids))
+    if not ids or any(i not in roles for i in ids):
         raise HTTPException(status_code=400, detail="Список ролей устарел — обновите страницу")
-    current = sorted(roles.values(), key=lambda r: (-r.position, r.name))
-    if not authority.platform:
-        top_index = next((i for i, r in enumerate(current) if authority.top is not None and r.position == authority.top), None)
-        for i, (old, new_id) in enumerate(zip(current, body.ids)):
-            new = roles[new_id]
-            if old.id == new.id:
-                continue
-            movable = (authority.may_edit_role(new.position, new.server_ids, new.permissions)
-                       and authority.may_edit_role(old.position, old.server_ids, old.permissions))
-            if not movable or (top_index is not None and i <= top_index) or (top_index is None and not authority.admin_servers):
-                raise HTTPException(status_code=403, detail="Двигать можно только свои роли и только ниже своей")
-    n = len(body.ids)
-    for i, rid in enumerate(body.ids):
-        roles[rid].position = (n - i) * 10
+    current = sorted((roles[i] for i in ids), key=lambda r: (-r.position, r.name))
+    slots = [r.position for r in current]
+    if len(set(slots)) < len(slots):  # equal positions: spread them first, order kept
+        ordered = sorted(roles.values(), key=lambda r: (-r.position, r.name))
+        for n, r in enumerate(ordered):
+            r.position = (len(ordered) - n) * 10
+        current = sorted((roles[i] for i in ids), key=lambda r: -r.position)
+        slots = [r.position for r in current]
+    for old, new_id, slot in zip(current, ids, slots):
+        new = roles[new_id]
+        if old.id == new.id or authority.platform:
+            continue
+        movable = (authority.may_edit_role(new.position, new.server_ids, new.permissions)
+                   and authority.may_edit_role(old.position, old.server_ids, old.permissions))
+        below = authority.top is None or slot < authority.top
+        if not movable or not below:
+            raise HTTPException(status_code=403, detail="Двигать можно только свои роли и только ниже своей")
+    for new_id, slot in zip(ids, slots):
+        roles[new_id].position = slot
     session.commit()
     record_audit(session, actor=authority.actor, category="roles", action="reorder",
-                 meta={"order": [roles[rid].name for rid in body.ids]})
+                 meta={"order": [roles[i].name for i in ids]})
     return list_roles(session, authority)
 
 

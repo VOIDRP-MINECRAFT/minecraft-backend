@@ -6,7 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
 
@@ -31,6 +31,15 @@ class StaffRole(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # A badge: a label about the person (like a fun Discord role) — never any permission,
     # no weight in seniority.
     is_badge: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # A badge may belong to a role: that role's members hand it out and edit it, and it
+    # lives on that role's servers.
+    owner_role_id: Mapped[UUID | None] = mapped_column(ForeignKey("staff_roles.id", ondelete="SET NULL"), nullable=True)
+    owner_role: Mapped["StaffRole | None"] = relationship(remote_side="StaffRole.id", lazy="selectin", join_depth=1)
+
+    @property
+    def scope_ids(self) -> list[str] | None:
+        """The servers the role (or a role-owned badge, through its role) belongs to."""
+        return self.owner_role.server_ids if self.owner_role is not None else self.server_ids
 
 
 class StaffRoleMember(Base):

@@ -105,8 +105,18 @@ class PermissionCatalogResponse(BaseModel):
     preset: list[str]
 
 
-def get_authority(actor: Annotated[User, Depends(get_current_staff_user)]) -> Authority:
+def get_authority(
+    actor: Annotated[User, Depends(get_current_staff_user)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> Authority:
     authority = Authority(actor)
+    own_roles = [r.id for r in (actor.staff_roles or []) if not r.is_badge]
+    if own_roles:
+        from apps.api.app.models.staff_role import StaffRole
+
+        authority.owns_badges = session.scalar(
+            select(StaffRole.id).where(StaffRole.is_badge.is_(True), StaffRole.owner_role_id.in_(own_roles)).limit(1)
+        ) is not None
     if not authority.opens_staff_pages:
         raise HTTPException(status_code=403, detail="Нет доступа к управлению персоналом")
     return authority
