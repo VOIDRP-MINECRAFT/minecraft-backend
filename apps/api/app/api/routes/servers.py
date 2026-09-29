@@ -71,11 +71,9 @@ def status_address(server: GameServer) -> tuple[str, int]:
 @router.get("", response_model=list[GameServerPublic])
 def list_servers(
     session: Annotated[Session, Depends(get_db_session)],
-    with_staff_only: Annotated[bool, Depends(can_view_staff_only_servers)],
+    may_see_hidden: Annotated[object, Depends(can_view_staff_only_servers)],
 ) -> list[GameServerPublic]:
-    servers = GameServerRepository(session).list_visible()
-    if not with_staff_only:
-        servers = [s for s in servers if not s.staff_only]
+    servers = [s for s in GameServerRepository(session).list_visible() if not s.staff_only or may_see_hidden(s)]
     return [_to_public(s) for s in servers]
 
 
@@ -83,9 +81,9 @@ def list_servers(
 def get_server(
     slug: str,
     session: Annotated[Session, Depends(get_db_session)],
-    with_staff_only: Annotated[bool, Depends(can_view_staff_only_servers)],
+    may_see_hidden: Annotated[object, Depends(can_view_staff_only_servers)],
 ) -> GameServerPublic:
     server = GameServerRepository(session).get_by_slug(slug)
-    if server is None or not server.is_visible or (server.staff_only and not with_staff_only):
+    if server is None or not server.is_visible or (server.staff_only and not may_see_hidden(server)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
     return _to_public(server)

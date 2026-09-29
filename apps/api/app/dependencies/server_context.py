@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from apps.api.app.core.permissions import HIDDEN_SERVERS_PERMISSION, resolve_user_permissions
+from apps.api.app.core.permissions import HIDDEN_SERVERS_PERMISSION
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_optional_current_user
 from apps.api.app.models.game_server import GameServer
@@ -15,17 +15,23 @@ from apps.api.app.repositories.game_server_repository import GameServerRepositor
 
 def can_view_staff_only_servers(
     user: Annotated[User | None, Depends(get_optional_current_user)],
-) -> bool:
-    """Whether the caller may see ``staff_only`` servers in the public catalogue.
+):
+    """Which ``staff_only`` servers the caller may see in the public catalogue — a
+    predicate over a server.
 
-    Optional auth on purpose: anonymous visitors (and anyone whose token is
-    stale) simply don't get the hidden servers — no 401, no error. Full admins
-    pass through ``resolve_user_permissions``; moderators need
-    ``servers.hidden.view``.
+    Optional auth on purpose: anonymous visitors (and anyone whose token is stale)
+    simply don't get the hidden servers — no 401, no error. Seen by: full admins and
+    holders of ``servers.hidden.view`` (every hidden server), and staff who hold any
+    permission on that very server (an admin of a hidden server must find it).
     """
     if user is None:
-        return False
-    return HIDDEN_SERVERS_PERMISSION in resolve_user_permissions(user)
+        return lambda server: False
+    from apps.api.app.core.permissions import SERVER_KEYS, access_of
+
+    access = access_of(user)
+    if access.holds_everywhere(HIDDEN_SERVERS_PERMISSION):
+        return lambda server: True
+    return lambda server: bool(access.on(server.id) & (SERVER_KEYS | {HIDDEN_SERVERS_PERMISSION}))
 
 
 def resolve_server(
