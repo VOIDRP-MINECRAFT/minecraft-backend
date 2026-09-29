@@ -160,17 +160,22 @@ def _archive(session: Session, server: GameServer, backup: ServerBackup) -> None
         backup.progress = f"Архивирую {', '.join(worlds)} ({raw // 1024**2} МБ)"
         session.commit()
         # Lowest CPU and disk priority, two compression threads: the game server on the
-        # same machine comes first — a 55 GB world at full tilt made it lag.
-        tar = subprocess.Popen(
-            [*BACKGROUND, "tar", "-C", data_dir, "--warning=no-file-changed", "--warning=no-file-removed",
-             "-cf", "-", *worlds],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        # same machine comes first — a 55 GB world at full tilt made it lag. Level 1:
+        # region files are compressed already, a higher level only costs time. The stream
+        # is checked on its way to the disk (tee → zstd -t) rather than read back after,
+        # which on the backup HDD took as long as the archiving itself.
+        script = (
+            'tar -C "$1" --warning=no-file-changed --warning=no-file-removed -cf - "${@:3}" '
+            '| zstd -T2 -1 -q -c | tee "$2" | zstd -t -q; '
+            'echo "${PIPESTATUS[*]}" >&2'
         )
-        zst = subprocess.run([*BACKGROUND, "zstd", "-T2", "-3", "-q", "-f", "-o", str(tmp)], stdin=tar.stdout,
-                             capture_output=True)
-        tar.stdout.close()
-        tar_err = tar.stderr.read().decode(errors="replace")
-        tar_rc = tar.wait()
+        pipe = subprocess.run(
+            [*BACKGROUND, "bash", "-c", script, "backup", data_dir, str(tmp), *worlds],
+            capture_output=True, text=True,
+        )
+        codes = (pipe.stderr.strip().splitlines() or [""])[-1].split()
+        tar_rc, zst_rc, tee_rc, check_rc = ([int(c) for c in codes] + [99, 99, 99, 99])[:4]
+        tar_err = pipe.stderr
     finally:
         if live:
             rcon_quiet(server, "save-on")
@@ -178,14 +183,10 @@ def _archive(session: Session, server: GameServer, backup: ServerBackup) -> None
                 rcon_quiet(server, "chunky continue")
 
     # tar exits 1 on "file changed as we read it" — a warning; 2 and up is fatal.
-    if zst.returncode != 0 or tar_rc > 1 or not tmp.is_file():
+    if zst_rc != 0 or tee_rc != 0 or tar_rc > 1 or not tmp.is_file():
         tmp.unlink(missing_ok=True)
-        raise Failed(f"Архивация не удалась: tar={tar_rc} zstd={zst.returncode} {tar_err[:300]} {zst.stderr.decode(errors='replace')[:300]}")
-
-    backup.progress = "Проверяю архив"
-    session.commit()
-    check = subprocess.run(["zstd", "-t", "-q", str(tmp)], capture_output=True)
-    if check.returncode != 0:
+        raise Failed(f"Архивация не удалась: tar={tar_rc} zstd={zst_rc} tee={tee_rc} {tar_err[-400:]}")
+    if check_rc != 0:
         tmp.unlink(missing_ok=True)
         raise Failed("Архив не прошёл проверку (zstd -t)")
     tmp.rename(final)
