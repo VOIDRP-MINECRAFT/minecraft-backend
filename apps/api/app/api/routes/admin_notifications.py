@@ -47,16 +47,17 @@ def list_notifications(
     # Feedback and suggestions come from every server: count those of the servers this
     # person may see (untagged ones only with the permission on every server).
     from apps.api.app.core.permissions import servers_with_permission
-    all_ids = [i for (i,) in session.execute(select(GameServer.id)).all()]
+    slug_of = {i: slug for i, slug in session.execute(select(GameServer.id, GameServer.slug)).all()}
 
-    def _count_on(model, key: str) -> int:
+    def _count_on(model, key: str, by_slug: bool = False) -> int:
         if me.is_admin or key in (me.staff_permissions or []):
             return _count_since(session, model, since)
-        ids = [UUID(i) for i in servers_with_permission(me, key, all_ids)]
+        ids = [UUID(i) for i in servers_with_permission(me, key, slug_of)]
         if not ids:
             return 0
+        where = model.server_slug.in_([slug_of[i] for i in ids]) if by_slug else model.server_id.in_(ids)
         return session.scalar(select(func.count()).select_from(model).where(
-            model.created_at >= since, model.server_id.in_(ids))) or 0
+            model.created_at >= since, where)) or 0
 
     if n := _count_on(PlayerFeedback, "feedback.view"):
         items.append(AdminNotification(
@@ -74,15 +75,13 @@ def list_notifications(
             link="/admin/mod-suggestions",
         ))
 
-    if "crashes.view" in perms:
-        n = _count_since(session, LauncherCrashReport, since)
-        if n:
-            items.append(AdminNotification(
-                id="crashes-24h", level="warning", count=n,
-                title="Краши лаунчера",
-                message=f"{n} крашей лаунчера за последние сутки.",
-                link="/admin/launcher-crashes",
-            ))
+    if n := _count_on(LauncherCrashReport, "crashes.view", by_slug=True):
+        items.append(AdminNotification(
+            id="crashes-24h", level="warning", count=n,
+            title="Краши лаунчера",
+            message=f"{n} крашей лаунчера за последние сутки.",
+            link="/admin/launcher-crashes",
+        ))
 
     if "anticheat.view" in perms:
         # Only *meaningful* injection reports are the "possible cheater" signal.

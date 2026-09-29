@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user
 from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.repositories.game_server_repository import GameServerRepository
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.launcher_crash_report import LauncherCrashReport
 from apps.api.app.models.user import User
@@ -58,6 +59,7 @@ def submit_crash_report(
     body: CrashReportRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> None:
     nickname = current_user.player_account.minecraft_nickname if current_user.player_account else None
     if not nickname:
@@ -72,7 +74,9 @@ def submit_crash_report(
         os_name=body.os_name,
         java_version=body.java_version,
         ram_mb=body.ram_mb,
-        server_slug=body.server_slug,
+        # The server the launcher names; older launchers send none — then the request's
+        # server (X-Server-Slug, else the default), so every report belongs to a server.
+        server_slug=body.server_slug if body.server_slug and GameServerRepository(session).get_by_slug(body.server_slug) else server.slug,
         advice_rule_key=(body.advice_rule_key or None) and body.advice_rule_key[:64],
     )
     session.add(record)

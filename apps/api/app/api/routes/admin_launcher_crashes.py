@@ -4,18 +4,27 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, true
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_permission
+from apps.api.app.dependencies.admin import PermittedServers, require_permission_somewhere
+from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.launcher_crash_report import LauncherCrashReport
 
 router = APIRouter(
     prefix="/admin/launcher-crashes",
     tags=["admin", "launcher-crashes"],
-    dependencies=[Depends(require_permission("crashes.view"))],
 )
+
+
+def _visible(session: Session, where: PermittedServers):
+    """Crash reports carry the slug of the server picked in the launcher: only those of
+    the permitted servers; reports without one only with the permission everywhere."""
+    if where.all:
+        return true()
+    slugs = session.scalars(select(GameServer.slug).where(GameServer.id.in_(where.ids))).all()
+    return LauncherCrashReport.server_slug.in_(slugs)
 
 
 class CrashReportItem(BaseModel):
@@ -43,6 +52,7 @@ class CrashReportListResponse(BaseModel):
 @router.get("", response_model=CrashReportListResponse)
 def list_crashes(
     session: Annotated[Session, Depends(get_db_session)],
+    where: Annotated[PermittedServers, Depends(require_permission_somewhere("crashes.view"))],
     player: str | None = Query(default=None),
     version: str | None = Query(default=None),
     # "yes" = the launcher showed a matching rule, "no" = generic advice only.
@@ -51,6 +61,7 @@ def list_crashes(
     offset: int = Query(default=0, ge=0),
 ) -> CrashReportListResponse:
     def _apply(stmt):
+        stmt = stmt.where(_visible(session, where))
         if player:
             stmt = stmt.where(LauncherCrashReport.player_nickname.ilike(f"%{player}%"))
         if version:
@@ -89,16 +100,14 @@ def list_crashes(
     )
 
 
-@router.delete(
-    "/{crash_id}",
-    status_code=204,
-    dependencies=[Depends(require_permission("crashes.manage"))],
-)
+@router.delete("/{crash_id}", status_code=204)
 def delete_crash(
     crash_id: str,
     session: Annotated[Session, Depends(get_db_session)],
+    where: Annotated[PermittedServers, Depends(require_permission_somewhere("crashes.manage"))],
 ) -> None:
-    row = session.get(LauncherCrashReport, crash_id)
+    row = session.scalar(select(LauncherCrashReport).where(
+        LauncherCrashReport.id == crash_id, _visible(session, where)))
     if row:
         session.delete(row)
         session.commit()
@@ -108,13 +117,11 @@ class DeleteCrashesRequest(BaseModel):
     ids: list[str]
 
 
-@router.post(
-    "/delete",
-    dependencies=[Depends(require_permission("crashes.manage"))],
-)
+@router.post("/delete")
 def delete_crashes(
     req: DeleteCrashesRequest,
     session: Annotated[Session, Depends(get_db_session)],
+    where: Annotated[PermittedServers, Depends(require_permission_somewhere("crashes.manage"))],
 ) -> dict[str, int]:
     """Bulk-delete crash reports by id."""
     ids = [i for i in dict.fromkeys(req.ids) if i]  # dedupe, drop blanks
@@ -122,7 +129,7 @@ def delete_crashes(
         return {"deleted": 0}
     deleted = (
         session.query(LauncherCrashReport)
-        .filter(LauncherCrashReport.id.in_(ids))
+        .filter(LauncherCrashReport.id.in_(ids), _visible(session, where))
         .delete(synchronize_session=False)
     )
     session.commit()

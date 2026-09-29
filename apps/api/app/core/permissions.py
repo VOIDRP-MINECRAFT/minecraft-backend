@@ -154,10 +154,13 @@ SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "salary.", "backups.", "punishments.", "battlepass.", "voxel.", "upgrader.",
     "trader.", "news.", "files.", "plugins.", "donate.", "audit.", "feedback.", "mod_suggestions.",
 )
+# Per-server keys outside those prefixes. Crash reports carry the server picked in the
+# launcher; the crash *rules* stay platform-wide, their buttons touch players' files.
+SERVER_SCOPED_KEYS: frozenset[str] = frozenset({"crashes.view", "crashes.manage"})
 
 for _group in PERMISSION_CATALOG:
     for _p in _group["permissions"]:
-        _p["scope"] = "server" if _p["key"].startswith(SERVER_SCOPED_PREFIXES) else "global"
+        _p["scope"] = "server" if _p["key"].startswith(SERVER_SCOPED_PREFIXES) or _p["key"] in SERVER_SCOPED_KEYS else "global"
 
 SERVER_KEYS: frozenset[str] = frozenset(
     p["key"] for group in PERMISSION_CATALOG for p in group["permissions"] if p["scope"] == "server"
