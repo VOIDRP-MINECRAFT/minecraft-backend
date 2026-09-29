@@ -69,8 +69,11 @@ def list_plugins(session: Session, server: GameServer) -> dict:
     enabled = _scan(base)
     for p in enabled:
         p["config_folder"] = f"plugins/{p['name']}" if p.get("name") and os.path.isdir(os.path.join(base, p["name"])) else None
+    plugman = next((p for p in enabled if (p.get("name") or "").lower() in ("plugmanx", "plugman")), None)
     return {
         "available": True,
+        # PlugMan(X) lets plugin changes be applied without restarting the server.
+        "plugman": {"installed": plugman is not None, "name": plugman.get("name") if plugman else None},
         "enabled": enabled,
         "disabled": _scan(os.path.join(base, "disabled")),
         "updates": _scan(os.path.join(base, "update")),
@@ -140,3 +143,81 @@ def apply_staged(session: Session, server: GameServer, token: str, filenames: li
         queued.append({"filename": base, "status": change.status, "label": label, "result": change.result})
     shutil.rmtree(d, ignore_errors=True)
     return {"queued": queued}
+
+
+# ── Applying plugin changes without a restart (PlugMan) ──────────────────────
+
+def _rcon(server: GameServer, command: str) -> str:
+    from apps.api.app.core import server_ops
+
+    return server_ops.strip_color_codes(server_ops.rcon_command(server, command, timeout=30) or "").strip()
+
+
+def _dependents(enabled: list[dict], name: str) -> list[dict]:
+    """Loaded plugins that need ``name`` (directly or through another), outermost first."""
+    out: list[dict] = []
+    frontier = {name.lower()}
+    while True:
+        more = [p for p in enabled if p not in out and p.get("name") and
+                frontier & {d.lower() for d in p.get("depend", []) + p.get("softdepend", [])}]
+        if not more:
+            return list(reversed(out))
+        out.extend(more)
+        frontier = {p["name"].lower() for p in more}
+
+
+def apply_hot(session: Session, server: GameServer) -> list[dict]:
+    """The queued plugin changes, applied on the running server through PlugMan: the
+    plugin (and whatever depends on it) is unloaded, its jar swapped, and loaded again.
+    Each step's answer is kept in the change's result. Mods are not touched — they need
+    a restart whatever happens."""
+    from apps.api.app.models.server_change import ServerFileChange
+
+    info = list_plugins(session, server)
+    if not info.get("plugman", {}).get("installed"):
+        raise mod_ops.ModOpsError("На сервере нет PlugMan — примените изменения перезапуском")
+    enabled = info["enabled"]
+    by_file = {p["filename"]: p for p in enabled + info["disabled"]}
+    results = []
+    changes = [c for c in server_changes.pending(session, server) if c.kind == "plugin"]
+    base = server_changes.folder(server, "plugin")
+    for change in changes:
+        log: list[str] = []
+        try:
+            if change.op == "add":
+                meta = read_meta(change.source_path or "")
+            else:
+                meta = by_file.get(change.filename) or by_file.get(change.replaces or "") or {}
+            name = meta.get("name")
+            if not name:
+                raise mod_ops.ModOpsError("Не удалось понять название плагина")
+            loaded_name = (by_file.get(change.replaces or change.filename) or {}).get("name") if change.op in ("add", "remove", "disable") else None
+            deps = _dependents(enabled, name) if loaded_name else []
+            for d in deps:
+                log.append(f"unload {d['name']}: {_rcon(server, f'plugman unload {d['name']}')}")
+            if loaded_name and (change.op != "add" or change.replaces):
+                log.append(f"unload {loaded_name}: {_rcon(server, f'plugman unload {loaded_name}')}")
+            server_changes.apply_one(session, server, change)  # the file operation, now nothing holds the jar
+            if change.status == "failed":
+                raise mod_ops.ModOpsError(change.result or "файл не применён")
+            if change.op in ("add", "enable"):
+                stem = change.filename[:-4]
+                log.append(f"load {stem}: {_rcon(server, f'plugman load {stem}')}")
+            for d in reversed(deps):
+                stem = d["filename"][:-4]
+                if os.path.isfile(os.path.join(base, d["filename"])):
+                    log.append(f"load {stem}: {_rcon(server, f'plugman load {stem}')}")
+            bad = [line for line in log if any(w in line.lower() for w in ("error", "failed", "could not", "not found", "exception"))]
+            change.result = (change.result or "") + " · PlugMan: " + " | ".join(log)
+            if bad:
+                change.result += " · ⚠ проверьте консоль — возможно, нужен перезапуск"
+            session.commit()
+            results.append({"filename": change.filename, "status": change.status, "result": change.result, "warning": bool(bad)})
+        except Exception as exc:  # noqa: BLE001 — one plugin's trouble is reported, the rest go on
+            if change.status == "pending":
+                change.result = f"Не применено через PlugMan: {exc}. " + " | ".join(log)
+            else:
+                change.result = (change.result or "") + f" · PlugMan: {exc} · " + " | ".join(log)
+            session.commit()
+            results.append({"filename": change.filename, "status": change.status, "result": change.result, "warning": True})
+    return results

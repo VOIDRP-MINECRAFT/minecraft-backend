@@ -137,9 +137,12 @@ def list_changes(
               .order_by(ServerFileChange.updated_at.desc()).limit(15).all())
     job = (session.query(ServerRestartJob).filter(ServerRestartJob.server_id == server.id)
            .order_by(ServerRestartJob.created_at.desc()).first())
+    info = plugin_ops.list_plugins(session, server)
     return {"pending": [_change_out(c) for c in pending], "recent": [_change_out(c) for c in recent],
             "job": _job_out(job), "running": server_changes.running(server),
-            "can_restart": bool(server.systemd_unit and server.rcon_port)}
+            "can_restart": bool(server.systemd_unit and server.rcon_port),
+            "has_plugins": bool(info.get("available")),
+            "plugman": (info.get("plugman") or {}).get("installed", False)}
 
 
 @changes_router.delete("/{change_id}", dependencies=[Depends(require_any_permission("mods.manage", "plugins.manage"))])
@@ -188,3 +191,23 @@ def apply_now(
                  target_id=server.slug, target_label=server.name, server_id=server.id,
                  meta={"pending": len(server_changes.pending(session, server)), "warn_seconds": req.warn_seconds})
     return {"job": _job_out(job)}
+
+
+@changes_router.post("/apply-plugman", dependencies=[_MANAGE])
+def apply_plugman(
+    server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
+) -> dict:
+    """Queued plugin changes, applied without a restart through PlugMan."""
+    if not server_changes.running(server):
+        applied = server_changes.apply_pending(session, server)
+        return {"results": [{"filename": c.filename, "status": c.status, "result": c.result} for c in applied]}
+    try:
+        results = plugin_ops.apply_hot(session, server)
+    except mod_ops.ModOpsError as exc:
+        raise _fail(exc)
+    record_audit(session, actor=actor, category="plugins", action="apply_plugman", target_type="server",
+                 target_id=server.slug, target_label=server.name, server_id=server.id,
+                 meta={"results": [{"file": r["filename"], "status": r["status"]} for r in results]})
+    return {"results": results}
