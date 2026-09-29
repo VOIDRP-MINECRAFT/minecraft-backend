@@ -6,9 +6,8 @@ Permissions, per server: files.view (browse, read, download), files.edit (save t
 files, revert), files.upload (upload, new folder, rename), files.delete, files.secrets
 (see and download what is secret). Every change is written to the audit log.
 
-A jar is never put over a running server's plugin or mod: a class loader still reading
-the old one fails later, out of the blue. Plugins go to plugins/update/ (Paper swaps them
-in on the next start); mods and anything else wait until the server is stopped.
+Jars of mods and plugins are not touched here — they belong to the «Моды и плагины»
+section; their configs are edited here. Any other jar changes only on a stopped server.
 """
 from __future__ import annotations
 
@@ -84,18 +83,25 @@ def _read_text(path: Path) -> str:
         raise HTTPException(status_code=415, detail="Файл не текстовый (не UTF-8) — его можно только скачать")
 
 
+# Jars in these top-level folders belong to the «Моды и плагины» section, which knows
+# what a plugin or mod is, keeps a staging area and applies them safely.
+_JAR_FOLDERS = {"mods", "plugins"}
+
+
 def _jar_guard(server: GameServer, root: Path, target: Path, *, for_upload: bool = False) -> Path:
-    """Where a jar may go while the server runs: plugins/X.jar → plugins/update/X.jar;
-    anything else → refused until the server is stopped."""
-    if target.suffix.lower() != ".jar" or not _running(server):
+    """Jars of mods and plugins are not handled here at all; any other jar (the server
+    core, a library) only while the server is stopped — a running JVM reading a jar that
+    is replaced under it fails later, out of the blue."""
+    if target.suffix.lower() != ".jar":
         return target
-    parent = target.parent
-    if for_upload and parent.name == "plugins" and parent.parent == root:
-        update = parent / "update"
-        update.mkdir(exist_ok=True)
-        return update / target.name
-    raise HTTPException(status_code=409, detail="Сервер запущен: jar-файлы модов и ядра меняются только на остановленном сервере. "
-                                                "Плагины можно загружать — они лягут в plugins/update/ и применятся при перезапуске.")
+    rel = sf.rel_of(root, target)
+    if rel.split("/", 1)[0] in _JAR_FOLDERS:
+        raise HTTPException(status_code=409, detail="Моды и плагины загружаются, заменяются и удаляются в разделе "
+                                                    "«Моды и плагины» — там они проверяются и применяются без поломок. "
+                                                    "Их настройки можно править здесь.")
+    if _running(server):
+        raise HTTPException(status_code=409, detail="Сервер запущен: jar-файлы меняются только на остановленном сервере")
+    return target
 
 
 # ── Reading ──────────────────────────────────────────────────────────────────
