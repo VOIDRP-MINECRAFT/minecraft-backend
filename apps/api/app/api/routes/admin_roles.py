@@ -9,9 +9,9 @@ import re
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.routes.admin_moderators import (
@@ -280,6 +280,51 @@ def reorder_roles(
     record_audit(session, actor=authority.actor, category="roles", action="reorder",
                  meta={"order": [roles[i].name for i in ids]})
     return list_roles(session, authority)
+
+
+@router.get("/people")
+def suggest_people(
+    session: Annotated[Session, Depends(get_db_session)],
+    authority: Annotated[Authority, Depends(get_authority)],
+    q: Annotated[str, Query(min_length=2, max_length=32)],
+    role_id: UUID | None = None,
+    staff_only: bool = False,
+) -> list[dict]:
+    """Nickname suggestions: site login or Minecraft nickname starting with ``q`` (both
+    prefix-indexed), at most 8. With ``role_id``: only people who could get that role or
+    badge from the caller (not already holding it, not senior, badges — staff only)."""
+    from apps.api.app.models.player_account import PlayerAccount
+
+    needle = q.strip().lower().replace("\\", "").replace("%", "").replace("_", "\\_") + "%"
+    rows = session.execute(
+        select(User, PlayerAccount.minecraft_nickname)
+        .outerjoin(PlayerAccount, PlayerAccount.user_id == User.id)
+        .where(User.is_active.is_(True), or_(User.site_login_normalized.like(needle, escape="\\"),
+                                              PlayerAccount.minecraft_nickname_normalized.like(needle, escape="\\")))
+        .order_by(func.length(User.site_login_normalized), User.site_login_normalized)
+        .limit(30)
+    ).all()
+    role = session.get(StaffRole, role_id) if role_id else None
+    members = set()
+    if role is not None:
+        members = {uid for (uid,) in session.execute(select(StaffRoleMember.user_id).where(StaffRoleMember.role_id == role.id)).all()}
+    out = []
+    for user, nick in rows:
+        staff = bool(user.is_admin or user.is_moderator or user.admin_server_ids)
+        if user.id in members or ((staff_only or (role is not None and role.is_badge)) and not staff):
+            continue
+        if role is not None:
+            if user.is_admin:
+                continue
+            myself = user.id == authority.actor.id
+            if myself and not role.is_badge and not authority.platform:
+                continue
+            if staff and not myself and not authority.outranks(user):
+                continue
+        out.append({"id": str(user.id), "site_login": user.site_login, "nickname": nick, "staff": staff})
+        if len(out) >= 8:
+            break
+    return out
 
 
 @router.post("/{role_id}/members", response_model=RoleRead)
