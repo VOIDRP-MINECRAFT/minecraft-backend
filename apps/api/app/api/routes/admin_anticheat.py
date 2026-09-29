@@ -8,12 +8,13 @@ from pydantic import BaseModel
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from apps.api.app.core import server_ops
 from apps.api.app.core.audit import record_audit
-from apps.api.app.core.rcon_client import send_rcon_command
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import get_current_staff_user, require_permission
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.anticheat import (
+    AnticheatAction,
     AnticheatInjectionReport,
     AnticheatModSnapshot,
     AnticheatThresholdConfig,
@@ -316,9 +317,18 @@ def player_action(
 
     nick = violations[0].player_nick if violations else snapshots[0].player_nick
     reason = req.reason or "Действие администратора"
+    rcon_error: str | None = None
+
+    def rcon(command: str) -> None:
+        # The server chosen in the admin panel, not the main one: each has its own RCON.
+        nonlocal rcon_error
+        try:
+            server_ops.rcon_command(server, command)
+        except Exception as exc:  # noqa: BLE001 — best effort, the action itself stands
+            rcon_error = str(exc)
 
     if req.action == "kick":
-        send_rcon_command(f'kick {nick} {reason}')
+        rcon(f"kick {nick} {reason}")
 
     elif req.action in ("disable", "enable"):
         user = _find_user(session, nick)
@@ -327,7 +337,7 @@ def player_action(
         user.is_active = req.action == "enable"
         session.commit()
         if req.action == "disable":
-            send_rcon_command(f'kick {nick} Аккаунт заблокирован')
+            rcon(f"kick {nick} Аккаунт заблокирован")
 
     elif req.action == "clear_violations":
         for v in violations:
@@ -341,8 +351,11 @@ def player_action(
 
     record_audit(session, actor=actor, category="anticheat", action=req.action,
                  target_type="player", target_id=player_uuid, target_label=nick,
-                 server_id=server.id, meta={"reason": req.reason})
-    return {"ok": "true", "action": req.action, "nick": nick}
+                 server_id=server.id, meta={"reason": req.reason, "rcon_error": rcon_error})
+    result = {"ok": "true", "action": req.action, "nick": nick}
+    if rcon_error:
+        result["rcon_error"] = rcon_error
+    return result
 
 
 class DeletePlayersRequest(BaseModel):
@@ -468,29 +481,34 @@ def delete_mod_verdict(
 # ── Threshold config ──────────────────────────────────────────────────────────
 
 _DEFAULT_CONFIGS = [
+    # NeoForge mod (voidrp_anticheat)
     {"key": "vl_threshold", "value": 10.0, "label": "Порог VL", "description": "Сколько VL нужно для репорта нарушения", "min_value": 1.0, "max_value": 100.0, "step": 1.0},
     {"key": "speed_threshold", "value": 0.75, "label": "Скорость (блоков/тик)", "description": "Максимальная горизонтальная скорость без эффектов", "min_value": 0.3, "max_value": 5.0, "step": 0.05},
     {"key": "fly_ticks_threshold", "value": 40.0, "label": "Полёт (тиков)", "description": "Тиков в воздухе без снижения до флага", "min_value": 5.0, "max_value": 200.0, "step": 1.0},
     {"key": "reach_threshold", "value": 6.5, "label": "Дальность удара (блоков)", "description": "Максимальная дистанция атаки", "min_value": 3.0, "max_value": 20.0, "step": 0.5},
     {"key": "killaura_targets_per_second", "value": 6.0, "label": "KillAura: целей в сек", "description": "Максимум разных целей за 1 секунду", "min_value": 2.0, "max_value": 20.0, "step": 1.0},
     {"key": "cps_threshold", "value": 25.0, "label": "Порог CPS", "description": "Максимум кликов в секунду", "min_value": 10.0, "max_value": 50.0, "step": 1.0},
+    # Paper plugin (voidrp_guard)
+    {"key": "guard_grim_min_vl", "value": 5.0, "label": "Grim: VL до записи", "description": "С какого VL флаг GrimAC попадает в админку (ниже — только копится)", "min_value": 1.0, "max_value": 100.0, "step": 1.0},
+    {"key": "guard_report_cooldown", "value": 10.0, "label": "Интервал записей (сек)", "description": "Не чаще одной записи на игрока и проверку за столько секунд", "min_value": 1.0, "max_value": 300.0, "step": 1.0},
+    {"key": "guard_xray_min_stone", "value": 300.0, "label": "Иксрей: вскопано камня", "description": "Сколько камня игрок должен вскопать, прежде чем считать долю руды", "min_value": 50.0, "max_value": 5000.0, "step": 50.0},
+    {"key": "guard_xray_ratio", "value": 3.0, "label": "Иксрей: руды на 100 камня", "description": "Алмазов и древних обломков на 100 вскопанного камня, выше — подозрение", "min_value": 0.5, "max_value": 20.0, "step": 0.5},
+    {"key": "guard_grief_blocks", "value": 25.0, "label": "Гриф: чужих блоков", "description": "Сколько чужих блоков сломать за окно, чтобы попасть в админку", "min_value": 5.0, "max_value": 500.0, "step": 5.0},
+    {"key": "guard_grief_containers", "value": 4.0, "label": "Гриф: чужих сундуков", "description": "Сколько чужих сундуков открыть или опустошить за окно", "min_value": 1.0, "max_value": 50.0, "step": 1.0},
+    {"key": "guard_grief_window", "value": 300.0, "label": "Гриф: окно (сек)", "description": "За какое время считаются чужие блоки и сундуки", "min_value": 30.0, "max_value": 3600.0, "step": 30.0},
+    {"key": "guard_grief_owner_days", "value": 14.0, "label": "Гриф: давность постройки (дней)", "description": "Блоки, поставленные другим игроком не раньше стольких дней назад, считаются чужими", "min_value": 1.0, "max_value": 90.0, "step": 1.0},
 ]
 
 
 def _ensure_defaults(session: Session) -> None:
-    from uuid import uuid4
-    existing = {r.key for r in session.query(AnticheatThresholdConfig).all()}
+    """Rows without a server are the defaults every server starts from."""
+    existing = {
+        r.key for r in session.query(AnticheatThresholdConfig)
+        .filter(AnticheatThresholdConfig.server_id.is_(None)).all()
+    }
     for cfg in _DEFAULT_CONFIGS:
         if cfg["key"] not in existing:
-            session.add(AnticheatThresholdConfig(
-                key=cfg["key"],
-                value=cfg["value"],
-                label=cfg["label"],
-                description=cfg["description"],
-                min_value=cfg["min_value"],
-                max_value=cfg["max_value"],
-                step=cfg["step"],
-            ))
+            session.add(AnticheatThresholdConfig(server_id=None, **cfg))
     session.commit()
 
 
@@ -504,6 +522,9 @@ class ThresholdConfigOut(BaseModel):
     step: float
     updated_by: str | None
     updated_at: str
+    # The value every server gets, and whether this server has its own instead.
+    default_value: float
+    overridden: bool
 
 
 class ThresholdUpdateItem(BaseModel):
@@ -512,63 +533,178 @@ class ThresholdUpdateItem(BaseModel):
 
 
 class ThresholdUpdateRequest(BaseModel):
-    updates: list[ThresholdUpdateItem]
+    updates: list[ThresholdUpdateItem] = []
+    # Keys to put back to the default for this server.
+    reset: list[str] = []
     updated_by: str = "admin"
+
+
+def _config_for(session: Session, server: GameServer) -> list[ThresholdConfigOut]:
+    rows = session.query(AnticheatThresholdConfig).filter(
+        (AnticheatThresholdConfig.server_id.is_(None)) | (AnticheatThresholdConfig.server_id == server.id)
+    ).all()
+    defaults = {r.key: r for r in rows if r.server_id is None}
+    own = {r.key: r for r in rows if r.server_id is not None}
+    out = []
+    for key in sorted(defaults):
+        d = defaults[key]
+        o = own.get(key)
+        shown = o or d
+        out.append(ThresholdConfigOut(
+            key=key, value=shown.value, label=d.label, description=d.description,
+            min_value=d.min_value, max_value=d.max_value, step=d.step,
+            updated_by=shown.updated_by, updated_at=shown.updated_at.isoformat(),
+            default_value=d.value, overridden=o is not None,
+        ))
+    return out
 
 
 @router.get("/config", response_model=list[ThresholdConfigOut])
 def get_config(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> list[ThresholdConfigOut]:
     _ensure_defaults(session)
-    rows = session.query(AnticheatThresholdConfig).order_by(AnticheatThresholdConfig.key).all()
-    return [
-        ThresholdConfigOut(
-            key=r.key,
-            value=r.value,
-            label=r.label,
-            description=r.description,
-            min_value=r.min_value,
-            max_value=r.max_value,
-            step=r.step,
-            updated_by=r.updated_by,
-            updated_at=r.updated_at.isoformat(),
-        )
-        for r in rows
-    ]
+    return _config_for(session, server)
 
 
 @router.put("/config", response_model=list[ThresholdConfigOut], dependencies=[Depends(require_permission("anticheat.manage"))])
 def update_config(
     req: ThresholdUpdateRequest,
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
 ) -> list[ThresholdConfigOut]:
+    """Sets values for the server chosen in the admin panel only; others keep theirs."""
     _ensure_defaults(session)
-    rows_map = {r.key: r for r in session.query(AnticheatThresholdConfig).all()}
+    defaults = {
+        r.key: r for r in session.query(AnticheatThresholdConfig)
+        .filter(AnticheatThresholdConfig.server_id.is_(None)).all()
+    }
+    own = {
+        r.key: r for r in session.query(AnticheatThresholdConfig)
+        .filter(AnticheatThresholdConfig.server_id == server.id).all()
+    }
+    for key in req.reset:
+        if key in own:
+            session.delete(own.pop(key))
     for item in req.updates:
-        if item.key not in rows_map:
+        d = defaults.get(item.key)
+        if d is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown config key: {item.key}")
-        row = rows_map[item.key]
         # Only enforce the lower bound (a sane floor); admins may raise a threshold
         # above the recommended slider range by typing it into the number field.
-        row.value = max(row.min_value, item.value)
-        row.updated_by = req.updated_by
+        value = max(d.min_value, item.value)
+        row = own.get(item.key)
+        if row is None:
+            row = AnticheatThresholdConfig(
+                server_id=server.id, key=d.key, value=value, label=d.label, description=d.description,
+                min_value=d.min_value, max_value=d.max_value, step=d.step,
+            )
+            session.add(row)
+            own[item.key] = row
+        row.value = value
+        row.updated_by = actor.site_login
     session.commit()
-    rows = session.query(AnticheatThresholdConfig).order_by(AnticheatThresholdConfig.key).all()
-    return [
-        ThresholdConfigOut(
-            key=r.key,
-            value=r.value,
-            label=r.label,
-            description=r.description,
-            min_value=r.min_value,
-            max_value=r.max_value,
-            step=r.step,
-            updated_by=r.updated_by,
-            updated_at=r.updated_at.isoformat(),
-        )
-        for r in rows
-    ]
+    record_audit(session, actor=actor, category="anticheat", action="config",
+                 target_type="server", target_id=str(server.id), target_label=server.slug,
+                 server_id=server.id,
+                 meta={"updates": {u.key: u.value for u in req.updates}, "reset": req.reset})
+    return _config_for(session, server)
+
+
+# ── Actions carried out by the game server (CoreProtect) ──────────────────────
+
+_ACTION_KINDS = {"rollback", "restore"}
+
+
+class ActionOut(BaseModel):
+    id: str
+    kind: str
+    target_uuid: str | None
+    target_nick: str | None
+    params: dict
+    status: str
+    result: str | None
+    created_by: str | None
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+
+
+def _action_out(a: AnticheatAction) -> ActionOut:
+    return ActionOut(
+        id=str(a.id), kind=a.kind, target_uuid=a.target_uuid, target_nick=a.target_nick,
+        params=a.params or {}, status=a.status, result=a.result, created_by=a.created_by,
+        created_at=a.created_at.isoformat(),
+        started_at=a.started_at.isoformat() if a.started_at else None,
+        finished_at=a.finished_at.isoformat() if a.finished_at else None,
+    )
+
+
+class CreateActionRequest(BaseModel):
+    kind: str                       # rollback | restore
+    target_nick: str
+    target_uuid: str | None = None
+    minutes: int                    # how far back
+    radius: int = 0                 # blocks round the place; 0 = everywhere
+    world: str | None = None
+    x: int | None = None
+    y: int | None = None
+    z: int | None = None
+    reason: str = ""
+
+
+@router.get("/actions", response_model=list[ActionOut])
+def list_actions(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    player_uuid: str | None = Query(default=None),
+    player_nick: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[ActionOut]:
+    q = session.query(AnticheatAction).filter(AnticheatAction.server_id == server.id)
+    if player_uuid:
+        q = q.filter(AnticheatAction.target_uuid == player_uuid)
+    if player_nick:
+        q = q.filter(func.lower(AnticheatAction.target_nick) == player_nick.lower())
+    return [_action_out(a) for a in q.order_by(AnticheatAction.created_at.desc()).limit(limit).all()]
+
+
+@router.post("/actions", response_model=ActionOut, dependencies=[Depends(require_permission("anticheat.manage"))])
+def create_action(
+    req: CreateActionRequest,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
+) -> ActionOut:
+    """Queues a rollback (or its undo) of one player's changes for the server's plugin."""
+    if req.kind not in _ACTION_KINDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown action: {req.kind}")
+    nick = req.target_nick.strip()
+    if not nick or len(nick) > 64:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Player nickname is required")
+    if not 1 <= req.minutes <= 60 * 24 * 30:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Time must be from 1 minute to 30 days")
+    if not 0 <= req.radius <= 1000:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Radius must be from 0 to 1000 blocks")
+    if req.radius and (req.world is None or req.x is None or req.y is None or req.z is None):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A radius needs a place: world and coordinates")
+    params = {"minutes": req.minutes, "radius": req.radius}
+    if req.radius:
+        params.update({"world": req.world, "x": req.x, "y": req.y, "z": req.z})
+    if req.reason:
+        params["reason"] = req.reason[:256]
+    action = AnticheatAction(
+        server_id=server.id, kind=req.kind, target_uuid=req.target_uuid, target_nick=nick,
+        params=params, status="pending", created_by=actor.site_login,
+    )
+    session.add(action)
+    session.commit()
+    record_audit(session, actor=actor, category="anticheat", action=req.kind,
+                 target_type="player", target_id=req.target_uuid or nick, target_label=nick,
+                 server_id=server.id, meta=params)
+    return _action_out(action)
 
 
 # ── Statistics ────────────────────────────────────────────────────────────────

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_auth_secret, require_game_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.anticheat import (
+    AnticheatAction,
     AnticheatInjectionReport,
     AnticheatModSnapshot,
     AnticheatThresholdConfig,
@@ -89,10 +91,16 @@ def _find_suspicious(mods: list[str], session: Session) -> list[str]:
 @router.get("/config")
 def get_anticheat_config(
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
 ) -> dict[str, float]:
-    """Returns current threshold config for the game server mod to poll."""
-    rows = session.query(AnticheatThresholdConfig).all()
-    return {r.key: r.value for r in rows}
+    """Threshold config for the calling server's mod or plugin to poll: the defaults,
+    with the values set for this server in their place."""
+    rows = session.query(AnticheatThresholdConfig).filter(
+        (AnticheatThresholdConfig.server_id.is_(None)) | (AnticheatThresholdConfig.server_id == server.id)
+    ).all()
+    values = {r.key: r.value for r in rows if r.server_id is None}
+    values.update({r.key: r.value for r in rows if r.server_id is not None})
+    return values
 
 
 class ViolationRequest(BaseModel):
@@ -178,4 +186,74 @@ def ingest_injection_report(
         agents_detected=req.agents_detected,
     )
     session.add(record)
+    session.commit()
+
+
+# ── Actions staff queued for this server (CoreProtect rollbacks) ──────────────
+
+# A claimed action the plugin never answered for — the server went down mid-way.
+_STALE_AFTER = timedelta(minutes=30)
+
+
+def _action_json(a: AnticheatAction) -> dict:
+    return {
+        "id": str(a.id),
+        "kind": a.kind,
+        "target_uuid": a.target_uuid,
+        "target_nick": a.target_nick,
+        "params": a.params or {},
+        "created_by": a.created_by,
+    }
+
+
+@router.get("/actions/pending")
+def claim_pending_actions(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> dict[str, list[dict]]:
+    """Hands the server what it has to do and marks it running, so a second poll
+    does not run it twice."""
+    now = datetime.now(timezone.utc)
+    stale = session.query(AnticheatAction).filter(
+        AnticheatAction.server_id == server.id,
+        AnticheatAction.status == "running",
+        AnticheatAction.started_at < now - _STALE_AFTER,
+    ).all()
+    for a in stale:
+        a.status = "failed"
+        a.result = "Сервер не сообщил результат — возможно, перезапускался. Проверьте и повторите."
+        a.finished_at = now
+    pending = (
+        session.query(AnticheatAction)
+        .filter(AnticheatAction.server_id == server.id, AnticheatAction.status == "pending")
+        .order_by(AnticheatAction.created_at)
+        .with_for_update(skip_locked=True)
+        .limit(10)
+        .all()
+    )
+    for a in pending:
+        a.status = "running"
+        a.started_at = now
+    session.commit()
+    return {"items": [_action_json(a) for a in pending]}
+
+
+class ActionResultRequest(BaseModel):
+    ok: bool
+    result: str = ""
+
+
+@router.post("/actions/{action_id}/result", status_code=204)
+def report_action_result(
+    action_id: UUID,
+    req: ActionResultRequest,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> None:
+    action = session.get(AnticheatAction, action_id)
+    if action is None or action.server_id != server.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
+    action.status = "done" if req.ok else "failed"
+    action.result = req.result[:4000]
+    action.finished_at = datetime.now(timezone.utc)
     session.commit()

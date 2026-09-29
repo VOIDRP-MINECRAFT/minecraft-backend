@@ -50,6 +50,11 @@ _EXACT_MESSAGES: dict[str, str] = {
     "not enough balance to create nation": "Для создания государства нужно минимум 300 000. Баланс игрока меньше или ещё не синхронизирован с сервером.",
     "nation is founder of alliance with other members": "Нельзя расформировать государство, пока оно является основателем альянса с другими участниками. Сначала распусти альянс или выйди из него.",
     "Nation disbanded successfully.": "Государство расформировано.",
+    "Player nickname is required": "Укажите ник игрока.",
+    "Time must be from 1 minute to 30 days": "Время — от 1 минуты до 30 дней.",
+    "Radius must be from 0 to 1000 blocks": "Радиус — от 0 до 1000 блоков.",
+    "A radius needs a place: world and coordinates": "Для радиуса нужно место: мир и координаты.",
+    "Action not found": "Действие не найдено.",
 }
 
 _CONTAINS_RULES: list[tuple[str, str]] = [
