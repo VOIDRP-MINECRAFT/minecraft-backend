@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, String
+from sqlalchemy import BigInteger, Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +44,11 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # (is_admin) bypass all permission checks.
     is_moderator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     staff_permissions: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    # The one person who appoints and removes full admins (admins manage moderators only).
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # When the person became staff (admin or moderator), and who made them so.
+    staff_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    staff_granted_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Telegram account link (for the aiogram bot: news publishing / admin).
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True, index=True)
