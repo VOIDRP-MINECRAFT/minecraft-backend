@@ -51,6 +51,16 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
     {
+        "group": "Файлы сервера",
+        "permissions": [
+            {"key": "files.view", "label": "Файлы: смотреть папку сервера и читать конфиги", "sensitive": True},
+            {"key": "files.edit", "label": "Файлы: править текстовые файлы (с историей и откатом)", "sensitive": True},
+            {"key": "files.upload", "label": "Файлы: загружать, создавать папки, переименовывать", "sensitive": True},
+            {"key": "files.delete", "label": "Файлы: удалять", "sensitive": True},
+            {"key": "files.secrets", "label": "Файлы: видеть пароли и секреты в конфигах", "sensitive": True},
+        ],
+    },
+    {
         "group": "Платформа",
         "permissions": [
             {"key": "players.view", "label": "Игроки (поиск, просмотр)", "sensitive": True},
@@ -140,7 +150,7 @@ PERMISSION_CATALOG: list[dict] = [
 SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
     "salary.", "backups.", "punishments.", "battlepass.", "voxel.", "upgrader.",
-    "trader.", "news.",
+    "trader.", "news.", "files.",
 )
 
 for _group in PERMISSION_CATALOG:
