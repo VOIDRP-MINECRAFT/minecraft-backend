@@ -72,6 +72,13 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
     {
+        "group": "Сотрудники",
+        "permissions": [
+            {"key": "roles.manage", "label": "Роли: создавать и править роли ниже своей (только с правами, что есть у тебя)", "sensitive": True},
+            {"key": "roles.assign", "label": "Роли: выдавать и снимать роли ниже своей", "sensitive": True},
+        ],
+    },
+    {
         "group": "Безопасность",
         "permissions": [
             {"key": "punishments.view", "label": "Наказания (список банов/мутов)"},
@@ -207,37 +214,89 @@ def sanitize_server_permissions(grants: dict | None) -> dict[str, list[str]]:
     return out
 
 
-def resolve_user_permissions(user, server_id=None) -> set[str]:
-    """Effective permission set for a User object on one server.
+class Access:
+    """Everything a person may do in the admin panel, from every source.
 
-    Full admins get every key. A moderator gets their platform-wide grants
-    (``staff_permissions`` — global keys, and per-server keys granted on every
-    server) plus, when ``server_id`` is given, the per-server keys granted on that
-    server (``staff_server_permissions``). Everyone else gets nothing. Shared by
-    the admin API (``caller_permissions``) and the Telegram bot.
+    Sources, most senior first: the owner / platform admins (``is_admin``, every key
+    everywhere); admins of single servers (``admin_server_ids``, every per-server key
+    there); roles (``staff_roles`` — keys on every server, or per-server keys on the
+    role's servers); personal grants (``staff_permissions`` everywhere,
+    ``staff_server_permissions`` per server). ``everywhere`` holds keys valid on every
+    server (and the platform keys); ``per_server`` the extra keys of single servers.
     """
-    if user is None or not getattr(user, "is_active", True):
-        return set()
-    if getattr(user, "is_admin", False):
-        return set(ALL_KEYS)
-    if getattr(user, "is_moderator", False):
-        keys = set(sanitize_permissions(user.staff_permissions or []))
+
+    def __init__(self, user) -> None:
+        self.user = user
+        active = user is not None and getattr(user, "is_active", True)
+        self.platform_admin = bool(active and getattr(user, "is_admin", False))
+        self.admin_servers: set[str] = set()
+        self.everywhere: set[str] = set()
+        self.per_server: dict[str, set[str]] = {}
+        if not active or self.platform_admin:
+            return
+        self.admin_servers = {str(i) for i in (getattr(user, "admin_server_ids", None) or [])}
+        if not (getattr(user, "is_moderator", False) or self.admin_servers):
+            return
+        self.everywhere |= set(sanitize_permissions(user.staff_permissions or []))
+        for sid, keys in (getattr(user, "staff_server_permissions", None) or {}).items():
+            self._add(str(sid), keys)
+        for role in getattr(user, "staff_roles", None) or []:
+            if role.server_ids is None:
+                self.everywhere |= set(sanitize_permissions(role.permissions or []))
+            else:
+                for sid in role.server_ids:
+                    self._add(str(sid), role.permissions or [])
+
+    def _add(self, sid: str, keys) -> None:
+        kept = {k for k in sanitize_permissions(keys) if k in SERVER_KEYS}
+        if kept:
+            self.per_server.setdefault(sid, set()).update(kept)
+
+    @property
+    def is_staff(self) -> bool:
+        return self.platform_admin or bool(self.admin_servers or self.everywhere or self.per_server)
+
+    def on(self, server_id=None) -> set[str]:
+        """Effective keys on one server (None: only what holds everywhere)."""
+        if self.platform_admin:
+            return set(ALL_KEYS)
+        keys = set(self.everywhere)
         if server_id is not None:
-            per = (getattr(user, "staff_server_permissions", None) or {}).get(str(server_id)) or []
-            keys |= {k for k in sanitize_permissions(per) if k in SERVER_KEYS}
+            sid = str(server_id)
+            if sid in self.admin_servers:
+                keys |= SERVER_KEYS
+            keys |= self.per_server.get(sid, set())
         return keys
-    return set()
+
+    def holds_everywhere(self, key: str) -> bool:
+        return self.platform_admin or key in self.everywhere
+
+    def servers_with(self, key: str, all_server_ids) -> set[str]:
+        ids = {str(i) for i in all_server_ids}
+        if self.holds_everywhere(key):
+            return ids
+        out = {sid for sid, keys in self.per_server.items() if key in keys}
+        if key in SERVER_KEYS:
+            out |= self.admin_servers
+        return out & ids
+
+    def is_admin_of(self, server_id) -> bool:
+        return self.platform_admin or str(server_id) in self.admin_servers
+
+
+def access_of(user) -> Access:
+    return Access(user)
+
+
+def resolve_user_permissions(user, server_id=None) -> set[str]:
+    """Effective permission set for a User object on one server (see Access). Shared by
+    the admin API (``caller_permissions``) and the Telegram bot."""
+    return Access(user).on(server_id)
 
 
 def servers_with_permission(user, key: str, all_server_ids) -> set[str]:
     """The servers (ids as strings) on which the user holds ``key``."""
-    ids = {str(i) for i in all_server_ids}
-    if user is None or not getattr(user, "is_active", True):
-        return set()
-    if getattr(user, "is_admin", False) or key in (user.staff_permissions or []):
-        return ids
-    per = getattr(user, "staff_server_permissions", None) or {}
-    return {sid for sid, keys in per.items() if key in (keys or []) and sid in ids}
+    return Access(user).servers_with(key, all_server_ids)
 
 
 _ORDERED_KEYS: list[str] = [

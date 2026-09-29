@@ -35,6 +35,9 @@ class UserRead(ORMModel):
     # Servers a moderator can pick in the admin panel (null = all of them: admins, or a
     # moderator with a per-server permission granted on every server).
     admin_servers: list[str] | None = None
+    # Servers (slugs) this person is an admin of, and their roles (for the panel header).
+    administered_servers: list[str] = Field(default_factory=list)
+    roles: list[dict] = Field(default_factory=list)
     created_at: datetime
 
 

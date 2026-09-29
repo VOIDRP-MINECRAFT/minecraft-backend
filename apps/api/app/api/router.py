@@ -31,6 +31,7 @@ from apps.api.app.api.routes.admin_files import router as admin_files_router
 from apps.api.app.api.routes.admin_plugins import changes_router as server_changes_router, router as admin_plugins_router
 from apps.api.app.api.routes.playtime_pay import admin_router as salary_admin_router, plugin_router as salary_plugin_router
 from apps.api.app.api.routes.admin_audit import router as admin_audit_router
+from apps.api.app.api.routes.admin_roles import router as admin_roles_router
 from apps.api.app.api.routes.admin_punishments import router as admin_punishments_router
 from apps.api.app.api.routes.admin_player_overview import router as admin_player_overview_router
 from apps.api.app.api.routes.monitoring_prometheus import router as monitoring_prometheus_router
@@ -218,6 +219,7 @@ api_router.include_router(server_changes_router)
 api_router.include_router(salary_admin_router)
 api_router.include_router(salary_plugin_router)
 api_router.include_router(admin_audit_router)
+api_router.include_router(admin_roles_router)
 api_router.include_router(admin_punishments_router)
 api_router.include_router(admin_player_overview_router)
 api_router.include_router(monitoring_prometheus_router)

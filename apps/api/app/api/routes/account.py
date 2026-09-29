@@ -59,21 +59,31 @@ def _build_me_response(
         and player_account.legacy_hash_algo
     )
 
-    from apps.api.app.core.permissions import SERVER_KEYS, sanitize_server_permissions
+    from apps.api.app.core.permissions import SERVER_KEYS, access_of
     from apps.api.app.models.game_server import GameServer
 
     servers = session.query(GameServer.id, GameServer.slug, GameServer.is_default).all()
-    slug_of = {str(i): slug for i, slug, _ in servers}
+    access = access_of(current_user)
+    # Effective grants from every source (personal, roles, server-admin): the site's
+    # hasPermission() reads `permissions` (everywhere) and `server_permissions[slug]`.
+    everywhere = sorted(access.everywhere)
     per_server = {}
-    if current_user.is_moderator and not current_user.is_admin:
-        per_server = {slug_of[sid]: keys for sid, keys in
-                      sanitize_server_permissions(current_user.staff_server_permissions).items() if sid in slug_of}
     admin_servers = None
-    if current_user.is_moderator and not current_user.is_admin:
-        if not SERVER_KEYS & set(current_user.staff_permissions or []):
-            admin_servers = [slug for _, slug, _ in servers if slug in per_server]
+    if not current_user.is_admin and access.is_staff:
+        for sid, slug, _ in servers:
+            extra = access.on(sid) - access.everywhere
+            if extra:
+                per_server[slug] = sorted(extra)
+        # The admin panel's server switcher offers only servers where the person holds at
+        # least one per-server permission (from any source); null = all of them.
+        usable = [slug for sid, slug, _ in servers if access.on(sid) & SERVER_KEYS]
+        if len(usable) < len(servers):
+            admin_servers = usable
     user = UserRead.model_validate(current_user).model_copy(update={
+        "permissions": [] if current_user.is_admin else everywhere,
         "server_permissions": per_server,
+        "administered_servers": [slug for sid, slug, _ in servers if str(sid) in access.admin_servers],
+        "roles": [{"name": r.name, "color": r.color} for r in (current_user.staff_roles or [])],
         "admin_servers": admin_servers,
         "default_server": next((slug for _, slug, d in servers if d), None),
     })

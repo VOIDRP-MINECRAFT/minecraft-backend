@@ -52,10 +52,19 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # When the person became staff (admin or moderator), and who made them so.
     staff_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     staff_granted_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Servers (game_servers.id as strings) this person is an admin of: every per-server
+    # permission there, plus managing that server's staff and roles.
+    admin_server_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
 
     # Telegram account link (for the aiogram bot: news publishing / admin).
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True, index=True)
     telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Roles (like Discord's), read on every permission check — hence selectin.
+    staff_roles: Mapped[list["StaffRole"]] = relationship(
+        "StaffRole", secondary="staff_role_members", lazy="selectin", viewonly=True,
+        order_by="StaffRole.position.desc()",
+    )
 
     player_account: Mapped["PlayerAccount"] = relationship(
         back_populates="user",

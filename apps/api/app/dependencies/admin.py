@@ -156,7 +156,9 @@ def require_permission_somewhere(key: str):
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_optional_bearer)],
         session: Annotated[Session, Depends(get_db_session)],
     ) -> PermittedServers:
-        from apps.api.app.core.permissions import servers_with_permission
+        from uuid import UUID as _UUID
+
+        from apps.api.app.core.permissions import access_of
         from apps.api.app.models.game_server import GameServer
 
         user = _user_from_credentials(credentials, session)
@@ -164,11 +166,11 @@ def require_permission_somewhere(key: str):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin access required")
         if not (user.is_admin or user.is_moderator):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
-        if user.is_admin or key in (user.staff_permissions or []):
+        access = access_of(user)
+        if access.holds_everywhere(key):
             return PermittedServers(True, set())
         all_ids = [i for (i,) in session.query(GameServer.id).all()]
-        from uuid import UUID as _UUID
-        ids = {_UUID(i) for i in servers_with_permission(user, key, all_ids)}
+        ids = {_UUID(i) for i in access.servers_with(key, all_ids)}
         if not ids:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing permission: {key}")
         return PermittedServers(False, ids)

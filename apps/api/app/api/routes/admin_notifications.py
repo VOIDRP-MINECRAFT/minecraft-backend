@@ -46,13 +46,14 @@ def list_notifications(
 
     # Feedback and suggestions come from every server: count those of the servers this
     # person may see (untagged ones only with the permission on every server).
-    from apps.api.app.core.permissions import servers_with_permission
+    from apps.api.app.core.permissions import access_of, servers_with_permission
+    access = access_of(me)
     slug_of = {i: slug for i, slug in session.execute(select(GameServer.id, GameServer.slug)).all()}
 
     def _count_on(model, key: str, by_slug: bool = False) -> int:
-        if me.is_admin or key in (me.staff_permissions or []):
+        if access.holds_everywhere(key):
             return _count_since(session, model, since)
-        ids = [UUID(i) for i in servers_with_permission(me, key, slug_of)]
+        ids = [UUID(i) for i in access.servers_with(key, slug_of)]
         if not ids:
             return 0
         where = model.server_slug.in_([slug_of[i] for i in ids]) if by_slug else model.server_id.in_(ids)
