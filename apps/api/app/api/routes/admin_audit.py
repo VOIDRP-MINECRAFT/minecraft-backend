@@ -8,9 +8,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import PermittedServers, require_permission_somewhere
+from apps.api.app.core.staff_authority import rank
+from apps.api.app.dependencies.admin import PermittedServers, get_current_staff_user, require_permission_somewhere
 from apps.api.app.models.admin_audit_log import AdminAuditLog
 from apps.api.app.models.game_server import GameServer
+from apps.api.app.models.user import User
 
 router = APIRouter(
     prefix="/admin/audit",
@@ -22,6 +24,7 @@ router = APIRouter(
 def list_audit(
     session: Annotated[Session, Depends(get_db_session)],
     where: Annotated[PermittedServers, Depends(require_permission_somewhere("audit.view"))],
+    me: Annotated[User, Depends(get_current_staff_user)],
     q: Annotated[str | None, Query(max_length=120)] = None,
     category: Annotated[str | None, Query(max_length=48)] = None,
     days: Annotated[int, Query(ge=0, le=365)] = 30,
@@ -34,6 +37,14 @@ def list_audit(
     # no server (platform-wide actions) only with the permission on every server.
     if not where.all:
         conds.append(AdminAuditLog.server_id.in_(where.ids))
+    # Nobody sees what people senior to them did (owner > platform admins > admins of
+    # servers > by highest role). Their own entries and system ones stay visible.
+    if not me.is_owner:
+        mine = rank(me)
+        staff = session.scalars(select(User).where(or_(User.is_admin.is_(True), User.is_moderator.is_(True)))).all()
+        senior = [u.id for u in staff if u.id != me.id and rank(u) > mine]
+        if senior:
+            conds.append(or_(AdminAuditLog.actor_user_id.is_(None), AdminAuditLog.actor_user_id.notin_(senior)))
     if days:
         conds.append(AdminAuditLog.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
     if category:

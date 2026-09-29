@@ -539,6 +539,16 @@ class ThresholdUpdateRequest(BaseModel):
     updated_by: str = "admin"
 
 
+_PLUGIN_LOADERS = frozenset({"paper", "purpur", "spigot", "bukkit", "folia", "pufferfish"})
+
+
+def _applies(server: GameServer, key: str) -> bool:
+    """A server reads only its own anticheat's thresholds: Paper-type servers the VoidRP
+    Guard plugin's (``guard_*``), servers on mods the voidrp_anticheat mod's."""
+    plugin_server = (server.loader or "").lower() in _PLUGIN_LOADERS
+    return key.startswith("guard_") == plugin_server
+
+
 def _config_for(session: Session, server: GameServer) -> list[ThresholdConfigOut]:
     rows = session.query(AnticheatThresholdConfig).filter(
         (AnticheatThresholdConfig.server_id.is_(None)) | (AnticheatThresholdConfig.server_id == server.id)
@@ -546,7 +556,7 @@ def _config_for(session: Session, server: GameServer) -> list[ThresholdConfigOut
     defaults = {r.key: r for r in rows if r.server_id is None}
     own = {r.key: r for r in rows if r.server_id is not None}
     out = []
-    for key in sorted(defaults):
+    for key in sorted(k for k in defaults if _applies(server, k)):
         d = defaults[key]
         o = own.get(key)
         shown = o or d
@@ -592,6 +602,9 @@ def update_config(
         d = defaults.get(item.key)
         if d is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown config key: {item.key}")
+        if not _applies(server, item.key):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"«{d.label}» не относится к античиту этого сервера")
         # Only enforce the lower bound (a sane floor); admins may raise a threshold
         # above the recommended slider range by typing it into the number field.
         value = max(d.min_value, item.value)

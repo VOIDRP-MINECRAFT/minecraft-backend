@@ -11,7 +11,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import require_permission
+from apps.api.app.dependencies.admin import PermittedServers, require_permission, require_permission_somewhere
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.launcher_crash_report import LauncherCrashReport
 from apps.api.app.models.launcher_crash_rule import LauncherCrashRule
@@ -31,8 +31,19 @@ from apps.api.app.services.launcher_crash_rules_service import (
 router = APIRouter(
     prefix="/admin/launcher-crash-rules",
     tags=["admin", "launcher-crash-rules"],
-    dependencies=[Depends(require_permission("crashes.view"))],
+    # Crash views are granted per server; the rules themselves are platform config
+    # (changing them needs crashes.rules.manage), and report-based answers keep to the
+    # servers the caller may see.
+    dependencies=[Depends(require_permission_somewhere("crashes.view"))],
 )
+_Where = Annotated[PermittedServers, Depends(require_permission_somewhere("crashes.view"))]
+
+
+def _visible_reports(session: Session, where: PermittedServers):
+    if where.all:
+        return None
+    return LauncherCrashReport.server_slug.in_(
+        session.scalars(select(GameServer.slug).where(GameServer.id.in_(where.ids))).all())
 
 _manage = [Depends(require_permission("crashes.rules.manage"))]
 
@@ -189,7 +200,7 @@ def delete_rule(rule_id: UUID, session: Annotated[Session, Depends(get_db_sessio
 
 
 @router.post("/test")
-def test_rule(body: TestRuleBody, session: Annotated[Session, Depends(get_db_session)]) -> dict[str, Any]:
+def test_rule(body: TestRuleBody, session: Annotated[Session, Depends(get_db_session)], where: _Where) -> dict[str, Any]:
     """Runs a (possibly unsaved) rule over recent crash reports so the admin sees what it would catch."""
     rule = {"key": "test", "patterns_all": body.patterns_all, "patterns_any": body.patterns_any, "exit_codes": body.exit_codes}
     errors = [e for e in validate_rule({**rule, "title": "test", "key": "test_rule"}) if "Шаблон" in e or "шаблон" in e]
@@ -199,6 +210,8 @@ def test_rule(body: TestRuleBody, session: Annotated[Session, Depends(get_db_ses
     stmt = select(LauncherCrashReport).order_by(desc(LauncherCrashReport.created_at)).limit(body.limit)
     if body.server_slug:
         stmt = stmt.where(LauncherCrashReport.server_slug == body.server_slug)
+    if (visible := _visible_reports(session, where)) is not None:
+        stmt = stmt.where(visible)
     reports = session.scalars(stmt).all()
 
     samples: list[dict[str, Any]] = []
@@ -224,13 +237,15 @@ def test_rule(body: TestRuleBody, session: Annotated[Session, Depends(get_db_ses
 @router.get("/coverage")
 def coverage(
     session: Annotated[Session, Depends(get_db_session)],
+    where: _Where,
     days: int = Query(default=14, ge=1, le=90),
 ) -> dict[str, Any]:
     """How the current rules (built-ins + DB) would classify the last ``days`` of crash reports."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    reports = session.scalars(
-        select(LauncherCrashReport).where(LauncherCrashReport.created_at >= since).order_by(desc(LauncherCrashReport.created_at))
-    ).all()
+    stmt = select(LauncherCrashReport).where(LauncherCrashReport.created_at >= since)
+    if (visible := _visible_reports(session, where)) is not None:
+        stmt = stmt.where(visible)
+    reports = session.scalars(stmt.order_by(desc(LauncherCrashReport.created_at))).all()
 
     repo = GameServerRepository(session)
     default_server = repo.get_default()

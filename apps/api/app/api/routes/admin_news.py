@@ -16,6 +16,8 @@ from apps.api.app.dependencies.admin import (
     caller_permissions,
     get_current_staff_user,
     require_any_permission,
+    require_permission_somewhere,
+    PermittedServers,
 )
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.news import NewsPost
@@ -39,8 +41,9 @@ _NEWS_KEYS = (
 router = APIRouter(
     prefix="/admin/news",
     tags=["admin", "news"],
-    # Any news permission lets the tab load; per-endpoint checks the exact key.
-    dependencies=[Depends(require_any_permission(*_NEWS_KEYS))],
+    # Any news permission on any server lets the tab load; per-endpoint checks the exact
+    # key on the server the request is about.
+    dependencies=[Depends(require_permission_somewhere(*_NEWS_KEYS))],
 )
 
 _VALID_CATEGORIES = {"update", "media"}
@@ -202,10 +205,13 @@ def _broadcast_result(
 
 
 @router.get("/servers")
-def list_news_servers(session: Annotated[Session, Depends(get_db_session)]) -> list[dict]:
-    """Server dropdown for the news editor (any news perm). Channel config is
-    reduced to per-category booleans — no secrets."""
-    servers = GameServerRepository(session).list_all()
+def list_news_servers(
+    session: Annotated[Session, Depends(get_db_session)],
+    where: Annotated[PermittedServers, Depends(require_permission_somewhere(*_NEWS_KEYS))],
+) -> list[dict]:
+    """Server dropdown for the news editor: the servers where the caller holds a news
+    permission. Channel config is reduced to per-category booleans — no secrets."""
+    servers = [s for s in GameServerRepository(session).list_all() if where.allows(s.id)]
     return [
         {
             "id": str(s.id),

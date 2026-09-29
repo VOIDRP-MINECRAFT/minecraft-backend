@@ -148,9 +148,9 @@ class PermittedServers:
         return query if self.all else query.filter(column.in_(self.ids or {None}))
 
 
-def require_permission_somewhere(key: str):
-    """Dependency factory: 403 unless the caller holds ``key`` on at least one server;
-    returns the PermittedServers to filter by."""
+def require_permission_somewhere(*keys: str):
+    """Dependency factory: 403 unless the caller holds one of ``keys`` on at least one
+    server; returns the PermittedServers (where any of them is held) to filter by."""
 
     def _dep(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_optional_bearer)],
@@ -167,12 +167,12 @@ def require_permission_somewhere(key: str):
         if not (user.is_admin or user.is_moderator):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
         access = access_of(user)
-        if access.holds_everywhere(key):
+        if any(access.holds_everywhere(k) for k in keys):
             return PermittedServers(True, set())
         all_ids = [i for (i,) in session.query(GameServer.id).all()]
-        ids = {_UUID(i) for i in access.servers_with(key, all_ids)}
+        ids = {_UUID(i) for k in keys for i in access.servers_with(k, all_ids)}
         if not ids:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing permission: {key}")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing permission: {' / '.join(keys)}")
         return PermittedServers(False, ids)
 
     return _dep

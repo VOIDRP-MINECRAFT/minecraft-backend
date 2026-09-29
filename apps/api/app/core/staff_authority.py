@@ -21,6 +21,21 @@ def top_position(user) -> int | None:
     return max(positions) if positions else None
 
 
+def rank(user) -> int:
+    """Seniority for things like the audit log: owner > platform admins > admins of
+    servers > people by their highest role > the rest."""
+    if user is None:
+        return -1
+    if getattr(user, "is_owner", False):
+        return 1_000_000
+    if getattr(user, "is_admin", False):
+        return 900_000
+    if getattr(user, "admin_server_ids", None):
+        return 800_000
+    top = top_position(user)
+    return min(top, 700_000) if top is not None else -1
+
+
 class Authority:
     def __init__(self, actor) -> None:
         self.actor = actor
