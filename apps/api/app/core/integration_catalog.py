@@ -79,7 +79,7 @@ launcher:
 
 
 def _perms_config(server: GameServer) -> str:
-    return _header(server) + f'''# VoidRP Perms: права в игре (LuckPerms) из админки, чат с префиксами, мониторинг.
+    return _header(server) + f'''# VoidRP Perms: мониторинг, права в игре (LuckPerms), чат, консоль и лог, бан предметов, наказания.
 backend-url: "{_backend_url()}"
 game-auth-secret: "{server.game_auth_secret}"
 server-slug: "{server.slug}"
@@ -91,6 +91,13 @@ blocked-message: "&cПрава настраиваются только в адм
 chat:
   mode: auto
   format: "{{prefix}}{{name}}{{suffix}}&7: &f{{message}}"
+# Консоль, лог и чат, бан предметов, баны и муты — всё из админки, без RCON и EssentialsX.
+# auto — включено, если это не делает другой плагин VoidRP (бан предметов — VoidRpGameSync).
+modules:
+  console: auto
+  log: auto
+  item_bans: auto
+  punishments: auto
 '''
 
 
@@ -132,8 +139,9 @@ CATALOG: list[dict[str, Any]] = [
     },
     {
         "key": "voidrp-perms", "name": "VoidRpPerms", "kind": "ours", "cores": list(PLUGIN_CORES),
-        "required": True, "modules": ["monitoring", "perms", "chat"],
-        "summary": "Мониторинг для админки (TPS, игроки, память), права в игре из раздела «Права в игре» и чат с префиксами.",
+        "required": True, "modules": ["monitoring", "perms", "chat", "console", "log", "item_bans", "punishments"],
+        "summary": "Мониторинг для админки (TPS, игроки, память), права в игре из раздела «Права в игре», чат с префиксами, "
+                   "консоль, лог и чат сервера в админке (RCON не нужен), бан предметов, баны и муты (EssentialsX не нужен).",
         "install_as": "plugins/VoidRpPerms.jar", "config_path": "plugins/VoidRpPerms/config.yml",
         "needs": ["luckperms"],
     },

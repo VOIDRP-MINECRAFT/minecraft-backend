@@ -39,6 +39,7 @@ from apps.api.app.api.routes.admin_item_bans import router as admin_item_bans_ro
 from apps.api.app.api.routes.game_sync_item_bans import router as game_sync_item_bans_router
 from apps.api.app.api.routes.game_sync_heartbeat import router as game_sync_heartbeat_router
 from apps.api.app.api.routes.admin_integration import router as admin_integration_router
+from apps.api.app.api.routes.game_sync_connect import router as game_sync_connect_router
 from apps.api.app.api.routes.admin_punishments import router as admin_punishments_router
 from apps.api.app.api.routes.admin_player_overview import router as admin_player_overview_router
 from apps.api.app.api.routes.monitoring_prometheus import router as monitoring_prometheus_router
@@ -219,6 +220,7 @@ api_router.include_router(admin_item_bans_router)
 api_router.include_router(game_sync_item_bans_router)
 api_router.include_router(game_sync_heartbeat_router)
 api_router.include_router(admin_integration_router)
+api_router.include_router(game_sync_connect_router)
 api_router.include_router(admin_punishments_router)
 api_router.include_router(admin_player_overview_router)
 api_router.include_router(monitoring_prometheus_router)

@@ -32,6 +32,9 @@ MODULE_LABELS: dict[str, str] = {
     "anticheat": "Античит VoidRP Guard",
     "grim": "GrimAC (флаги движения и боя для VoidRP Guard)",
     "item_bans": "Бан предметов",
+    "console": "Консоль из админки (без RCON)",
+    "log": "Лог и чат сервера в админке",
+    "punishments": "Баны и муты из админки (без EssentialsX)",
 }
 
 

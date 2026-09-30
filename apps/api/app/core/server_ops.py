@@ -433,7 +433,15 @@ def rcon_command(server: "GameServer", command: str, timeout: float = 6.0) -> st
 
     ``timeout`` is an overall wall-clock budget for the whole exchange (connect
     + auth + all response packets), so a server that dribbles output slowly
-    can't stall the caller past it."""
+    can't stall the caller past it.
+
+    A server whose plugin reports the console module (a partner's, or one without RCON) gets
+    the command through the plugin's queue instead — see core/server_console.py. Every caller
+    (console, kicks, punishments, rollbacks, PlugMan…) follows without knowing."""
+    from apps.api.app.core import server_console
+
+    if server_console.routes_through_plugin(server):
+        return server_console.run(server, command, timeout=max(timeout, 8.0))
     host = server.rcon_host or "127.0.0.1"
     port = server.rcon_port
     password = server.rcon_password
@@ -852,8 +860,13 @@ def parse_chat(path: str, scan_lines: int = 60000, limit: int = 200) -> list[dic
     The window is wide on purpose: every RCON call (panel polling, cron
     scripts) writes two "Thread RCON Client" lines, ~500/min on the main
     server, which pushed the whole chat out of a 4000-line tail."""
+    return parse_chat_lines(tail_log(path, lines=scan_lines, max_bytes=8 * 1024 * 1024), limit)
+
+
+def parse_chat_lines(lines: list[str], limit: int = 200) -> list[dict]:
+    """The chat feed out of log lines already in hand (a file tail or what a plugin shipped)."""
     out: list[dict] = []
-    for ln in tail_log(path, lines=scan_lines, max_bytes=8 * 1024 * 1024):
+    for ln in lines:
         if "RCON" in ln:
             continue
         hit = _match_chat_line(ln)

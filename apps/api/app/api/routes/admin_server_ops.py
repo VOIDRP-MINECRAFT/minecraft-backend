@@ -52,7 +52,8 @@ def get_live(
         tps = {"tps": report.get("tps"), "mspt": report.get("mspt"), "windows": None, "dimensions": None,
                "source": "plugin"}
         return {
-            "online": True, "rcon_configured": rcon_configured, "rcon_error": None,
+            "online": True, "rcon_configured": rcon_configured or server_reports.modules(session, server).get("console") is not None,
+            "rcon_error": None, "console_via_plugin": server_reports.modules(session, server).get("console") is not None,
             "players": players if can_see_players else None, "can_view_players": can_see_players,
             "tps": tps, "source": "plugin", "plugin": {k: report.get(k) for k in
             ("plugin", "version", "core", "memory_used_mb", "memory_max_mb", "uptime_s", "reported_at")},
@@ -209,9 +210,16 @@ def run_rcon(
 @router.get("/logs")
 def get_logs(
     server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
     source: Annotated[str, Query(pattern=r"^(server|watchdog)$")] = "server",
     lines: Annotated[int, Query(ge=1, le=1000)] = 250,
 ) -> dict:
+    if source == "server":
+        from apps.api.app.core import server_console
+
+        if server_console.uses_plugin_log(session, server):
+            return {"source": source, "path": "плагин VoidRpPerms", "lines": server_console.tail(session, server, lines),
+                    "available": True}
     if source == "watchdog":
         path = get_settings().watchdog_log_path or None
     else:
@@ -244,10 +252,16 @@ def get_hangs(
 @router.get("/chat")
 def get_chat(
     server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> dict:
     """The server's in-game chat parsed out of the log (player chat +
     join/leave/death), newest last. Cleaner than scrolling the raw log."""
+    from apps.api.app.core import server_console
+
+    if server_console.uses_plugin_log(session, server):
+        lines = server_console.tail(session, server, server_console.LOG_KEEP_LINES)
+        return {"path": "плагин VoidRpPerms", "messages": server_ops.parse_chat_lines(lines, limit), "available": True}
     path = server_ops.resolve_log_path(server)
     if not path:
         return {"path": None, "messages": [], "available": False}

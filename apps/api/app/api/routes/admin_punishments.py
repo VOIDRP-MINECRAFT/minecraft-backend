@@ -41,11 +41,27 @@ def _fmt_duration(seconds: int) -> str:
     return "".join(parts) or "1m"
 
 
-def _enforce_rcon(server: GameServer, p: Punishment) -> str | None:
+def _plugin_enforces(session: Session, server: GameServer) -> bool:
+    """VoidRpPerms 0.5.0+ reports the punishments module: it keeps bans and mutes itself
+    (refetched the moment one changes), so no ban/mute commands — and no EssentialsX — needed."""
+    from apps.api.app.core import server_reports
+
+    return "punishments" in server_reports.modules(session, server)
+
+
+def _enforce_rcon(server: GameServer, p: Punishment, session: Session | None = None) -> str | None:
     """Dispatch the in-game command for a punishment. Best-effort; returns an
     error string on failure (so the row is still saved), else None."""
     name = p.player_name
     reason = p.reason or "Нарушение правил"
+    if session is not None and _plugin_enforces(session, server):
+        if p.type not in ("ban", "tempban", "kick"):
+            return None   # mutes: the plugin picks the new list up within seconds
+        try:
+            server_ops.rcon_command(server, f"kick {name} {reason}")   # off the server right now
+        except Exception as exc:  # noqa: BLE001 — the player may simply be offline
+            return None if "not found" in str(exc).lower() else str(exc)
+        return None
     if p.type == "ban":
         cmd = f"ban {name} {reason}"
     elif p.type == "tempban":
@@ -67,7 +83,10 @@ def _enforce_rcon(server: GameServer, p: Punishment) -> str | None:
         return str(exc)
 
 
-def _revoke_rcon(server: GameServer, p: Punishment) -> str | None:
+def _revoke_rcon(server: GameServer, p: Punishment, session: Session | None = None) -> str | None:
+    # With the plugin enforcing, it drops the entry on its next poll; the command still goes
+    # out for a ban/mute issued earlier through EssentialsX, and a failure there is no error.
+    plugin = session is not None and _plugin_enforces(session, server)
     if p.type in ("ban", "tempban"):
         cmd = f"unban {p.player_name}"
     elif p.type in ("mute", "tempmute"):
@@ -78,7 +97,7 @@ def _revoke_rcon(server: GameServer, p: Punishment) -> str | None:
         server_ops.rcon_command(server, cmd)
         return None
     except Exception as exc:  # noqa: BLE001
-        return str(exc)
+        return None if plugin else str(exc)
 
 
 def _serialize(p: Punishment) -> dict:
@@ -181,7 +200,7 @@ def create_punishment(
     session.add(p)
     session.flush()
 
-    enforce_err = _enforce_rcon(server, p) if payload.enforce else None
+    enforce_err = _enforce_rcon(server, p, session) if payload.enforce else None
     session.commit()
     session.refresh(p)
 
@@ -232,7 +251,7 @@ def revoke_punishment(
     p.revoked_by_name = actor.site_login
     p.revoke_reason = payload.reason or None
 
-    lift_err = _revoke_rcon(server, p) if payload.lift_in_game else None
+    lift_err = _revoke_rcon(server, p, session) if payload.lift_in_game else None
     session.commit()
     session.refresh(p)
 
