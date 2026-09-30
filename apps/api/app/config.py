@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     launcher_deploy_dir: str = "/var/www/void-rp/launcher/self-update"
     # The deployed site: the admin item search reads item_names.json and item-icons/ there.
     site_public_dir: str = "/var/www/void-rp/site"
+    # Published builds of our plugins and mods for the «Интеграция» page (not public: served
+    # through the admin API to staff with the right).
+    releases_dir: str = "/home/mironoouv/voidrp_releases"
     launcher_public_manifest_url: str = (
         "https://void-rp.ru/launcher/self-update/manifest.json"
     )

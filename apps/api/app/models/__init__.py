@@ -60,6 +60,7 @@ from apps.api.app.models.admin_audit_log import AdminAuditLog
 from apps.api.app.models.punishment import Punishment
 
 __all__ = [
+    "PluginRelease",
     "ServerPluginReport",
     "BannedItem",
     "ServerItems",
@@ -137,6 +138,7 @@ from apps.api.app.models.mfa_passkey import MfaPasskey
 from apps.api.app.models.game_perm import GamePermApplied, GamePermCatalog, GamePermDirect, GamePermFlag, GamePermOp
 from apps.api.app.models.item_ban import BannedItem, ServerItems
 from apps.api.app.models.server_report import ServerPluginReport
+from apps.api.app.models.plugin_release import PluginRelease
 from apps.api.app.models.trader import (
     TraderCatalogItem,
     TraderSession,

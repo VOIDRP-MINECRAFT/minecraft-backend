@@ -214,6 +214,23 @@ def update_server(
         updates.pop("features")
     if "easydonate_shop_key" in updates:
         updates["easydonate_shop_key"] = (updates["easydonate_shop_key"] or "").strip() or None
+    # An external server opens to players only with its required modules working (login and
+    # monitoring — reported by our plugins on it): otherwise anyone could walk in under someone
+    # else's nickname on a partner's offline-mode server.
+    opening = (updates.get("maintenance") is False and server.maintenance) or \
+              (updates.get("is_visible") is True and not server.is_visible)
+    becomes_external = updates.get("is_external", server.is_external)
+    if opening and becomes_external:
+        from apps.api.app.core import server_reports
+
+        missing = server_reports.missing_required(session, server) if server.is_external else \
+            list(server_reports.REQUIRED_MODULES.values())
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Внешний сервер нельзя открыть игрокам, пока не работают обязательные модули: "
+                       + "; ".join(missing) + ". Подробности — в разделе «Интеграция».",
+            )
     for field, value in updates.items():
         setattr(server, field, value)
 

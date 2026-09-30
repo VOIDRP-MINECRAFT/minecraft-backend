@@ -115,6 +115,10 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # connect-by-IP card with a live status ping, but NOT managed by our launcher/pack/
     # game-sync (no modpack, no game_auth_secret usage, skipped by the manifest generator).
     is_external: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # What the game server itself runs: paper | folia | neoforge | hybrid. Separate from
+    # ``loader`` (the client pack): VexVol's players get a NeoForge pack while the server is
+    # Paper. Picks the login method a partner installs (plugin core → VoidRpAuth, else the mod).
+    server_core: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     # ── Connection / runtime ──────────────────────────────────────────────
     host: Mapped[str] = mapped_column(String(255), nullable=False)

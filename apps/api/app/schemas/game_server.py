@@ -54,6 +54,7 @@ class GameServerPublic(BaseModel):
     # row out entirely otherwise. Lets the site/launcher badge it as hidden.
     staff_only: bool = False
     is_external: bool = False
+    server_core: str | None = None
     status: GameServerStatus | None = None
 
     model_config = {"from_attributes": True}
@@ -64,6 +65,7 @@ class GameServerAdmin(GameServerPublic):
 
     is_visible: bool
     is_external: bool = False
+    server_core: str | None = None
     neoforge_version: str | None = None
     pack_root: str | None = None
     pack_base_url: str | None = None
@@ -103,6 +105,8 @@ class GameServerCreate(BaseModel):
     is_visible: bool = True
     is_default: bool = False
     staff_only: bool = False
+    is_external: bool = False
+    server_core: str | None = Field(default=None, pattern=r"^(paper|folia|neoforge|hybrid)$")
 
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(default=25565, ge=1, le=65535)
@@ -155,6 +159,7 @@ class GameServerUpdate(BaseModel):
     is_default: bool | None = None
     staff_only: bool | None = None
     is_external: bool | None = None
+    server_core: str | None = Field(default=None, pattern=r"^(paper|folia|neoforge|hybrid)$")
 
     host: str | None = Field(default=None, min_length=1, max_length=255)
     port: int | None = Field(default=None, ge=1, le=65535)
