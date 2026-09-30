@@ -130,6 +130,8 @@ _CONTAINS_RULES: list[tuple[str, str]] = [
 ]
 
 _FIELD_LABELS: dict[str, str] = {
+    "scan_period_ticks": "период проверки",
+    "item_ids": "предметы",
     "site_login": "логин",
     "minecraft_nickname": "игровой ник",
     "email": "почта",

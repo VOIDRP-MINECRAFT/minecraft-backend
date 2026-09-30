@@ -40,6 +40,8 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "anticheat.manage", "label": "Античит: действия/вердикты/конфиг", "sensitive": True},
             {"key": "salary.view", "label": "Зарплата за игру (выплаты, настройки)"},
             {"key": "salary.manage", "label": "Зарплата за игру: менять суммы и лимиты", "sensitive": True},
+            {"key": "items.bans.view", "label": "Бан предметов (список запрещённых)"},
+            {"key": "items.bans.manage", "label": "Бан предметов: запрещать, разрешать, менять сообщение", "sensitive": True},
         ],
     },
     {
@@ -167,7 +169,7 @@ SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
     "salary.", "backups.", "punishments.", "battlepass.", "upgrader.",
     "trader.", "news.", "files.", "plugins.", "donate.", "audit.", "feedback.", "mod_suggestions.",
-    "badges.", "game.",
+    "badges.", "game.", "items.",
 )
 # Per-server keys outside those prefixes. Crash reports carry the server picked in the
 # launcher; the crash *rules* stay platform-wide, their buttons touch players' files.

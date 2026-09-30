@@ -139,6 +139,8 @@ class Settings(BaseSettings):
     # publish releases directly (no sudo). See core/launcher_ops.py.
     launcher_repo_dir: str = "/home/mironoouv/minecraft/voidrp_launcher_vue"
     launcher_deploy_dir: str = "/var/www/void-rp/launcher/self-update"
+    # The deployed site: the admin item search reads item_names.json and item-icons/ there.
+    site_public_dir: str = "/var/www/void-rp/site"
     launcher_public_manifest_url: str = (
         "https://void-rp.ru/launcher/self-update/manifest.json"
     )
