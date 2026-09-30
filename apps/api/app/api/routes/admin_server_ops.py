@@ -36,11 +36,28 @@ def get_metrics(server: Annotated[GameServer, Depends(resolve_server)]) -> dict:
 def get_live(
     server: Annotated[GameServer, Depends(resolve_server)],
     perms: Annotated[set[str], Depends(caller_permissions)],
+    session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
-    # Players come from the status/query protocol (locale-proof, real names);
-    # TPS needs RCON. The two are independent so one failing doesn't hide the other.
-    players = server_ops.collect_players(server)
+    # A fresh report of our monitoring module (the plugin on the server) beats RCON: it needs no
+    # open port on a partner's machine and carries real names. Otherwise players come from RCON
+    # list / the status protocol and TPS from RCON, independently.
+    from apps.api.app.core import server_reports
+
     rcon_configured = bool(server.rcon_port and server.rcon_password is not None)
+    report = server_reports.monitoring(session, server)
+    if report is not None:
+        can_see_players = "players.online.view" in perms
+        players = {"online": report.get("online", 0), "max": report.get("max"),
+                   "players": sorted(report.get("players", []), key=str.lower)}
+        tps = {"tps": report.get("tps"), "mspt": report.get("mspt"), "windows": None, "dimensions": None,
+               "source": "plugin"}
+        return {
+            "online": True, "rcon_configured": rcon_configured, "rcon_error": None,
+            "players": players if can_see_players else None, "can_view_players": can_see_players,
+            "tps": tps, "source": "plugin", "plugin": {k: report.get(k) for k in
+            ("plugin", "version", "core", "memory_used_mb", "memory_max_mb", "uptime_s", "reported_at")},
+        }
+    players = server_ops.collect_players(server)
     tps: dict | None = None
     rcon_error: str | None = None
     if rcon_configured:
