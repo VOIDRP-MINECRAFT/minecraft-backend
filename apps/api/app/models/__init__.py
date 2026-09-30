@@ -60,6 +60,8 @@ from apps.api.app.models.admin_audit_log import AdminAuditLog
 from apps.api.app.models.punishment import Punishment
 
 __all__ = [
+    "BannedItem",
+    "ServerItems",
     "AdminAuditLog",
     "Punishment",
     "Alliance",
@@ -132,6 +134,7 @@ from apps.api.app.models.staff_role import StaffRole, StaffRoleMember
 from apps.api.app.models.auth_device import AuthDevice
 from apps.api.app.models.mfa_passkey import MfaPasskey
 from apps.api.app.models.game_perm import GamePermApplied, GamePermCatalog, GamePermDirect, GamePermFlag, GamePermOp
+from apps.api.app.models.item_ban import BannedItem, ServerItems
 from apps.api.app.models.trader import (
     TraderCatalogItem,
     TraderSession,

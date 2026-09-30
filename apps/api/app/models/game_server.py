@@ -186,6 +186,18 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     def resolved_auth_settings(self) -> dict[str, int]:
         return resolve_auth_settings(self.auth_settings)
 
+    # Banned items: message to the player, scan period. Read through
+    # ``resolved_item_ban_settings`` (models/item_ban.py) — the column may be partial.
+    item_ban_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+
+    @property
+    def resolved_item_ban_settings(self) -> dict[str, Any]:
+        from apps.api.app.models.item_ban import resolve_item_ban_settings
+
+        return resolve_item_ban_settings(self.item_ban_settings)
+
     # ── News auto-posting channels, per category ──────────────────────────
     # Shape: {"update": {"telegram": [{"chat_id","thread_id"}], "discord": ["url"]},
     #         "media":  {"telegram": [...], "discord": [...]}}
