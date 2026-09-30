@@ -43,6 +43,9 @@ _Where = Annotated[PermittedServers, Depends(require_permission_somewhere("serve
 PLATFORM_FIELDS = frozenset({
     "is_default", "systemd_unit", "data_dir", "log_path", "rcon_host", "rcon_port",
     "rcon_password", "pack_root", "manifest_build_script",
+    # Whether a server is a partner's and what it runs decide which modules it must have
+    # before it opens to players — not for the server's own admin to switch off.
+    "is_external", "server_core",
 })
 
 
