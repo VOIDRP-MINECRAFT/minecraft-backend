@@ -34,6 +34,16 @@ def can_view_staff_only_servers(
     return lambda server: bool(access.on(server.id) & (SERVER_KEYS | {HIDDEN_SERVERS_PERMISSION}))
 
 
+def maintenance_join_check(
+    user: Annotated[User | None, Depends(get_optional_current_user)],
+):
+    """Predicate over a server: may the caller play on it during maintenance. Optional
+    auth, like the hidden-server check — anonymous callers simply get False."""
+    from apps.api.app.core.permissions import may_join_during_maintenance
+
+    return lambda server: may_join_during_maintenance(user, server)
+
+
 def resolve_server(
     session: Annotated[Session, Depends(get_db_session)],
     server: Annotated[str | None, Query(description="Server slug")] = None,

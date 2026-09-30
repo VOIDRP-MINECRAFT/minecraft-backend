@@ -40,6 +40,9 @@ class GameServerPublic(BaseModel):
     max_players: int
     whitelist_mode: str
     maintenance: bool
+    # The caller may play here despite maintenance (servers.maintenance.join or a platform
+    # admin); the launcher unlocks «Играть» on it. Always false for anonymous callers.
+    can_join_maintenance: bool = False
     map_url: str | None = None
     accent_color: str | None = None
     features: dict[str, bool] = Field(default_factory=dict)

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_context import can_view_staff_only_servers
+from apps.api.app.dependencies.server_context import can_view_staff_only_servers, maintenance_join_check
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.repositories.game_server_repository import GameServerRepository
 from apps.api.app.schemas.game_server import GameServerPublic, GameServerStatus
@@ -77,8 +77,9 @@ def _warm(servers: list[GameServer]) -> None:
         list(_pinger.map(lambda a: _do_ping(*a), cold))
 
 
-def _to_public(server: GameServer, with_status: bool = True) -> GameServerPublic:
+def _to_public(server: GameServer, with_status: bool = True, may_join=None) -> GameServerPublic:
     dto = GameServerPublic.model_validate(server)
+    dto.can_join_maintenance = bool(server.maintenance and may_join is not None and may_join(server))
     if with_status:
         dto.status = _ping_status(*status_address(server))
     return dto
@@ -103,10 +104,11 @@ def status_address(server: GameServer) -> tuple[str, int]:
 def list_servers(
     session: Annotated[Session, Depends(get_db_session)],
     may_see_hidden: Annotated[object, Depends(can_view_staff_only_servers)],
+    may_join: Annotated[object, Depends(maintenance_join_check)],
 ) -> list[GameServerPublic]:
     servers = [s for s in GameServerRepository(session).list_visible() if not s.staff_only or may_see_hidden(s)]
     _warm(servers)
-    return [_to_public(s) for s in servers]
+    return [_to_public(s, may_join=may_join) for s in servers]
 
 
 @router.get("/{slug}", response_model=GameServerPublic)
@@ -114,8 +116,9 @@ def get_server(
     slug: str,
     session: Annotated[Session, Depends(get_db_session)],
     may_see_hidden: Annotated[object, Depends(can_view_staff_only_servers)],
+    may_join: Annotated[object, Depends(maintenance_join_check)],
 ) -> GameServerPublic:
     server = GameServerRepository(session).get_by_slug(slug)
     if server is None or not server.is_visible or (server.staff_only and not may_see_hidden(server)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
-    return _to_public(server)
+    return _to_public(server, may_join=may_join)

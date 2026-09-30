@@ -69,6 +69,7 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "players.manage", "label": "Игроки: правки (legacy-вход и т.п.)", "sensitive": True},
             {"key": "servers.manage", "label": "Серверы: настройки сервера (создавать и удалять — только с галочкой на всех)", "sensitive": True},
             {"key": "servers.hidden.view", "label": "Скрытые серверы: видеть на сайте и в лаунчере", "sensitive": True},
+            {"key": "servers.maintenance.join", "label": "Вход на сервер во время тех. работ", "sensitive": True},
         ],
     },
     {
@@ -171,7 +172,7 @@ SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
 # Per-server keys outside those prefixes. Crash reports carry the server picked in the
 # launcher; the crash *rules* stay platform-wide, their buttons touch players' files.
 SERVER_SCOPED_KEYS: frozenset[str] = frozenset({"crashes.view", "crashes.manage", "servers.manage", "dashboard.view",
-                                               "roles.manage", "roles.assign"})
+                                               "roles.manage", "roles.assign", "servers.maintenance.join"})
 
 for _group in PERMISSION_CATALOG:
     for _p in _group["permissions"]:
@@ -193,6 +194,15 @@ for _group in PERMISSION_CATALOG:
 # Grants sight of ``game_servers.staff_only`` servers in the public catalogue
 # (/servers) that feeds the site and the launcher. Full admins bypass it.
 HIDDEN_SERVERS_PERMISSION = "servers.hidden.view"
+MAINTENANCE_JOIN_PERMISSION = "servers.maintenance.join"
+
+
+def may_join_during_maintenance(user, server) -> bool:
+    """Whether the user may play on ``server`` while it is under maintenance: platform
+    admins, and holders of ``servers.maintenance.join`` on it (admins of the server have it)."""
+    if user is None:
+        return False
+    return MAINTENANCE_JOIN_PERMISSION in access_of(user).on(server.id)
 
 ALL_KEYS: frozenset[str] = frozenset(
     p["key"] for group in PERMISSION_CATALOG for p in group["permissions"]

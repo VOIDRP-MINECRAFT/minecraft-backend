@@ -20,6 +20,7 @@ from apps.api.app.schemas.play_ticket import (
     IssuePlayTicketResponse,
 )
 from apps.api.app.core.audit import client_ip
+from apps.api.app.core.permissions import may_join_during_maintenance
 from apps.api.app.services.consent_service import ConsentService
 from apps.api.app.services.play_ticket_service import PlayTicketService, PlayTicketValidationError
 
@@ -41,7 +42,16 @@ def issue_play_ticket(
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[PlayTicketService, Depends(get_play_ticket_service)],
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
 ) -> IssuePlayTicketResponse:
+    # Maintenance closes the server for everyone but platform admins and holders of
+    # servers.maintenance.join on it. The launcher greys out «Играть» too, but only this
+    # check really keeps people out. 409 so the launcher shows the text as it is.
+    if server.maintenance and not may_join_during_maintenance(current_user, server):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"На сервере «{server.name}» идут технические работы. Зайти можно будет, когда они закончатся.",
+        )
     # The game is entered only after the offer and the personal data consent are accepted. The
     # launcher asks for them right after login; older launchers get this message instead. 409 (not
     # 403) so the launcher shows it without treating it as an expired session.
