@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,18 +17,17 @@ from apps.api.app.schemas.game_server import GameServerPublic, GameServerStatus
 
 router = APIRouter(prefix="/servers", tags=["servers"])
 
-# Lightweight per-process TTL cache for status pings (avoid hammering servers).
+# Per-process status cache. A stale entry is served at once while a background thread
+# refreshes it, so a site request never waits on a ping (an offline server costs the full
+# timeout); only the very first ping of an address blocks, and those run in parallel.
 _STATUS_TTL_SECONDS = 30
 _status_cache: dict[str, tuple[float, GameServerStatus]] = {}
+_refreshing: set[str] = set()
+_refresh_lock = threading.Lock()
+_pinger = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mc-status")
 
 
-def _ping_status(host: str, port: int) -> GameServerStatus:
-    cache_key = f"{host}:{port}"
-    now = time.monotonic()
-    cached = _status_cache.get(cache_key)
-    if cached and (now - cached[0]) < _STATUS_TTL_SECONDS:
-        return cached[1]
-
+def _do_ping(host: str, port: int) -> GameServerStatus:
     result = GameServerStatus(online=False)
     try:
         from mcstatus import JavaServer  # type: ignore[import-untyped]
@@ -41,9 +42,39 @@ def _ping_status(host: str, port: int) -> GameServerStatus:
         )
     except Exception:
         result = GameServerStatus(online=False)
-
-    _status_cache[cache_key] = (now, result)
+    _status_cache[f"{host}:{port}"] = (time.monotonic(), result)
     return result
+
+
+def _refresh(host: str, port: int) -> None:
+    key = f"{host}:{port}"
+    try:
+        _do_ping(host, port)
+    finally:
+        with _refresh_lock:
+            _refreshing.discard(key)
+
+
+def _ping_status(host: str, port: int) -> GameServerStatus:
+    cache_key = f"{host}:{port}"
+    cached = _status_cache.get(cache_key)
+    if cached is None:
+        return _do_ping(host, port)
+    if (time.monotonic() - cached[0]) >= _STATUS_TTL_SECONDS:
+        with _refresh_lock:
+            start = cache_key not in _refreshing
+            _refreshing.add(cache_key)
+        if start:
+            _pinger.submit(_refresh, host, port)
+    return cached[1]
+
+
+def _warm(servers: list[GameServer]) -> None:
+    """First-ever pings of several servers at once instead of one after another."""
+    cold = {status_address(s) for s in servers}
+    cold = [a for a in cold if f"{a[0]}:{a[1]}" not in _status_cache]
+    if len(cold) > 1:
+        list(_pinger.map(lambda a: _do_ping(*a), cold))
 
 
 def _to_public(server: GameServer, with_status: bool = True) -> GameServerPublic:
@@ -74,6 +105,7 @@ def list_servers(
     may_see_hidden: Annotated[object, Depends(can_view_staff_only_servers)],
 ) -> list[GameServerPublic]:
     servers = [s for s in GameServerRepository(session).list_visible() if not s.staff_only or may_see_hidden(s)]
+    _warm(servers)
     return [_to_public(s) for s in servers]
 
 

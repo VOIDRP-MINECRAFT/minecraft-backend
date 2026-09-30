@@ -255,7 +255,28 @@ def rollback() -> str:
 # ── Deployed manifest inspection ─────────────────────────────────────────────
 
 
+# (path, size, mtime) → sha: the status page is opened often and the artifacts weigh
+# hundreds of MB, so each build is hashed once.
+_SHA_CACHE: dict[tuple[str, int, float], str] = {}
+
+
 def _sha256(path: Path) -> str | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (str(path), st.st_size, st.st_mtime)
+    if key not in _SHA_CACHE:
+        digest = _sha256_file(path)
+        if digest is None:
+            return None
+        if len(_SHA_CACHE) > 64:
+            _SHA_CACHE.clear()
+        _SHA_CACHE[key] = digest
+    return _SHA_CACHE[key]
+
+
+def _sha256_file(path: Path) -> str | None:
     try:
         h = hashlib.sha256()
         with path.open("rb") as f:
