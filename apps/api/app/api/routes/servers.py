@@ -80,6 +80,7 @@ def _warm(servers: list[GameServer]) -> None:
 def _to_public(server: GameServer, with_status: bool = True, may_join=None) -> GameServerPublic:
     dto = GameServerPublic.model_validate(server)
     dto.can_join_maintenance = bool(server.maintenance and may_join is not None and may_join(server))
+    dto.donate_enabled = bool((server.easydonate_shop_key or "").strip()) or bool(server.is_default)
     if with_status:
         dto.status = _ping_status(*status_address(server))
     return dto

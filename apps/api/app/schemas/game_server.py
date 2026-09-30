@@ -43,6 +43,9 @@ class GameServerPublic(BaseModel):
     # The caller may play here despite maintenance (servers.maintenance.join or a platform
     # admin); the launcher unlocks «Играть» on it. Always false for anonymous callers.
     can_join_maintenance: bool = False
+    # A donation shop is connected: the server's own EasyDonate key, or the default server
+    # (which falls back to the global key). The admin shows «Донаты» only then.
+    donate_enabled: bool = False
     map_url: str | None = None
     accent_color: str | None = None
     features: dict[str, bool] = Field(default_factory=dict)

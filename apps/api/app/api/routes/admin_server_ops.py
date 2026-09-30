@@ -201,7 +201,10 @@ def get_logs(
         path = server_ops.resolve_log_path(server)
     if not path:
         return {"source": source, "path": None, "lines": [], "available": False}
-    content = server_ops.tail_log(path, lines=lines)
+    try:
+        content = server_ops.tail_log(path, lines=lines)
+    except server_ops.LogUnavailable as exc:
+        return {"source": source, "path": path, "lines": [], "available": False, "error": f"Лог не читается: {exc}"}
     return {"source": source, "path": path, "lines": content, "available": True}
 
 
@@ -231,7 +234,10 @@ def get_chat(
     path = server_ops.resolve_log_path(server)
     if not path:
         return {"path": None, "messages": [], "available": False}
-    messages = server_ops.parse_chat(path, limit=limit)
+    try:
+        messages = server_ops.parse_chat(path, limit=limit)
+    except server_ops.LogUnavailable as exc:
+        return {"path": path, "messages": [], "available": False, "error": f"Чат берётся из лога, а лог не читается: {exc}"}
     return {"path": path, "messages": messages, "available": True}
 
 

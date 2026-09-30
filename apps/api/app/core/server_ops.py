@@ -494,11 +494,24 @@ def collect_players(server: "GameServer") -> dict | None:
     endpoints. Returns ``None`` only if the server can't be reached at all."""
     from mcstatus import JavaServer
 
+    # A server on another machine: RCON `list` answers in ~0.2 s; the UDP query protocol is
+    # usually off there and costs 3 retries × 3 s before the TCP ping is even tried.
+    remote = bool(getattr(server, "is_external", False)) or not server.systemd_unit
+    if remote and server.rcon_port and server.rcon_password is not None:
+        try:
+            parsed = _parse_list(strip_color_codes(rcon_command(server, "list", timeout=4.0) or ""))
+            if parsed is not None:
+                return parsed
+        except Exception:
+            pass
+
     for host, port in _player_endpoints(server):
         online: int | None = None
         mx: int | None = None
         names: list[str] = []
         try:
+            if remote:
+                raise RuntimeError("no UDP query for a remote server")
             q = JavaServer(host, port, timeout=3).query()
             online, mx = q.players.online, q.players.max
             names = list(getattr(q.players, "list", None) or getattr(q.players, "names", []) or [])
@@ -516,6 +529,18 @@ def collect_players(server: "GameServer") -> dict | None:
         if online is not None:
             return {"online": online or 0, "max": mx, "players": sorted(names, key=str.lower)}
     return None
+
+
+_LIST_RE = re.compile(r"There are (\d+) of a max(?: of)? (\d+) players online:?\s*(.*)", re.IGNORECASE | re.DOTALL)
+
+
+def _parse_list(raw: str) -> dict | None:
+    """Vanilla/Paper ``list``: "There are 2 of a max of 100 players online: a, b"."""
+    m = _LIST_RE.search(raw or "")
+    if not m:
+        return None
+    names = [n.strip() for n in m.group(3).replace("\n", ",").split(",") if n.strip()]
+    return {"online": int(m.group(1)), "max": int(m.group(2)), "players": sorted(names, key=str.lower)}
 
 
 # ── TPS / MSPT (via RCON; handles Paper `tps` and localized NeoForge) ───────
@@ -649,7 +674,32 @@ def strip_color_codes(text: str) -> str:
 
 
 # ── Log tail ────────────────────────────────────────────────────────────────
+class LogUnavailable(Exception):
+    """The log could not be read; the message says why, for the admin panel."""
+
+
+# url → (monotonic time it failed, message): a dead partner URL takes the full timeout, and the
+# panel polls the log and chat every few seconds — so a failure is remembered for a minute.
+_LOG_URL_FAILURES: dict[str, tuple[float, str]] = {}
+_LOG_URL_RETRY_S = 60.0
+
+
 def _tail_log_url(url: str, lines: int, max_bytes: int) -> list[str]:
+    import time as _time
+
+    failed = _LOG_URL_FAILURES.get(url)
+    if failed and _time.monotonic() - failed[0] < _LOG_URL_RETRY_S:
+        raise LogUnavailable(failed[1])
+    try:
+        out = _fetch_log_url(url, lines, max_bytes)
+    except LogUnavailable as exc:
+        _LOG_URL_FAILURES[url] = (_time.monotonic(), str(exc))
+        raise
+    _LOG_URL_FAILURES.pop(url, None)
+    return out
+
+
+def _fetch_log_url(url: str, lines: int, max_bytes: int) -> list[str]:
     """Tail a log served over HTTP(S) — used by partner (external) servers that expose
     their latest.log by URL. Requests the byte tail via Range; falls back to a bounded
     stream. Honours the box's outbound proxy (httpx trust_env)."""
@@ -659,14 +709,16 @@ def _tail_log_url(url: str, lines: int, max_bytes: int) -> list[str]:
         with httpx.Client(timeout=8.0, trust_env=True, follow_redirects=True) as client:
             with client.stream("GET", url, headers={"Range": f"bytes=-{max_bytes}"}) as resp:
                 if resp.status_code not in (200, 206):
-                    return []
+                    raise LogUnavailable(f"адрес лога ответил {resp.status_code}: {url}")
                 data = b""
                 for chunk in resp.iter_bytes():
                     data += chunk
                     if len(data) > max_bytes:
                         data = data[-max_bytes:]   # keep only the tail in memory
-    except Exception:  # noqa: BLE001 — network/log fetch is best-effort
-        return []
+    except LogUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 — network/log fetch is best-effort
+        raise LogUnavailable(f"адрес лога недоступен ({type(exc).__name__}): {url}") from exc
     text = data.decode("utf-8", errors="replace")
     return text.splitlines()[-lines:]
 
@@ -710,7 +762,11 @@ def scan_hangs(path: str, scan_lines: int = 6000, limit: int = 50) -> list[dict]
     """Scan the tail of a log for watchdog/hang summary lines, newest last.
     Returns ``[{time, seconds, text}]``. Empty list if the file is unreadable."""
     hits: list[dict] = []
-    for ln in tail_log(path, lines=scan_lines, max_bytes=3 * 1024 * 1024):
+    try:
+        tail = tail_log(path, lines=scan_lines, max_bytes=3 * 1024 * 1024)
+    except LogUnavailable:
+        return []
+    for ln in tail:
         if not _HANG_LINE_RE.search(ln) or _HANG_NOISE_RE.search(ln):
             continue
         ts = _TS_RE.search(ln)

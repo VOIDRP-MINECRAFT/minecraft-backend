@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.user_messages import translate_user_message
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_current_user
-from apps.api.app.dependencies.server_auth import require_game_auth_secret
+from apps.api.app.dependencies.server_auth import require_game_server
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
@@ -32,6 +32,15 @@ def get_play_ticket_service(
     session: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],
 ) -> PlayTicketService:
+    return PlayTicketService(session=session, server_id=server.id)
+
+
+def get_game_ticket_service(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> PlayTicketService:
+    """For the game server's own calls: the server is the one its secret belongs to — a
+    partner server's plugin must not depend on sending the right X-Server-Slug."""
     return PlayTicketService(session=session, server_id=server.id)
 
 
@@ -82,11 +91,10 @@ def issue_play_ticket(
 @server_router.post(
     "/consume-play-ticket",
     response_model=ConsumePlayTicketResponse,
-    dependencies=[Depends(require_game_auth_secret)],
 )
 def consume_play_ticket(
     payload: ConsumePlayTicketRequest,
-    service: Annotated[PlayTicketService, Depends(get_play_ticket_service)],
+    service: Annotated[PlayTicketService, Depends(get_game_ticket_service)],
 ) -> ConsumePlayTicketResponse:
     try:
         consumed = service.consume(
@@ -108,11 +116,10 @@ def consume_play_ticket(
 @server_router.post(
     "/consume-by-ip",
     response_model=ConsumePlayTicketResponse,
-    dependencies=[Depends(require_game_auth_secret)],
 )
 def consume_play_ticket_by_ip(
     payload: ConsumeByIpRequest,
-    service: Annotated[PlayTicketService, Depends(get_play_ticket_service)],
+    service: Annotated[PlayTicketService, Depends(get_game_ticket_service)],
 ) -> ConsumePlayTicketResponse:
     """Lets a player in at join by the ticket their launcher took from the same IP, without
     waiting for the client to send it. 400 = nothing matches; the server then waits for the
