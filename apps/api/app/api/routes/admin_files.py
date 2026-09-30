@@ -67,7 +67,7 @@ def _running(server: GameServer) -> bool:
     return props.get("ActiveState") == "active" and int(props.get("MainPID") or 0) > 0
 
 
-def _secrets_ok(perms: set[str], reauthed: bool = True) -> bool:
+def _secrets_ok(perms: set[str], reauthed: bool = False) -> bool:
     """Secrets in the clear: the permission, and the password re-entered in the last 5 minutes."""
     return "files.secrets" in perms and reauthed
 
@@ -310,13 +310,14 @@ def revision(
     revision_id: UUID,
     server: Annotated[GameServer, Depends(resolve_server)],
     perms: Annotated[set[str], Depends(caller_permissions)],
+    reauthed: Annotated[bool, Depends(reauth_is_fresh)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     r = session.get(FileRevision, revision_id)
     if r is None or r.server_id != server.id:
         raise HTTPException(status_code=404, detail="Версия не найдена")
     before, after = r.content_before, r.content_after
-    if not _secrets_ok(perms):
+    if not _secrets_ok(perms, reauthed):
         before = sf.mask(before)[0] if before is not None else None
         after = sf.mask(after)[0]
     return {"id": str(r.id), "path": r.path, "author": r.author, "at": r.created_at.isoformat(),

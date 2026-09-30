@@ -428,7 +428,16 @@ def list_mod_verdicts(
     ]
 
 
-@router.post("/mod-verdicts", response_model=ModVerdictOut, status_code=200, dependencies=[Depends(require_permission("anticheat.manage"))])
+def _manage_everywhere(actor: Annotated[User, Depends(get_current_staff_user)]) -> None:
+    """Mod verdicts are shared by every server: changing them needs anticheat.manage on all
+    of them — otherwise one server's moderator could mark a cheat safe for the others."""
+    from apps.api.app.core.permissions import access_of
+
+    if not access_of(actor).holds_everywhere("anticheat.manage"):
+        raise HTTPException(status_code=403, detail="Вердикты модов общие для всех серверов — менять их может тот, у кого право на античит на всех серверах")
+
+
+@router.post("/mod-verdicts", response_model=ModVerdictOut, status_code=200, dependencies=[Depends(require_permission("anticheat.manage")), Depends(_manage_everywhere)])
 def set_mod_verdict(
     req: SetModVerdictRequest,
     session: Annotated[Session, Depends(get_db_session)],
@@ -466,7 +475,7 @@ def set_mod_verdict(
     )
 
 
-@router.delete("/mod-verdicts/{mod_id}", status_code=204, dependencies=[Depends(require_permission("anticheat.manage"))])
+@router.delete("/mod-verdicts/{mod_id}", status_code=204, dependencies=[Depends(require_permission("anticheat.manage")), Depends(_manage_everywhere)])
 def delete_mod_verdict(
     mod_id: str,
     session: Annotated[Session, Depends(get_db_session)],

@@ -150,6 +150,11 @@ def create_punishment(
 ) -> dict:
     if payload.type not in PUNISHMENT_TYPES:
         raise HTTPException(status_code=400, detail=f"Unknown punishment type: {payload.type}")
+    if payload.scope == "global":
+        from apps.api.app.core.permissions import access_of
+
+        if not access_of(actor).holds_everywhere("punishments.manage"):
+            raise HTTPException(status_code=403, detail="Наказание на всю платформу выдаёт тот, у кого право на всех серверах")
 
     expires_at = None
     if payload.type in ("tempban", "tempmute"):
@@ -210,8 +215,15 @@ def revoke_punishment(
     payload: Annotated[PunishmentRevoke, Body()] = PunishmentRevoke(),
 ) -> dict:
     p = session.get(Punishment, punishment_id)
-    if p is None:
+    # Only a punishment of the server the request is about; a platform-wide one (no
+    # server) needs the permission on every server.
+    if p is None or (p.server_id is not None and p.server_id != server.id):
         raise HTTPException(status_code=404, detail="Наказание не найдено")
+    if p.server_id is None:
+        from apps.api.app.core.permissions import access_of
+
+        if not access_of(actor).holds_everywhere("punishments.manage"):
+            raise HTTPException(status_code=403, detail="Наказание на всю платформу снимает тот, у кого право на всех серверах")
     if not p.active:
         raise HTTPException(status_code=409, detail="Наказание уже снято")
 
