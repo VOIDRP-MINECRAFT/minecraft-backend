@@ -68,15 +68,18 @@ class EasyDonateService:
         if not self._key:
             raise EasyDonateError(404, "Donations are not set up for this server")
         url = f"{_BASE}{path}"
-        with httpx.Client(timeout=10) as client:
-            r = client.get(url, headers=self._headers, params=params)
-            if r.status_code == 429:
-                raise EasyDonateError(429, "EasyDonate: слишком много запросов (rate limit). Попробуйте позже.")
-            try:
-                data = r.json()
-            except Exception:
-                r.raise_for_status()
-                raise
+        try:
+            with httpx.Client(timeout=10) as client:
+                r = client.get(url, headers=self._headers, params=params)
+        except httpx.HTTPError as exc:
+            logger.warning("EasyDonate unreachable path=%s: %s", path, exc)
+            raise EasyDonateError(0, "EasyDonate не отвечает — попробуйте через минуту")
+        if r.status_code == 429:
+            raise EasyDonateError(429, "EasyDonate: слишком много запросов (rate limit). Попробуйте позже.")
+        try:
+            data = r.json()
+        except ValueError:
+            raise EasyDonateError(r.status_code, f"EasyDonate ответил не JSON (HTTP {r.status_code})")
         if not data.get("success"):
             msg = data.get("response") if isinstance(data.get("response"), str) else str(data)
             code = data.get("error_code", 0)
