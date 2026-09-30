@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
-from apps.api.app.core import server_ops
+from apps.api.app.core import server_console, server_ops
 from apps.api.app.core.audit import record_audit
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import caller_permissions, get_current_staff_user, require_permission
@@ -53,7 +53,7 @@ def get_live(
                "source": "plugin"}
         return {
             "online": True, "rcon_configured": rcon_configured or server_reports.modules(session, server).get("console") is not None,
-            "rcon_error": None, "console_via_plugin": server_reports.modules(session, server).get("console") is not None,
+            "rcon_error": None, "console_via_plugin": server_console.routes_through_plugin(server),
             "players": players if can_see_players else None, "can_view_players": can_see_players,
             "tps": tps, "source": "plugin", "plugin": {k: report.get(k) for k in
             ("plugin", "version", "core", "memory_used_mb", "memory_max_mb", "uptime_s", "reported_at")},
@@ -215,8 +215,6 @@ def get_logs(
     lines: Annotated[int, Query(ge=1, le=1000)] = 250,
 ) -> dict:
     if source == "server":
-        from apps.api.app.core import server_console
-
         if server_console.uses_plugin_log(session, server):
             return {"source": source, "path": "плагин VoidRpPerms", "lines": server_console.tail(session, server, lines),
                     "available": True}
@@ -257,8 +255,6 @@ def get_chat(
 ) -> dict:
     """The server's in-game chat parsed out of the log (player chat +
     join/leave/death), newest last. Cleaner than scrolling the raw log."""
-    from apps.api.app.core import server_console
-
     if server_console.uses_plugin_log(session, server):
         lines = server_console.tail(session, server, server_console.LOG_KEEP_LINES)
         return {"path": "плагин VoidRpPerms", "messages": server_ops.parse_chat_lines(lines, limit), "available": True}

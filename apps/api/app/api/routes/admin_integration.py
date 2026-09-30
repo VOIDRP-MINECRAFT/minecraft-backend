@@ -88,14 +88,20 @@ def overview(server: _Server, session: _Db) -> dict:
     tips = []
     if server.is_external and server.rcon_port:
         egress = get_settings().backend_egress_ip
-        tips.append({"level": "warn", "text": "RCON открыт в интернет, а пароль к нему идёт открытым текстом. "
-                     "Когда модуль мониторинга работает, RCON админке не нужен: закройте порт "
-                     f"{server.rcon_port} фаерволом или разрешите его только для {egress}."})
+        if "console" in have:
+            tips.append({"level": "warn", "text": "Консоль админки работает через VoidRpPerms — RCON больше не нужен. "
+                         "Выключите его на сервере (enable-rcon=false в server.properties), а владелец сотрёт "
+                         "RCON-порт и пароль в «Серверах»."})
+        else:
+            tips.append({"level": "warn", "text": "RCON открыт в интернет, а пароль к нему идёт открытым текстом. "
+                         "Обновите VoidRpPerms до 0.5.0: консоль пойдёт через него, и RCON можно будет выключить. "
+                         f"До тех пор закройте порт {server.rcon_port} фаерволом или разрешите его только для {egress}."})
     if not server.server_core:
         tips.append({"level": "warn", "text": "Не указано ядро сервера (Paper, Folia, NeoForge…) — "
                      "владелец задаёт его в «Серверах». От него зависит, какой способ входа ставить."})
     return {
         "server": {"slug": server.slug, "name": server.name, "is_external": server.is_external,
+                   "item_bans_enabled": (server.features or {}).get("item_bans") is True,
                    "server_core": server.server_core, "core_label": cat.CORE_LABELS.get(server.server_core or ""),
                    "core_reported": core_reported, "auth_method": cat.auth_method(server),
                    "maintenance": server.maintenance, "is_visible": server.is_visible},

@@ -816,6 +816,13 @@ _YOUER_NOISE_RE = re.compile(
     r"|Запуск сервера|Загрузка свойств|Генерация пары ключей|Этот сервер работает"
     r"|Режим игры по умолчанию|Прошло времени|Подготовка|Используется тип канала"
     r"|^Starting|^Preparing|^Loading properties|^Default game type|^Done \("
+    # Paper/Moonrise boot and plugin banners on the same thread (plugin-shipped logs too).
+    r"|persistent chunks|^Prepared spawn area|^Done preparing level|ThreadedAnvilChunkStorage"
+    r"|^Running delayed init|^Using \d+ threads|^Generating keypair|^Paper: |^Grim Version"
+    r"|^Environment: |^Loaded \d+ |^Time elapsed|^Server permissions file|^Found new data pack"
+    r"|^This server is running|^[|_\\/()\s-]*$|^[|_]\s|LuckPerms v\d|Running on Bukkit|^Server Ping Player Sample"
+    r"|\b(?:com|net|org|io|dev|me)\.[a-z0-9_]+\.[a-z0-9_.]+|^WEPIF:|^Registering commands with"
+    r"|^Thread Query Listener|^Query running on"
 )
 _JOIN_RE = re.compile(r"joined the game|присоединился к игре")
 _LEAVE_RE = re.compile(r"left the game|покинул игру")
