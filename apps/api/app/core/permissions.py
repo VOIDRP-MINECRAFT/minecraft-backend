@@ -75,6 +75,8 @@ PERMISSION_CATALOG: list[dict] = [
         "group": "Сотрудники",
         "permissions": [
             {"key": "staff.manage", "label": "Сотрудники: вкладка и личные права (выдавать можно только те, что есть у тебя)", "sensitive": True},
+            {"key": "staff.sessions", "label": "Сотрудники: видеть их входы и завершать их (только тем, кто ниже)", "sensitive": True},
+            {"key": "staff.mfa.reset", "label": "Сотрудники: сбрасывать 2FA, если потерян телефон (только тем, кто ниже, после пароля)", "sensitive": True},
             {"key": "roles.manage", "label": "Роли: создавать и править роли этого сервера (ниже своей, только с правами, что есть у тебя)", "sensitive": True},
             {"key": "roles.assign", "label": "Роли: выдавать и снимать роли этого сервера (ниже своей)", "sensitive": True},
             {"key": "badges.manage", "label": "Значки: создавать и править (роли без прав)"},

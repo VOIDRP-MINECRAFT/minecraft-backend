@@ -72,6 +72,8 @@ class ManagerInfo(BaseModel):
     can_staff: bool = False
     can_manage_badges: bool = False
     can_assign_badges: bool = False
+    can_sessions: bool = False
+    can_mfa_reset: bool = False
     top_position: int | None
 
 
@@ -128,6 +130,13 @@ def get_authority(
 def get_staff_authority(authority: Annotated[Authority, Depends(get_authority)]) -> Authority:
     """The «Сотрудники» tab: platform admins and holders of staff.manage."""
     if not authority.can_staff:
+        raise HTTPException(status_code=403, detail="Вкладка «Сотрудники» — по праву «Сотрудники: вкладка и личные права»")
+    return authority
+
+
+def get_staff_list_authority(authority: Annotated[Authority, Depends(get_authority)]) -> Authority:
+    """The staff list itself: the tab, or the sign-in / 2FA rights that act on people in it."""
+    if not authority.sees_staff_list:
         raise HTTPException(status_code=403, detail="Вкладка «Сотрудники» — по праву «Сотрудники: вкладка и личные права»")
     return authority
 
@@ -275,6 +284,7 @@ def _me(authority: Authority, session: Session) -> ManagerInfo:
         admin_servers=sorted(slug_of[s] for s in authority.admin_servers if s in slug_of),
         can_manage_roles=authority.can_manage_roles, can_assign_roles=authority.can_assign_roles,
         can_staff=authority.can_staff, can_manage_badges=authority.can_manage_badges, can_assign_badges=authority.can_assign_badges,
+        can_sessions=authority.can_sessions, can_mfa_reset=authority.can_mfa_reset,
         top_position=authority.top,
     )
 
@@ -287,7 +297,7 @@ def get_catalog() -> PermissionCatalogResponse:
 @router.get("", response_model=ModeratorListResponse)
 def list_staff(
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_staff_authority)],
+    authority: Annotated[Authority, Depends(get_staff_list_authority)],
 ) -> ModeratorListResponse:
     """Everyone with admin-panel access: the owner, admins, server admins, then the rest."""
     rows = session.scalars(
@@ -510,10 +520,12 @@ def _target(session: Session, authority: Authority, user_id: UUID) -> User:
 def staff_devices(
     user_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_staff_authority)],
+    authority: Annotated[Authority, Depends(get_staff_list_authority)],
 ) -> dict:
     from apps.api.app.api.routes.security import active_devices, device_view
 
+    if not (authority.can_sessions or authority.can_mfa_reset):
+        raise HTTPException(status_code=403, detail="Missing permission: staff.sessions")
     user = _target(session, authority, user_id)
     return {"items": [device_view(d, None) for d in active_devices(session, user.id)], "mfa_enabled": user.mfa_enabled}
 
@@ -522,11 +534,13 @@ def staff_devices(
 def staff_end_sessions(
     user_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_staff_authority)],
+    authority: Annotated[Authority, Depends(get_staff_list_authority)],
 ) -> dict:
     """Signs the person out everywhere — the site, the launcher, the admin panel."""
     from apps.api.app.core.sign_ins import revoke_devices
 
+    if not authority.can_sessions:
+        raise HTTPException(status_code=403, detail="Missing permission: staff.sessions")
     user = _target(session, authority, user_id)
     if user.id == authority.actor.id:
         raise HTTPException(status_code=400, detail="Свои входы завершай в профиле — «Активные входы»")
@@ -540,15 +554,18 @@ def staff_end_sessions(
 def staff_mfa_reset(
     user_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
-    authority: Annotated[Authority, Depends(get_staff_authority)],
+    authority: Annotated[Authority, Depends(get_staff_list_authority)],
 ) -> dict:
     """Lost phone: turns the person's 2FA off and signs them out; on the next visit to the
-    admin panel they set it up again. The owner and platform admins only."""
+    admin panel they set it up again. Platform admins and holders of staff.mfa.reset, on people
+    below them; the owner's 2FA only the owner."""
     from apps.api.app.core.sign_ins import revoke_devices
 
-    if not authority.platform:
-        raise HTTPException(status_code=403, detail="Сбросить 2FA может владелец или админ платформы")
+    if not authority.can_mfa_reset:
+        raise HTTPException(status_code=403, detail="Missing permission: staff.mfa.reset")
     user = _target(session, authority, user_id)
+    if user.id == authority.actor.id:
+        raise HTTPException(status_code=400, detail="Свою 2FA меняй в профиле — «Безопасность»")
     if user.is_owner and not authority.owner:
         raise HTTPException(status_code=403, detail="2FA владельца сбрасывает только он сам")
     user.mfa_totp_secret = None

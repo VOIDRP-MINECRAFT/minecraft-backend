@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 _EXACT_MESSAGES: dict[str, str] = {
+    "Staff access required": "Раздел только для сотрудников.",
+    "Admin access required": "Войди в аккаунт сотрудника.",
+    "Missing permission": "Нет права на это действие.",
     "User registered successfully. Email verification has been requested.": "Аккаунт создан. Мы отправили письмо для подтверждения почты.",
     "Email has been verified successfully.": "Почта успешно подтверждена.",
     "If the account exists and email is not verified, a new verification token has been issued.": "Если аккаунт существует и почта ещё не подтверждена, мы отправили новое письмо для подтверждения.",
@@ -198,6 +201,17 @@ def translate_user_message(message: str | None) -> str:
     for needle, replacement in _CONTAINS_RULES:
         if needle in lowered:
             return replacement
+
+    # «Missing permission: servers.manage / crashes.view» → names of the rights, as the
+    # admin panel shows them.
+    if text.startswith("Missing permission: "):
+        from apps.api.app.core.permissions import PERMISSION_CATALOG
+
+        labels = {p["key"]: p["label"] for g in PERMISSION_CATALOG for p in g["permissions"]}
+        keys = [k.strip() for k in text[len("Missing permission: "):].split("/")]
+        names = [f"«{labels.get(k.split(' ')[0], k)}»" for k in keys if k]
+        if names:
+            return ("Нет права " if len(names) == 1 else "Нужно одно из прав: ") + ", ".join(names)
 
     return text
 

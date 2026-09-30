@@ -50,6 +50,10 @@ class Authority:
         # The «Сотрудники» tab (personal grants); appointing admins stays with the owner and
         # platform admins.
         self.can_staff = self.platform or self.access.holds_everywhere("staff.manage")
+        # Staff sign-ins and 2FA: separate rights, so the owner can give them to someone who
+        # does not edit personal permissions. Never part of server admin.
+        self.can_sessions = self.platform or self.access.holds_everywhere("staff.sessions")
+        self.can_mfa_reset = self.platform or self.access.holds_everywhere("staff.mfa.reset")
         self.can_manage_badges = self.platform or self._somewhere("badges.manage")
         # Set by the page dependency: the actor's role owns badges (members hand them out).
         self.owns_badges = False
@@ -66,9 +70,14 @@ class Authority:
         return len(server_ids) > 0 and all(key in self.access.on(sid) for sid in server_ids)
 
     @property
+    def sees_staff_list(self) -> bool:
+        return self.can_staff or self.can_sessions or self.can_mfa_reset
+
+    @property
     def opens_staff_pages(self) -> bool:
         return (self.can_manage_roles or self.can_assign_roles or self.can_manage_badges
-                or self.can_assign_badges or self.can_staff or self.owns_badges)
+                or self.can_assign_badges or self.can_staff or self.owns_badges
+                or self.can_sessions or self.can_mfa_reset)
 
     # ── roles ────────────────────────────────────────────────────────────────
 
