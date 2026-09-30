@@ -42,7 +42,7 @@ class RoleBadge(BaseModel):
 class ModeratorRead(BaseModel):
     id: str
     site_login: str
-    email: str
+    email: str | None = None
     # Personal grants — platform-wide: global keys, and per-server keys granted on every server.
     permissions: list[str]
     # Personal per-server grants, by server slug.
@@ -178,7 +178,9 @@ def _read(u: User, session: Session, authority: Authority | None = None) -> Mode
     if editable and not u.is_admin and authority.can_staff:
         scope = None  # which keys exactly: Authority.may_grant, mirrored on the site
     return ModeratorRead(
-        id=str(u.id), site_login=u.site_login, email=u.email,
+        # Emails: platform admins see all; others only their own and of people below them.
+        id=str(u.id), site_login=u.site_login,
+        email=u.email if authority is None or authority.platform or editable or u.id == authority.actor.id else None,
         permissions=[] if u.is_admin else list(u.staff_permissions or []),
         server_permissions={} if u.is_admin else _by_slug(session, u.staff_server_permissions),
         role=_role(u),
