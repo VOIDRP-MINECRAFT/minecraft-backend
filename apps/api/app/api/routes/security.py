@@ -337,8 +337,12 @@ def _take_challenge(device: AuthDevice) -> bytes:
     return base64url_to_bytes(raw)
 
 
-def _passkey_name(device: AuthDevice, attachment: str | None, synced: bool) -> str:
-    if attachment == "cross-platform":
+def _passkey_name(device: AuthDevice, attachment: str | None, transports: list[str]) -> str:
+    """What to call a new key: a phone reached by QR (hybrid), a security key (USB / NFC /
+    Bluetooth), or the computer's own (Windows Hello, Face ID / Touch ID, Android)."""
+    if "hybrid" in transports:
+        return "Ключ на телефоне"
+    if attachment == "cross-platform" or any(t in transports for t in ("usb", "nfc", "ble")):
         return "Ключ безопасности"
     os_name = (describe(device.user_agent, device.device_name).get("os") or "")
     if os_name.startswith("Windows"):
@@ -347,7 +351,7 @@ def _passkey_name(device: AuthDevice, attachment: str | None, synced: bool) -> s
         return "Face ID / Touch ID"
     if os_name.startswith("Android"):
         return "Android"
-    return "Ключ доступа" + (" (синхронизируется)" if synced else "")
+    return "Ключ доступа"
 
 
 class PasskeyBody(BaseModel):
@@ -387,10 +391,11 @@ def passkey_register_verify(body: PasskeyBody, user: _User, device: _Device, ses
         raise HTTPException(status_code=400, detail=f"Ключ не принят: {exc}")
     synced = bool(getattr(v, "credential_backed_up", False))
     attachment = body.credential.get("authenticatorAttachment")
+    transports = list((body.credential.get("response") or {}).get("transports") or [])
     key = MfaPasskey(
         user_id=user.id, credential_id=bytes_to_base64url(v.credential_id), public_key=v.credential_public_key,
-        sign_count=v.sign_count, transports=list((body.credential.get("response") or {}).get("transports") or []),
-        name=(body.name or "").strip()[:80] or _passkey_name(device, attachment, synced), synced=synced,
+        sign_count=v.sign_count, transports=transports,
+        name=(body.name or "").strip()[:80] or _passkey_name(device, attachment, transports), synced=synced,
         last_used_at=utc_now(),
     )
     session.add(key)
@@ -439,6 +444,20 @@ def passkey_auth_verify(body: PasskeyBody, user: _User, device: _Device, session
     key.sign_count = v.new_sign_count
     key.last_used_at = utc_now()
     _mark_verified(session, user, device, "passkey", request)
+    return _status(user, device)
+
+
+class RenameBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+
+@router.patch("/mfa/passkeys/{key_id}")
+def passkey_rename(key_id: UUID, body: RenameBody, user: _User, device: _Device, session: _Db) -> dict:
+    key = next((k for k in user.mfa_passkeys if k.id == key_id), None)
+    if key is None:
+        raise HTTPException(status_code=404, detail="Ключ не найден")
+    key.name = body.name.strip()[:80]
+    session.commit()
     return _status(user, device)
 
 
