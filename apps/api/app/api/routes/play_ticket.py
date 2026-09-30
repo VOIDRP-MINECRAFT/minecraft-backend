@@ -13,6 +13,7 @@ from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 from apps.api.app.schemas.play_ticket import (
+    ConsumeByIpRequest,
     ConsumePlayTicketRequest,
     ConsumePlayTicketResponse,
     IssuePlayTicketRequest,
@@ -83,6 +84,31 @@ def consume_play_ticket(
             player_name=payload.player_name,
             launcher_proof=payload.launcher_proof,
         )
+    except PlayTicketValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=translate_user_message(str(exc))) from exc
+
+    return ConsumePlayTicketResponse(
+        user_id=consumed.user_id,
+        minecraft_nickname=consumed.minecraft_nickname,
+        legacy_auth_enabled=consumed.legacy_auth_enabled,
+        expires_at=consumed.expires_at,
+    )
+
+
+@server_router.post(
+    "/consume-by-ip",
+    response_model=ConsumePlayTicketResponse,
+    dependencies=[Depends(require_game_auth_secret)],
+)
+def consume_play_ticket_by_ip(
+    payload: ConsumeByIpRequest,
+    service: Annotated[PlayTicketService, Depends(get_play_ticket_service)],
+) -> ConsumePlayTicketResponse:
+    """Lets a player in at join by the ticket their launcher took from the same IP, without
+    waiting for the client to send it. 400 = nothing matches; the server then waits for the
+    client's ticket as before."""
+    try:
+        consumed = service.consume_by_ip(player_name=payload.player_name, ip=payload.ip)
     except PlayTicketValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=translate_user_message(str(exc))) from exc
 

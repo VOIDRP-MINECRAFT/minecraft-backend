@@ -27,6 +27,13 @@ class ConsumePlayTicketRequest(BaseModel):
     launcher_proof: str | None = None
 
 
+class ConsumeByIpRequest(BaseModel):
+    """The game server's own lookup at join: no ticket from the client, just who connected
+    and from where."""
+    player_name: str = Field(min_length=3, max_length=16)
+    ip: str = Field(min_length=3, max_length=64)
+
+
 class ConsumePlayTicketResponse(BaseModel):
     accepted: bool = True
     user_id: UUID

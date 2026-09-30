@@ -170,6 +170,57 @@ class PlayTicketService:
             expires_at=play_ticket.expires_at,
         )
 
+    # How old a ticket may be when the game server claims it by IP: the game has to start
+    # and load the pack after the launcher issues it, which takes minutes on a slow PC.
+    IP_CLAIM_MAX_AGE = timedelta(minutes=60)
+
+    def consume_by_ip(self, *, player_name: str, ip: str) -> ConsumedPlayTicket:
+        """Consumes the player's fresh ticket without the client sending it.
+
+        The server calls this the moment a player joins. It matches a ticket that is
+        unused, unexpired, issued in the last hour for this server and this nickname,
+        from the same IP the game connection comes from. So a player whose client is
+        slow to send its ticket (a heavy pack keeps the client thread busy for minutes)
+        is let in right away; the ticket the client sends later is already used and the
+        mod ignores that for an authenticated player.
+        """
+        ip = (ip or "").strip()
+        if not ip:
+            raise PlayTicketValidationError("play ticket is invalid")
+        requested_name_raw, requested_name_normalized = normalize_minecraft_nickname(player_name)
+        now = utc_now()
+        candidates = self.session.execute(
+            select(PlayTicket).where(
+                PlayTicket.server_id == self.server_id,
+                PlayTicket.issued_ip == ip,
+                PlayTicket.consumed_at.is_(None),
+                PlayTicket.expires_at > now,
+                PlayTicket.issued_at >= now - self.IP_CLAIM_MAX_AGE,
+            ).order_by(PlayTicket.issued_at.desc()).with_for_update()
+        ).scalars().all()
+        play_ticket = next(
+            (t for t in candidates if normalize_minecraft_nickname(t.minecraft_nickname)[1] == requested_name_normalized),
+            None,
+        )
+        if play_ticket is None:
+            raise PlayTicketValidationError("play ticket is invalid")
+
+        user = self.session.execute(select(User).where(User.id == play_ticket.user_id)).scalar_one_or_none()
+        if user is None or not user.is_active or user.player_account is None:
+            raise PlayTicketValidationError("ticket user is not available")
+
+        play_ticket.consumed_at = now
+        PlayerActivityService(self.session).record(
+            user_id=user.id, server_id=play_ticket.server_id, client=CLIENT_LAUNCHER
+        )
+        self.session.commit()
+        return ConsumedPlayTicket(
+            user_id=user.id,
+            minecraft_nickname=requested_name_raw,
+            legacy_auth_enabled=user.player_account.legacy_auth_enabled,
+            expires_at=play_ticket.expires_at,
+        )
+
     def _expire_existing_tickets(self, user_id: UUID, server_id: UUID) -> None:
         now = utc_now()
         active_tickets = self.session.execute(
