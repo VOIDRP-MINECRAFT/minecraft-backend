@@ -35,7 +35,7 @@ def auth_method(server: GameServer) -> str | None:
 
 
 def _backend_url() -> str:
-    return "https://api.void-rp.ru"
+    return get_settings().public_api_url.rstrip("/")
 
 
 def _header(server: GameServer, comment: str = "#") -> str:

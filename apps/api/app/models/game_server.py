@@ -119,6 +119,10 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # ``loader`` (the client pack): VexVol's players get a NeoForge pack while the server is
     # Paper. Picks the login method a partner installs (plugin core → VoidRpAuth, else the mod).
     server_core: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # The launcher connects to "<ticket label>.<host>" so a plugin server reads the play ticket
+    # from the address. Needs a wildcard DNS record for the domain — off unless the domain has
+    # one (login by nickname + IP works without it).
+    ticket_hostname: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # ── Connection / runtime ──────────────────────────────────────────────
     host: Mapped[str] = mapped_column(String(255), nullable=False)

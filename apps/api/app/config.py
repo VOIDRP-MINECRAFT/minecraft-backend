@@ -144,6 +144,10 @@ class Settings(BaseSettings):
     # Published builds of our plugins and mods for the «Интеграция» page (not public: served
     # through the admin API to staff with the right).
     releases_dir: str = "/home/mironoouv/voidrp_releases"
+    # What partner servers are told in generated configs and tips: the public API base (no
+    # /api/v1) and the address our backend reaches them from (for their RCON firewall).
+    public_api_url: str = "https://api.void-rp.ru"
+    backend_egress_ip: str = "80.68.9.233"
     launcher_public_manifest_url: str = (
         "https://void-rp.ru/launcher/self-update/manifest.json"
     )

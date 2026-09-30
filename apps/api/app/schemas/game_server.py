@@ -58,6 +58,7 @@ class GameServerPublic(BaseModel):
     staff_only: bool = False
     is_external: bool = False
     server_core: str | None = None
+    ticket_hostname: bool = False
     status: GameServerStatus | None = None
 
     model_config = {"from_attributes": True}
@@ -110,6 +111,7 @@ class GameServerCreate(BaseModel):
     staff_only: bool = False
     is_external: bool = False
     server_core: str | None = Field(default=None, pattern=r"^(paper|folia|neoforge|hybrid)$")
+    ticket_hostname: bool = False
 
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(default=25565, ge=1, le=65535)
@@ -163,6 +165,7 @@ class GameServerUpdate(BaseModel):
     staff_only: bool | None = None
     is_external: bool | None = None
     server_core: str | None = Field(default=None, pattern=r"^(paper|folia|neoforge|hybrid)$")
+    ticket_hostname: bool | None = None
 
     host: str | None = Field(default=None, min_length=1, max_length=255)
     port: int | None = Field(default=None, ge=1, le=65535)

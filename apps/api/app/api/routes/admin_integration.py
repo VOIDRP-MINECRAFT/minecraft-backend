@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.config import get_settings
 from apps.api.app.core import integration_catalog as cat
 from apps.api.app.core import server_reports
 from apps.api.app.core.audit import record_audit
@@ -86,9 +87,10 @@ def overview(server: _Server, session: _Db) -> dict:
     core_reported = next((r.core for r in reports if r.core and server_reports.is_fresh(r)), None)
     tips = []
     if server.is_external and server.rcon_port:
+        egress = get_settings().backend_egress_ip
         tips.append({"level": "warn", "text": "RCON открыт в интернет, а пароль к нему идёт открытым текстом. "
                      "Когда модуль мониторинга работает, RCON админке не нужен: закройте порт "
-                     f"{server.rcon_port} фаерволом или разрешите его только для 80.68.9.233."})
+                     f"{server.rcon_port} фаерволом или разрешите его только для {egress}."})
     if not server.server_core:
         tips.append({"level": "warn", "text": "Не указано ядро сервера (Paper, Folia, NeoForge…) — "
                      "владелец задаёт его в «Серверах». От него зависит, какой способ входа ставить."})
@@ -104,6 +106,8 @@ def overview(server: _Server, session: _Db) -> dict:
                      "reported_at": r.reported_at.isoformat(), "fresh": server_reports.is_fresh(r)} for r in reports],
         "tips": tips,
         "fresh_seconds": server_reports.FRESH_SECONDS,
+        "api_url": get_settings().public_api_url,
+        "backend_egress_ip": get_settings().backend_egress_ip,
     }
 
 
