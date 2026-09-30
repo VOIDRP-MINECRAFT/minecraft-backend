@@ -82,6 +82,14 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
     {
+        "group": "Права в игре (LuckPerms)",
+        "permissions": [
+            {"key": "game.view", "label": "Права в игре: смотреть группы и кто в них"},
+            {"key": "game.assign", "label": "Права в игре: выдавать группы людям и класть их в роли (легче своей группы)", "sensitive": True},
+            {"key": "game.groups.manage", "label": "Права в игре: менять состав групп (не входит в админство — выдаёт владелец)", "sensitive": True},
+        ],
+    },
+    {
         "group": "Безопасность",
         "permissions": [
             {"key": "punishments.view", "label": "Наказания (список банов/мутов)"},
@@ -156,7 +164,7 @@ SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
     "salary.", "backups.", "punishments.", "battlepass.", "upgrader.",
     "trader.", "news.", "files.", "plugins.", "donate.", "audit.", "feedback.", "mod_suggestions.",
-    "badges.",
+    "badges.", "game.",
 )
 # Per-server keys outside those prefixes. Crash reports carry the server picked in the
 # launcher; the crash *rules* stay platform-wide, their buttons touch players' files.
@@ -173,7 +181,7 @@ SERVER_KEYS: frozenset[str] = frozenset(
 
 # Per-server keys an admin of a server does NOT get just by being its admin — they are
 # given separately (by a role or personally) when really needed.
-NOT_VIA_SERVER_ADMIN: frozenset[str] = frozenset({"servers.manage"})
+NOT_VIA_SERVER_ADMIN: frozenset[str] = frozenset({"servers.manage", "game.groups.manage"})
 SERVER_ADMIN_KEYS: frozenset[str] = SERVER_KEYS - NOT_VIA_SERVER_ADMIN
 
 for _group in PERMISSION_CATALOG:

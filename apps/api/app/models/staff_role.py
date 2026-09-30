@@ -34,6 +34,8 @@ class StaffRole(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # A badge may belong to a role: that role's members hand it out and edit it, and it
     # lives on that role's servers.
     owner_role_id: Mapped[UUID | None] = mapped_column(ForeignKey("staff_roles.id", ondelete="SET NULL"), nullable=True)
+    # LuckPerms groups the role gives, per server: {"<game_servers.id>": ["moderator", …]}.
+    game_groups: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     owner_role: Mapped["StaffRole | None"] = relationship(remote_side="StaffRole.id", lazy="selectin", join_depth=1)
 
     @property

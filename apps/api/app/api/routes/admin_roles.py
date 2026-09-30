@@ -44,6 +44,8 @@ class RoleRead(BaseModel):
     permissions: list[str]
     # A badge: a label about the person, never any permission, no seniority.
     is_badge: bool = False
+    # LuckPerms groups the role gives, by server slug.
+    game_groups: dict[str, list[str]] = {}
     # For a badge: the role that owns it (its members hand it out).
     owner_role: dict | None = None
     # The viewer holds this role / badge.
@@ -66,6 +68,8 @@ class RoleBody(BaseModel):
     badge: bool = False
     # Badges only: tie it to a role (id) whose members then own it; None = not tied.
     owner_role_id: UUID | None = None
+    # LuckPerms groups by server slug; None = leave as they are.
+    game_groups: dict[str, list[str]] | None = None
 
 
 class RoleOrder(BaseModel):
@@ -96,6 +100,7 @@ def _read(role: StaffRole, session: Session, authority: Authority, members=None)
         servers=None if role.server_ids is None else [slug_of[s] for s in role.server_ids if s in slug_of],
         permissions=list(role.permissions or []),
         is_badge=role.is_badge,
+        game_groups={slug_of[k]: v for k, v in (role.game_groups or {}).items() if k in slug_of and v},
         owner_role={"id": str(role.owner_role.id), "name": role.owner_role.name, "color": role.owner_role.color}
         if role.is_badge and role.owner_role is not None else None,
         mine=authority.is_member(role),
@@ -134,6 +139,45 @@ def _owner_role(session: Session, authority: Authority, body: RoleBody) -> Staff
     if not authority.may_own_badge(owner):
         raise HTTPException(status_code=403, detail="Привязать значок можно к своей роли или к роли, которой управляешь")
     return owner
+
+
+def _game_groups(session: Session, authority: Authority, body: RoleBody, server_ids, old: dict | None) -> dict | None:
+    """Validates the LuckPerms groups a role gives: servers within the role's scope, groups
+    the plugin reported, and every group added or removed one the actor may hand out."""
+    if body.game_groups is None or body.badge:
+        return None
+    from apps.api.app.core import game_perms as gp
+
+    id_of = {slug: sid for sid, slug in _slugs(session).items()}
+    out: dict[str, list[str]] = {}
+    for slug, groups in body.game_groups.items():
+        groups = sorted({g.strip().lower() for g in groups if g and g.strip()})
+        if not groups:
+            continue
+        sid = id_of.get(slug)
+        if sid is None:
+            raise HTTPException(status_code=400, detail=f"Нет такого сервера: {slug}")
+        if server_ids is not None and sid not in [str(x) for x in server_ids]:
+            raise HTTPException(status_code=400, detail="Игровые группы — только на серверах этой роли")
+        known = gp.groups_by_name(gp.catalog(session, sid))
+        missing = [g for g in groups if g not in known]
+        if missing:
+            raise HTTPException(status_code=400, detail="На сервере нет групп: " + ", ".join(missing))
+        out[sid] = groups
+    old = old or {}
+    for sid in set(out) | set(old):
+        for g in set(out.get(sid, [])) ^ set(old.get(sid, [])):
+            if not gp.may_give(session, authority, sid, g):
+                raise HTTPException(status_code=403, detail=f"Группу «{g}» выдать нельзя: она не легче твоей игровой группы или только для владельца")
+    return out
+
+
+def _resync(session: Session, authority: Authority) -> None:
+    """Roles changed — LuckPerms groups follow (queued for the VoidRpPerms plugin)."""
+    from apps.api.app.core import game_perms as gp
+
+    session.flush()
+    gp.reconcile_all(session, authority.actor.site_login)
 
 
 def _get(session: Session, role_id: UUID) -> StaffRole:
@@ -185,9 +229,12 @@ def create_role(
         raise HTTPException(status_code=403, detail=_BADGE_DENY)
     if not _may_edit(authority, body.badge, position, server_ids, keys, owner):
         raise HTTPException(status_code=403, detail=_BADGE_DENY if body.badge else "Такую роль создать нельзя: в ней права, которых у тебя нет, или серверы не твои")
+    game_groups = _game_groups(session, authority, body, server_ids, None)
     role = StaffRole(name=name, color=color, position=position, server_ids=server_ids, permissions=keys,
-                     created_by=authority.actor.site_login, is_badge=body.badge, owner_role_id=owner.id if owner else None)
+                     created_by=authority.actor.site_login, is_badge=body.badge, owner_role_id=owner.id if owner else None,
+                     game_groups=game_groups or {})
     session.add(role)
+    _resync(session, authority)
     session.commit()
     session.refresh(role)
     _log(session, authority, "create", role, servers=body.servers, permissions=keys)
@@ -212,9 +259,15 @@ def update_role(
     if not _may_edit(authority, role.is_badge, role.position, server_ids, keys, owner):
         raise HTTPException(status_code=403, detail="Так изменить нельзя: в роли права, которых у тебя нет, или серверы не твои")
     before = {"name": role.name, "permissions": list(role.permissions or []), "servers": role.server_ids}
+    game_groups = _game_groups(session, authority, body, server_ids, role.game_groups)
     role.name, role.color, role.server_ids, role.permissions = name, color, server_ids, keys
     if role.is_badge:
         role.owner_role_id = owner.id if owner else None
+    if game_groups is not None:
+        role.game_groups = game_groups
+    elif server_ids is not None and role.game_groups:
+        role.game_groups = {k: v for k, v in role.game_groups.items() if k in [str(x) for x in server_ids]}
+    _resync(session, authority)
     session.commit()
     session.refresh(role)
     added = [k for k in keys if k not in before["permissions"]]
@@ -241,6 +294,7 @@ def delete_role(
         user = session.get(User, uid)
         if user is not None:
             refresh_staff_flag(session, user)
+    _resync(session, authority)
     session.commit()
 
 
@@ -357,6 +411,7 @@ def add_member(
         if not role.is_badge:
             _become_staff(user, authority.actor)
         session.add(StaffRoleMember(role_id=role.id, user_id=user.id, granted_by=authority.actor.site_login))
+        _resync(session, authority)
         session.commit()
         _audit(session, authority.actor, "role_add", user, role=role.name)
     return _read(role, session, authority)
@@ -378,6 +433,7 @@ def remove_member(
         raise HTTPException(status_code=403, detail="Снять эту роль может только тот, кто выше")
     session.execute(delete(StaffRoleMember).where(StaffRoleMember.role_id == role.id, StaffRoleMember.user_id == user.id))
     refresh_staff_flag(session, user)
+    _resync(session, authority)
     session.commit()
     _audit(session, authority.actor, "role_remove", user, role=role.name)
     return _read(role, session, authority)

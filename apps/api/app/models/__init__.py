@@ -140,6 +140,7 @@ from apps.api.app.models.user_consent import UserConsent
 from apps.api.app.models.staff_role import StaffRole, StaffRoleMember
 from apps.api.app.models.auth_device import AuthDevice
 from apps.api.app.models.mfa_passkey import MfaPasskey
+from apps.api.app.models.game_perm import GamePermApplied, GamePermCatalog, GamePermDirect, GamePermFlag, GamePermOp
 from apps.api.app.models.trader import (
     TraderCatalogItem,
     TraderSession,

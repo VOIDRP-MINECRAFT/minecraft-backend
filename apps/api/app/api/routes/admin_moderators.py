@@ -388,6 +388,9 @@ def revoke_moderator(
         if mine:
             session.execute(delete(StaffRoleMember).where(StaffRoleMember.user_id == user.id, StaffRoleMember.role_id.in_(mine)))
     refresh_staff_flag(session, user)
+    from apps.api.app.core import game_perms as gp
+
+    gp.reconcile_all(session, authority.actor.site_login)
     session.commit()
     _audit(session, authority.actor, "revoke", user, before=before, scope="all" if authority.platform else "what_actor_holds")
 
