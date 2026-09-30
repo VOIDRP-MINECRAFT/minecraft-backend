@@ -51,6 +51,9 @@ DEFAULT_AUTH_SETTINGS: dict[str, int] = {
     "auth_grace_seconds": 120,
     "request_timeout_ms": 60000,
     "reconnect_grant_minutes": 30,
+    # How long after the launcher issued it a ticket may still be matched by nickname + IP
+    # (the game has to start and load the pack first; heavy packs on slow PCs take long).
+    "ip_ticket_minutes": 60,
 }
 
 # Bounds are enforced on write (admin API) and again on read, so a hand-edited
@@ -60,6 +63,7 @@ AUTH_SETTINGS_BOUNDS: dict[str, tuple[int, int]] = {
     "auth_grace_seconds": (0, 3600),
     "request_timeout_ms": (1000, 1_200_000),
     "reconnect_grant_minutes": (1, 1440),
+    "ip_ticket_minutes": (1, 1440),
 }
 
 

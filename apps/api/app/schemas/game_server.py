@@ -217,6 +217,7 @@ class AuthSettingsUpdate(BaseModel):
     auth_grace_seconds: int | None = Field(default=None, ge=0, le=3600)
     request_timeout_ms: int | None = Field(default=None, ge=1000, le=1_200_000)
     reconnect_grant_minutes: int | None = Field(default=None, ge=1, le=1440)
+    ip_ticket_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
 class AuthSettingsAdmin(BaseModel):

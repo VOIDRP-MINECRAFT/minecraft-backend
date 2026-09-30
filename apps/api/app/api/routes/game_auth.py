@@ -59,8 +59,6 @@ MAX_FAILED_ATTEMPTS = 6
 LOCKOUT_SECONDS = 600
 
 
-# How recently the launcher must have taken the ticket for this path to accept it.
-LAUNCHER_TICKET_WINDOW_MINUTES = 10
 
 
 def _is_private(address: str) -> bool:
@@ -386,10 +384,10 @@ def game_launcher_ticket(
     if ticket_nick != normalized:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Билет выдан другому нику.")
 
-    # Only a ticket taken moments ago counts here. Tickets live for a day so the
-    # launcher can keep one around, but "the player our launcher just sent" is a
-    # question about the last few minutes.
-    if ticket.issued_at < utc_now() - timedelta(minutes=LAUNCHER_TICKET_WINDOW_MINUTES):
+    # Only a recently taken ticket counts here (the server's ip_ticket_minutes, set in the
+    # admin). Tickets live for a day so the launcher can keep one around, but "the player our
+    # launcher just sent" is about the time it takes to start the game.
+    if ticket.issued_at < utc_now() - timedelta(minutes=server.resolved_auth_settings["ip_ticket_minutes"]):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Билет лаунчера устарел.")
 
     # The address must match the one the launcher asked from — otherwise knowing a

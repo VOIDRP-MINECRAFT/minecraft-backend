@@ -73,6 +73,11 @@ class PlayTicketService:
             return self.settings.play_ticket_expire_minutes
         return server.resolved_auth_settings["play_ticket_expire_minutes"]
 
+    def _ip_ticket_minutes(self) -> int:
+        """How long a ticket may be claimed by nickname + IP — per server, from the admin."""
+        server = self.session.get(GameServer, self.server_id)
+        return server.resolved_auth_settings["ip_ticket_minutes"] if server else 60
+
     def issue_for_user(
         self,
         *,
@@ -170,9 +175,6 @@ class PlayTicketService:
             expires_at=play_ticket.expires_at,
         )
 
-    # How old a ticket may be when the game server claims it by IP: the game has to start
-    # and load the pack after the launcher issues it, which takes minutes on a slow PC.
-    IP_CLAIM_MAX_AGE = timedelta(minutes=60)
 
     def consume_by_ip(self, *, player_name: str, ip: str) -> ConsumedPlayTicket:
         """Consumes the player's fresh ticket without the client sending it.
@@ -195,7 +197,7 @@ class PlayTicketService:
                 PlayTicket.issued_ip == ip,
                 PlayTicket.consumed_at.is_(None),
                 PlayTicket.expires_at > now,
-                PlayTicket.issued_at >= now - self.IP_CLAIM_MAX_AGE,
+                PlayTicket.issued_at >= now - timedelta(minutes=self._ip_ticket_minutes()),
             ).order_by(PlayTicket.issued_at.desc()).with_for_update()
         ).scalars().all()
         play_ticket = next(

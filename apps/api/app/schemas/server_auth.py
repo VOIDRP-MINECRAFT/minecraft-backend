@@ -55,3 +55,4 @@ class AuthSettingsResponse(BaseModel):
     auth_grace_seconds: int
     request_timeout_ms: int
     reconnect_grant_minutes: int
+    ip_ticket_minutes: int = 60
