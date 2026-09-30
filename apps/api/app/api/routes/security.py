@@ -59,6 +59,9 @@ def _status(user: User, device: AuthDevice | None) -> dict:
         "telegram": bool(user.mfa_telegram_enabled_at and user.telegram_user_id),
         "telegram_linked": bool(user.telegram_user_id),
         "backup_left": len(user.mfa_backup_hashes or []),
+        "passkey": bool(user.mfa_passkeys),
+        "passkeys": [{"id": str(k.id), "name": k.name, "synced": k.synced, "created_at": k.created_at.isoformat(),
+                      "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None} for k in user.mfa_passkeys],
         "device_verified": mfa_fresh(device),
         "verified_until": (device.mfa_at + mfa.MFA_TTL).isoformat() if mfa_fresh(device) else None,
     }
@@ -88,7 +91,7 @@ def _fail(session: Session, device: AuthDevice, what: str = "код") -> None:
                             detail="Слишком много неверных попыток — вход на этом устройстве завершён. Войди заново.")
     session.commit()
     left = mfa.MAX_FAILURES - device.mfa_failures
-    word = "Неверный пароль" if what == "пароль" else "Неверный код"
+    word = {"пароль": "Неверный пароль", "ключ": "Ключ не подошёл"}.get(what, "Неверный код")
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{word}. Осталось попыток: {left}")
 
 
@@ -222,7 +225,8 @@ def mfa_disable(body: DisableBody, user: _User, device: _Device, session: _Db, r
     required for the admin panel."""
     if not reauth_fresh(device):
         raise HTTPException(status_code=403, detail="reauth_required")
-    others = bool(user.mfa_telegram_enabled_at and user.telegram_user_id) if body.method == "totp" else bool(user.mfa_totp_enabled_at)
+    others = (bool(user.mfa_telegram_enabled_at and user.telegram_user_id) if body.method == "totp"
+              else bool(user.mfa_totp_enabled_at)) or bool(user.mfa_passkeys)
     if is_staff(user) and not others:
         raise HTTPException(status_code=400, detail="Для работы в админке нужен хотя бы один способ 2FA — сначала подключи другой")
     if body.method == "totp":
@@ -293,3 +297,167 @@ def end_other_devices(user: _User, device: _Device, session: _Db, request: Reque
     session.commit()
     record_audit(session, actor=user, category="security", action="devices_end_others", meta={"count": n}, request=request)
     return {"ended": n}
+
+
+# ── passkeys (WebAuthn) ──────────────────────────────────────────────────────
+
+import json as _json  # noqa: E402
+
+import webauthn  # noqa: E402
+from webauthn.helpers import base64url_to_bytes, bytes_to_base64url  # noqa: E402
+from webauthn.helpers.structs import (  # noqa: E402
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
+
+from apps.api.app.models.mfa_passkey import MfaPasskey  # noqa: E402
+
+_CHALLENGE_TTL = timedelta(minutes=5)
+
+
+def _rp() -> tuple[str, list[str]]:
+    from urllib.parse import urlparse
+
+    s = get_settings()
+    base = s.website_base_url.rstrip("/")
+    rp_id = s.webauthn_rp_id or urlparse(base).hostname or "void-rp.ru"
+    origins = [base] + [o.strip().rstrip("/") for o in (s.webauthn_extra_origins or "").split(",") if o.strip()]
+    return rp_id, origins
+
+
+def _take_challenge(device: AuthDevice) -> bytes:
+    raw = device.webauthn_challenge
+    ok = raw and device.webauthn_challenge_expires_at and device.webauthn_challenge_expires_at > utc_now()
+    device.webauthn_challenge = None
+    device.webauthn_challenge_expires_at = None
+    if not ok:
+        raise HTTPException(status_code=400, detail="Запрос устарел — нажми ещё раз")
+    return base64url_to_bytes(raw)
+
+
+def _passkey_name(device: AuthDevice, attachment: str | None, synced: bool) -> str:
+    if attachment == "cross-platform":
+        return "Ключ безопасности"
+    os_name = (describe(device.user_agent, device.device_name).get("os") or "")
+    if os_name.startswith("Windows"):
+        return "Windows Hello"
+    if os_name.startswith(("iOS", "macOS")):
+        return "Face ID / Touch ID"
+    if os_name.startswith("Android"):
+        return "Android"
+    return "Ключ доступа" + (" (синхронизируется)" if synced else "")
+
+
+class PasskeyBody(BaseModel):
+    credential: dict
+    name: str | None = Field(default=None, max_length=80)
+
+
+@router.post("/mfa/passkey/register/options")
+def passkey_register_options(user: _User, device: _Device, session: _Db) -> dict:
+    """Options for navigator.credentials.create(): a new passkey for this account."""
+    if user.mfa_enabled and not (mfa_fresh(device) or reauth_fresh(device)):
+        # Adding a key to an account that already has 2FA — prove it is you first.
+        raise HTTPException(status_code=403, detail="reauth_required")
+    rp_id, _ = _rp()
+    options = webauthn.generate_registration_options(
+        rp_id=rp_id, rp_name="VoidRP", user_id=user.id.bytes, user_name=user.site_login,
+        user_display_name=user.site_login,
+        exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(k.credential_id)) for k in user.mfa_passkeys],
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED, user_verification=UserVerificationRequirement.PREFERRED),
+    )
+    device.webauthn_challenge = bytes_to_base64url(options.challenge)
+    device.webauthn_challenge_expires_at = utc_now() + _CHALLENGE_TTL
+    session.commit()
+    return _json.loads(webauthn.options_to_json(options))
+
+
+@router.post("/mfa/passkey/register/verify")
+def passkey_register_verify(body: PasskeyBody, user: _User, device: _Device, session: _Db, request: Request) -> dict:
+    challenge = _take_challenge(device)
+    rp_id, origins = _rp()
+    try:
+        v = webauthn.verify_registration_response(credential=body.credential, expected_challenge=challenge,
+                                                  expected_rp_id=rp_id, expected_origin=origins)
+    except Exception as exc:  # noqa: BLE001 — the library raises several kinds
+        session.commit()
+        raise HTTPException(status_code=400, detail=f"Ключ не принят: {exc}")
+    synced = bool(getattr(v, "credential_backed_up", False))
+    attachment = body.credential.get("authenticatorAttachment")
+    key = MfaPasskey(
+        user_id=user.id, credential_id=bytes_to_base64url(v.credential_id), public_key=v.credential_public_key,
+        sign_count=v.sign_count, transports=list((body.credential.get("response") or {}).get("transports") or []),
+        name=(body.name or "").strip()[:80] or _passkey_name(device, attachment, synced), synced=synced,
+        last_used_at=utc_now(),
+    )
+    session.add(key)
+    codes = None
+    if not user.mfa_backup_hashes:
+        codes, user.mfa_backup_hashes = mfa.new_backup_codes()
+    session.flush()
+    session.refresh(user)
+    record_audit(session, actor=user, category="security", action="mfa_enable",
+                 meta={"method": "passkey", "name": key.name}, request=request)
+    _mark_verified(session, user, device, "passkey", None)
+    return {**_status(user, device), "backup_codes": codes}
+
+
+@router.post("/mfa/passkey/auth/options")
+def passkey_auth_options(user: _User, device: _Device, session: _Db) -> dict:
+    """Options for navigator.credentials.get(): unlock the admin panel with a passkey."""
+    if not user.mfa_passkeys:
+        raise HTTPException(status_code=400, detail="Ключей доступа нет — войди кодом")
+    rp_id, _ = _rp()
+    options = webauthn.generate_authentication_options(
+        rp_id=rp_id,
+        allow_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(k.credential_id)) for k in user.mfa_passkeys],
+        user_verification=UserVerificationRequirement.PREFERRED,
+    )
+    device.webauthn_challenge = bytes_to_base64url(options.challenge)
+    device.webauthn_challenge_expires_at = utc_now() + _CHALLENGE_TTL
+    session.commit()
+    return _json.loads(webauthn.options_to_json(options))
+
+
+@router.post("/mfa/passkey/auth/verify")
+def passkey_auth_verify(body: PasskeyBody, user: _User, device: _Device, session: _Db, request: Request) -> dict:
+    challenge = _take_challenge(device)
+    raw_id = str(body.credential.get("id") or body.credential.get("rawId") or "")
+    key = next((k for k in user.mfa_passkeys if k.credential_id == raw_id), None)
+    if key is None:
+        _fail(session, device, "ключ")
+    rp_id, origins = _rp()
+    try:
+        v = webauthn.verify_authentication_response(
+            credential=body.credential, expected_challenge=challenge, expected_rp_id=rp_id, expected_origin=origins,
+            credential_public_key=key.public_key, credential_current_sign_count=key.sign_count)
+    except Exception:  # noqa: BLE001
+        _fail(session, device, "ключ")
+    key.sign_count = v.new_sign_count
+    key.last_used_at = utc_now()
+    _mark_verified(session, user, device, "passkey", request)
+    return _status(user, device)
+
+
+@router.delete("/mfa/passkeys/{key_id}")
+def passkey_delete(key_id: UUID, user: _User, device: _Device, session: _Db, request: Request) -> dict:
+    if not reauth_fresh(device):
+        raise HTTPException(status_code=403, detail="reauth_required")
+    key = next((k for k in user.mfa_passkeys if k.id == key_id), None)
+    if key is None:
+        raise HTTPException(status_code=404, detail="Ключ не найден")
+    others = bool(user.mfa_totp_enabled_at or (user.mfa_telegram_enabled_at and user.telegram_user_id)
+                  or len(user.mfa_passkeys) > 1)
+    if is_staff(user) and not others:
+        raise HTTPException(status_code=400, detail="Для работы в админке нужен хотя бы один способ 2FA — сначала подключи другой")
+    user.mfa_passkeys.remove(key)
+    session.flush()
+    if not user.mfa_enabled:
+        user.mfa_backup_hashes = []
+    record_audit(session, actor=user, category="security", action="mfa_disable",
+                 meta={"method": "passkey", "name": key.name}, request=request)
+    session.commit()
+    return _status(user, device)

@@ -63,9 +63,14 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     mfa_backup_hashes: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     mfa_totp_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
+    # Passkeys (WebAuthn) — the third 2FA method.
+    mfa_passkeys: Mapped[list["MfaPasskey"]] = relationship("MfaPasskey", lazy="select", cascade="all, delete-orphan",
+                                                            order_by="MfaPasskey.created_at")
+
     @property
     def mfa_enabled(self) -> bool:
-        return bool(self.mfa_totp_enabled_at or (self.mfa_telegram_enabled_at and self.telegram_user_id))
+        return bool(self.mfa_totp_enabled_at or (self.mfa_telegram_enabled_at and self.telegram_user_id)
+                    or self.mfa_passkeys)
 
     # Telegram account link (for the aiogram bot: news publishing / admin).
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True, index=True)

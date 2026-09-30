@@ -553,6 +553,7 @@ def staff_mfa_reset(
     user.mfa_totp_last_step = None
     user.mfa_telegram_enabled_at = None
     user.mfa_backup_hashes = []
+    user.mfa_passkeys.clear()
     n = revoke_devices(session, user.id)
     session.commit()
     _audit(session, authority.actor, "mfa_reset", user, devices_signed_out=n)

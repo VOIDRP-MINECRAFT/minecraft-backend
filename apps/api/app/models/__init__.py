@@ -139,6 +139,7 @@ from apps.api.app.models.player_guide_item import PlayerGuideItem
 from apps.api.app.models.user_consent import UserConsent
 from apps.api.app.models.staff_role import StaffRole, StaffRoleMember
 from apps.api.app.models.auth_device import AuthDevice
+from apps.api.app.models.mfa_passkey import MfaPasskey
 from apps.api.app.models.trader import (
     TraderCatalogItem,
     TraderSession,

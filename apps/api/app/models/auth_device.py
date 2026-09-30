@@ -35,3 +35,6 @@ class AuthDevice(UuidPrimaryKeyMixin, Base):
     mfa_code_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     mfa_code_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mfa_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # A pending passkey ceremony (registration or sign-in): its challenge, base64url.
+    webauthn_challenge: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    webauthn_challenge_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

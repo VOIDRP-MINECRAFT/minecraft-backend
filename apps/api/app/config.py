@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # TOTP secrets are encrypted with (empty = derived from JWT_SECRET_KEY).
     staff_mfa_required: bool = True
     mfa_encryption_key: str = ""
+    # Passkeys: the site's domain (empty = the host of WEBSITE_BASE_URL) and the extra
+    # origins allowed besides WEBSITE_BASE_URL (comma-separated).
+    webauthn_rp_id: str = ""
+    webauthn_extra_origins: str = "https://www.void-rp.ru"
 
     # Outbound HTTP(S) proxy for external calls (Telegram/Discord). This host has
     # no direct egress — traffic must go through the local proxy. Empty → direct.
