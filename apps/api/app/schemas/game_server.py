@@ -46,6 +46,9 @@ class GameServerPublic(BaseModel):
     # A donation shop is connected: the server's own EasyDonate key, or the default server
     # (which falls back to the global key). The admin shows «Донаты» only then.
     donate_enabled: bool = False
+    # Modules our plugins on the server report working right now (fresh heartbeats) —
+    # e.g. the admin shows «Античит» on a partner's server only with "anticheat".
+    modules: list[str] = Field(default_factory=list)
     map_url: str | None = None
     accent_color: str | None = None
     features: dict[str, bool] = Field(default_factory=dict)

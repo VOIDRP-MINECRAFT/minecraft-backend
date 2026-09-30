@@ -77,8 +77,29 @@ def _warm(servers: list[GameServer]) -> None:
         list(_pinger.map(lambda a: _do_ping(*a), cold))
 
 
-def _to_public(server: GameServer, with_status: bool = True, may_join=None) -> GameServerPublic:
+def _fresh_modules(session: Session) -> dict:
+    """server_id → names of modules a fresh plugin heartbeat reports working (one query)."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from apps.api.app.core.security import utc_now
+    from apps.api.app.core.server_reports import FRESH_SECONDS
+    from apps.api.app.models.server_report import ServerPluginReport
+
+    out: dict = {}
+    rows = session.execute(select(ServerPluginReport.server_id, ServerPluginReport.modules).where(
+        ServerPluginReport.reported_at >= utc_now() - timedelta(seconds=FRESH_SECONDS))).all()
+    for sid, modules in rows:
+        for name, state in (modules or {}).items():
+            if isinstance(state, dict) and state.get("ok"):
+                out.setdefault(sid, set()).add(name)
+    return out
+
+
+def _to_public(server: GameServer, with_status: bool = True, may_join=None, modules=None) -> GameServerPublic:
     dto = GameServerPublic.model_validate(server)
+    dto.modules = sorted((modules or {}).get(server.id, ()))
     dto.can_join_maintenance = bool(server.maintenance and may_join is not None and may_join(server))
     dto.donate_enabled = bool((server.easydonate_shop_key or "").strip()) or bool(server.is_default)
     if with_status:
@@ -109,7 +130,8 @@ def list_servers(
 ) -> list[GameServerPublic]:
     servers = [s for s in GameServerRepository(session).list_visible() if not s.staff_only or may_see_hidden(s)]
     _warm(servers)
-    return [_to_public(s, may_join=may_join) for s in servers]
+    modules = _fresh_modules(session)
+    return [_to_public(s, may_join=may_join, modules=modules) for s in servers]
 
 
 @router.get("/{slug}", response_model=GameServerPublic)
@@ -122,4 +144,4 @@ def get_server(
     server = GameServerRepository(session).get_by_slug(slug)
     if server is None or not server.is_visible or (server.staff_only and not may_see_hidden(server)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
-    return _to_public(server, may_join=may_join)
+    return _to_public(server, may_join=may_join, modules=_fresh_modules(session))

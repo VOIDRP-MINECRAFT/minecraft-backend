@@ -554,7 +554,10 @@ _PLUGIN_LOADERS = frozenset({"paper", "purpur", "spigot", "bukkit", "folia", "pu
 def _applies(server: GameServer, key: str) -> bool:
     """A server reads only its own anticheat's thresholds: Paper-type servers the VoidRP
     Guard plugin's (``guard_*``), servers on mods the voidrp_anticheat mod's."""
-    plugin_server = (server.loader or "").lower() in _PLUGIN_LOADERS
+    # What the server itself runs (server_core) decides; ``loader`` is the client pack and on a
+    # partner server can differ (VexVol: NeoForge pack, Paper server). Hybrid cores run our mod.
+    core = (getattr(server, "server_core", None) or "").lower()
+    plugin_server = core in ("paper", "folia") if core else (server.loader or "").lower() in _PLUGIN_LOADERS
     return key.startswith("guard_") == plugin_server
 
 

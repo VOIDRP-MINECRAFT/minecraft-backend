@@ -555,7 +555,8 @@ def query_tps(server: "GameServer", timeout: float = 3.0) -> dict | None:
     # Query the loader's own command first so the common case is one RCON
     # round-trip (matters for slow/laggy servers): Paper-family → `tps`,
     # everything else → `neoforge tps`. Fall back to the other on a miss.
-    loader = (server.loader or "").lower()
+    # server_core (what the server runs) over loader (the client pack) when it is set.
+    loader = (getattr(server, "server_core", None) or server.loader or "").lower()
     paper_like = any(k in loader for k in ("paper", "purpur", "spigot", "bukkit", "mohist", "folia"))
     cmds = ["tps", "neoforge tps"] if paper_like else ["neoforge tps", "tps"]
 

@@ -30,6 +30,7 @@ MODULE_LABELS: dict[str, str] = {
     "perms": "Права в игре (LuckPerms из админки)",
     "chat": "Чат с префиксами",
     "anticheat": "Античит VoidRP Guard",
+    "grim": "GrimAC (флаги движения и боя для VoidRP Guard)",
     "item_bans": "Бан предметов",
 }
 
