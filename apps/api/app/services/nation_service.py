@@ -4,7 +4,7 @@ import re
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from apps.api.app.models.alliance import Alliance, AllianceMember
@@ -223,15 +223,16 @@ class NationService:
         if nation is None or not nation.is_public:
             raise NationNotFoundError("nation was not found")
 
+        # One row per (nation, user): an old approved/rejected request is reopened below
+        # instead of inserting a second one, so a rejected or returning player can apply again.
         existing_request = self.session.execute(
             select(NationJoinRequest).where(
                 NationJoinRequest.nation_id == nation.id,
                 NationJoinRequest.user_id == current_user.id,
-                NationJoinRequest.status == "pending",
             )
         ).scalar_one_or_none()
 
-        if existing_request is not None:
+        if existing_request is not None and existing_request.status == "pending":
             raise NationConflictError("join request already exists")
 
         if nation.recruitment_policy == "invite_only":
@@ -261,14 +262,22 @@ class NationService:
                 nation=self._build_read(nation, viewer=current_user),
             )
 
-        join_request = NationJoinRequest(
-            server_id=self.server_id,
-            nation_id=nation.id,
-            user_id=current_user.id,
-            message=(payload.message or "").strip() or None,
-            status="pending",
-        )
-        self.session.add(join_request)
+        message = (payload.message or "").strip() or None
+        if existing_request is not None:
+            join_request = existing_request
+            join_request.message = message
+            join_request.status = "pending"
+            join_request.reviewed_by_user_id = None
+            join_request.created_at = func.now()
+        else:
+            join_request = NationJoinRequest(
+                server_id=self.server_id,
+                nation_id=nation.id,
+                user_id=current_user.id,
+                message=message,
+                status="pending",
+            )
+            self.session.add(join_request)
 
         self.activity_service.record(
             nation_id=nation.id,
