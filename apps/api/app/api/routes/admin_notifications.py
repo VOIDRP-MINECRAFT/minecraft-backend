@@ -107,6 +107,23 @@ def list_notifications(
                 link="/admin/anticheat",
             ))
 
+    # Our plugins an external server runs in an older version than the one offered.
+    from apps.api.app.core import integration_state
+    for srv in session.scalars(select(GameServer).where(GameServer.is_external.is_(True))).all():
+        if "integration.view" not in access.on(srv.id):
+            continue
+        old = integration_state.outdated(session, srv)
+        if old:
+            names = ", ".join(f"{o['name']} {o['installed']} → {o['latest']}" for o in old)
+            items.append(AdminNotification(
+                id=f"integration-outdated-{srv.slug}",
+                level="error" if any(o["important"] for o in old) else "warning",
+                count=len(old),
+                title="Есть обновления плагинов VoidRP",
+                message=f"Сервер «{srv.name}»: {names}.",
+                link=f"/admin/integration?server={srv.slug}",
+            ))
+
     if "monitoring.view" in perms or "servers.manage" in perms:
         maint = session.scalars(
             select(GameServer).where(GameServer.maintenance.is_(True)).order_by(GameServer.sort_order)

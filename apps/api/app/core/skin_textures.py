@@ -15,6 +15,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import httpx
 from sqlalchemy import select
@@ -31,6 +32,7 @@ MINESKIN_URL = "https://api.mineskin.org/v2/generate"
 USER_AGENT = "VoidRP/1.0 (+https://void-rp.ru)"
 MOJANG_TTL = 6 * 3600          # a nickname's Mojang skin rarely changes
 MOJANG_MISS_TTL = 3600         # not a Mojang name, or Mojang was down
+REFUSED_TTL = 6 * 3600         # MineSkin turned the picture down (banned, unreadable)
 
 # One MineSkin worker: without a key it allows a request every ~6 s, so queued skins go
 # through one at a time. Mojang lookups are quick and have their own pool.
@@ -72,9 +74,20 @@ def _forget_player_cache(nick_normalized: str | None) -> None:
 
 
 # ── VoidRP skins → MineSkin ──────────────────────────────────────────────────
+def refused(sha256: str, model_variant: str | None) -> bool:
+    """MineSkin recently turned this skin down; callers fall back to the Mojang skin."""
+    return RedisCacheService().get_json(_refused_key(sha256, _variant(model_variant))) is not None
+
+
+def _refused_key(sha256: str, variant: str) -> str:
+    return f"skin_sign_refused:{sha256}:{variant}"
+
+
 def request_signing(sha256: str, model_variant: str | None, url: str,
                     nick_normalized: str | None = None) -> None:
-    """Queue a skin for signing unless it is signed or already queued."""
+    """Queue a skin for signing unless it is signed, already queued or recently refused."""
+    if refused(sha256, model_variant):
+        return
     key = f"sign:{sha256}:{_variant(model_variant)}"
     if not _claim(key):
         return
@@ -104,6 +117,10 @@ def sign_now(sha256: str, model_variant: str | None, url: str) -> SkinTexture | 
     data = _mineskin_generate(url, variant, name=f"voidrp-{sha256[:10]}")
     if data is None:
         return None
+    if data.get("refused"):
+        RedisCacheService().set_json(_refused_key(sha256, variant), {"reason": data["refused"]},
+                                     ttl_seconds=REFUSED_TTL)
+        return None
 
     with SessionLocal() as session:
         row = SkinTexture(sha256=sha256, model_variant=variant, value=data["value"],
@@ -121,18 +138,26 @@ def sign_now(sha256: str, model_variant: str | None, url: str) -> SkinTexture | 
 
 def _mineskin_generate(url: str, variant: str, name: str) -> dict | None:
     global _next_request_at
-    headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json"}
+    headers = {"User-Agent": USER_AGENT}
     key = (get_settings().mineskin_api_key or "").strip()
     if key:
         headers["Authorization"] = f"Bearer {key}"
-    body = {"url": url, "variant": variant, "visibility": "unlisted", "name": name}
+    fields = {"variant": variant, "visibility": "unlisted", "name": name}
+    # Our own media is sent as the file itself: MineSkin fetching it by URL can time out.
+    local = _local_media_file(url)
+    if local is None:
+        headers["Content-Type"] = "application/json"
 
     for _attempt in range(4):
         wait = _next_request_at - time.time()
         if wait > 0:
             time.sleep(wait)
         try:
-            resp = httpx.post(MINESKIN_URL, json=body, headers=headers, timeout=60.0)
+            if local is not None:
+                resp = httpx.post(MINESKIN_URL, data=fields, headers=headers, timeout=60.0,
+                                  files={"file": (local.name, local.read_bytes(), "image/png")})
+            else:
+                resp = httpx.post(MINESKIN_URL, json={**fields, "url": url}, headers=headers, timeout=60.0)
         except httpx.HTTPError as exc:
             log.warning("MineSkin unreachable: %s", exc)
             _next_request_at = time.time() + 10
@@ -143,9 +168,10 @@ def _mineskin_generate(url: str, variant: str, name: str) -> dict | None:
         if resp.status_code == 429:
             continue
         if resp.status_code >= 400 or not payload.get("success"):
-            log.warning("MineSkin refused %s: http %s %s", url, resp.status_code,
-                        str(payload.get("errors") or payload.get("error") or "")[:300] if payload else resp.text[:300])
-            return None
+            reason = str(payload.get("errors") or payload.get("error") or "")[:300] if payload else resp.text[:300]
+            log.warning("MineSkin refused %s: http %s %s", url, resp.status_code, reason)
+            # 4xx is about the picture itself: don't ask again for a while.
+            return {"refused": reason or f"http {resp.status_code}"} if resp.status_code < 500 else None
         texture = ((payload.get("skin") or {}).get("texture") or {}).get("data") or {}
         if not texture.get("value") or not texture.get("signature"):
             log.warning("MineSkin answer without a signed texture for %s", url)
@@ -153,6 +179,16 @@ def _mineskin_generate(url: str, variant: str, name: str) -> dict | None:
         return {"value": texture["value"], "signature": texture["signature"],
                 "uuid": (payload.get("skin") or {}).get("uuid")}
     return None
+
+
+def _local_media_file(url: str) -> Path | None:
+    settings = get_settings()
+    base = (settings.media_public_base_url or "").rstrip("/") + "/"
+    if not url.startswith(base):
+        return None
+    root = Path(settings.media_storage_root).resolve()
+    path = (root / url[len(base):]).resolve()
+    return path if path.is_file() and root in path.parents else None
 
 
 def _json(resp: httpx.Response) -> dict:

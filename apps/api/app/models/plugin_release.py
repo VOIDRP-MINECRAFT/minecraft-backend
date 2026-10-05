@@ -29,4 +29,14 @@ class PluginRelease(UuidPrimaryKeyMixin, Base):
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     recommended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     published_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # "stable" | "beta" (a GitHub pre-release). Only stable builds are recommended on their own.
+    channel: Mapped[str] = mapped_column(String(8), nullable=False, default="stable", server_default="stable")
+    # Withdrawn by a platform admin: hidden from partners, never offered or announced.
+    yanked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # A fix partners should not skip (security, data loss): announced louder.
+    important: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # "manual" (apps.worker.publish_release) | "github" (apps.worker.release_sync).
+    source: Mapped[str] = mapped_column(String(8), nullable=False, default="manual", server_default="manual")
+    github_asset_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
+    source_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -13,16 +13,23 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.core import integration_catalog as cat
+from apps.api.app.core import integration_notices, integration_state
 from apps.api.app.core import server_reports
 from apps.api.app.core.audit import record_audit
 from apps.api.app.core.security import utc_now
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import get_current_staff_user, require_permission, require_reauth
+from apps.api.app.dependencies.admin import (
+    get_current_staff_user,
+    require_admin_access,
+    require_permission,
+    require_reauth,
+)
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.plugin_release import PluginRelease
@@ -35,48 +42,11 @@ _Server = Annotated[GameServer, Depends(resolve_server)]
 _Db = Annotated[Session, Depends(get_db_session)]
 
 
-def _version_key(v: str | None) -> tuple:
-    parts = []
-    for p in (v or "").replace("-", ".").split("."):
-        parts.append((0, int(p)) if p.isdigit() else (1, p))
-    return tuple(parts)
-
-
-def _release_view(r: PluginRelease) -> dict:
-    return {
-        "id": str(r.id), "version": r.version, "platforms": r.platforms, "mc_versions": r.mc_versions,
-        "changelog": r.changelog, "filename": r.filename, "size": r.size, "sha256": r.sha256,
-        "recommended": r.recommended, "published_at": r.published_at.isoformat() if r.published_at else None,
-    }
-
-
 @router.get("")
 def overview(server: _Server, session: _Db) -> dict:
     reports = server_reports.reports(session, server)
-    by_plugin = {r.plugin.lower(): r for r in reports}
     have = server_reports.modules(session, server)
-    releases = session.scalars(select(PluginRelease).order_by(PluginRelease.published_at.desc())).all()
-
-    items = []
-    for e in cat.for_server(server):
-        item = {k: v for k, v in e.items()}
-        item["has_config"] = e["key"] in cat.CONFIG_BUILDERS
-        if e["kind"] == "ours":
-            own = [r for r in releases if r.plugin == e["key"]]
-            own.sort(key=lambda r: _version_key(r.version), reverse=True)
-            latest = next((r for r in own if r.recommended), own[0] if own else None)
-            item["releases"] = [_release_view(r) for r in own]
-            item["latest"] = _release_view(latest) if latest else None
-            rep = by_plugin.get(e["name"].lower())
-            installed = rep.version if rep else None
-            item["installed"] = {
-                "version": installed,
-                "reported_at": rep.reported_at.isoformat() if rep else None,
-                "fresh": server_reports.is_fresh(rep) if rep else False,
-                "modules": rep.modules if rep else {},
-            } if rep else None
-            item["outdated"] = bool(installed and latest and _version_key(installed) < _version_key(latest.version))
-        items.append(item)
+    items = integration_state.plugin_items(session, server)
 
     required = []
     for key, label in server_reports.REQUIRED_MODULES.items():
@@ -141,3 +111,80 @@ def download_config(key: str, server: _Server, session: _Db, request: Request,
                  server_id=server.id, meta={"plugin": key}, request=request)
     filename = os.path.basename(e["config_path"])
     return PlainTextResponse(builder(server), headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+# ── My Telegram notices ───────────────────────────────────────────────────────
+class NotifyPrefs(BaseModel):
+    releases: str = Field(default="all", pattern=r"^(all|important|none)$")
+    beta: bool = False
+    health: bool = True
+
+
+@router.get("/notify")
+def get_notify(actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
+    return {"prefs": integration_notices.prefs(actor), "telegram_linked": bool(actor.telegram_user_id),
+            "telegram_username": actor.telegram_username,
+            # Platform admins see every server: they get the admin banner, not a message per partner.
+            "platform_admin": bool(actor.is_admin)}
+
+
+@router.put("/notify")
+def put_notify(payload: NotifyPrefs, session: _Db, actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
+    user = session.get(User, actor.id)
+    user.integration_notify = payload.model_dump()
+    session.commit()
+    return {"prefs": integration_notices.prefs(user)}
+
+
+# ── Releases (platform admins) ────────────────────────────────────────────────
+class ReleasePatch(BaseModel):
+    recommended: bool | None = None
+    yanked: bool | None = None
+    important: bool | None = None
+
+
+@router.get("/releases", dependencies=[Depends(require_admin_access)])
+def list_releases(session: _Db) -> dict:
+    rows = session.scalars(select(PluginRelease).order_by(PluginRelease.published_at.desc())).all()
+    by_plugin: dict[str, list[dict]] = {}
+    for r in rows:
+        by_plugin.setdefault(r.plugin, []).append(integration_state.release_view(r))
+    plugins = [{"key": e["key"], "name": e["name"], "repo": e.get("repo"),
+                "repo_url": f"https://github.com/{get_settings().github_org}/{e['repo']}" if e.get("repo") else None,
+                "releases": by_plugin.get(e["key"], [])}
+               for e in cat.CATALOG if e["kind"] == "ours"]
+    return {"plugins": plugins, "github_token": bool((get_settings().github_token or "").strip())}
+
+
+@router.patch("/releases/{release_id}", dependencies=[Depends(require_admin_access)])
+def patch_release(release_id: UUID, payload: ReleasePatch, session: _Db, request: Request,
+                  actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
+    from apps.api.app.core import releases
+
+    r = session.get(PluginRelease, release_id)
+    if r is None:
+        raise HTTPException(status_code=404, detail="Релиз не найден")
+    if payload.yanked is not None:
+        r.yanked = payload.yanked
+        if r.yanked:
+            r.recommended = False
+    if payload.recommended is True:
+        releases.recommend(session, r)
+    elif payload.recommended is False:
+        r.recommended = False
+    if payload.important is not None:
+        r.important = payload.important
+    record_audit(session, category="integration", action="release_update", actor=actor,
+                 target_type="plugin_release", target_id=str(r.id), target_label=f"{r.plugin} {r.version}",
+                 meta=payload.model_dump(exclude_none=True), request=request)
+    session.commit()
+    return integration_state.release_view(r)
+
+
+@router.post("/releases/sync", dependencies=[Depends(require_admin_access)])
+def sync_releases() -> dict:
+    """Takes new GitHub Releases now instead of waiting for the next cron run."""
+    from apps.worker import release_sync
+
+    added = release_sync.run()
+    return {"added": [{"plugin": r.plugin, "version": r.version, "filename": r.filename} for r in added]}

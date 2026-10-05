@@ -121,6 +121,11 @@ graceSecs=120
 
 
 # key → description. ``required`` is for the server cores listed in ``cores``.
+#
+# ``repo`` — our GitHub repository: a tag ``v1.2.0`` there makes CI publish a GitHub Release,
+# and ``apps.worker.release_sync`` takes it into ``plugin_releases`` (changelog = the tag's
+# message). ``release`` says how to read a release: the platforms and Minecraft versions of a
+# jar whose name has no ``+mc<ver>``, and per-version platforms for one that has.
 CATALOG: list[dict[str, Any]] = [
     {
         "key": "voidrp-auth", "name": "VoidRpAuth", "kind": "ours", "cores": list(PLUGIN_CORES),
@@ -129,6 +134,7 @@ CATALOG: list[dict[str, Any]] = [
                    "Закрывает вход под чужим ником на сервере в offline-mode.",
         "install_as": "plugins/VoidRpAuth.jar", "config_path": "plugins/VoidRpAuth/config.yml",
         "needs": [],
+        "repo": "voidrp-auth-plugin", "release": {"platforms": ["paper", "folia"], "mc": ["26.2"]},
     },
     {
         "key": "voidrp-auth-bridge", "name": "voidrp-auth-bridge", "kind": "ours", "cores": list(MOD_CORES),
@@ -136,6 +142,8 @@ CATALOG: list[dict[str, Any]] = [
         "summary": "Вход через лаунчер VoidRP для серверов на модах: мод стоит на сервере и в клиентском паке игроков.",
         "install_as": "mods/voidrp_auth_bridge.jar", "config_path": "config/voidrp-auth-bridge.properties",
         "needs": [],
+        "repo": "voidrp-auth-bridge",
+        "release": {"platforms": ["neoforge", "hybrid"], "mc": ["1.21.1"], "by_mc": {"26.2": ["neoforge"]}},
     },
     {
         "key": "voidrp-perms", "name": "VoidRpPerms", "kind": "ours", "cores": list(PLUGIN_CORES),
@@ -144,6 +152,7 @@ CATALOG: list[dict[str, Any]] = [
                    "консоль, лог и чат сервера в админке (RCON не нужен), бан предметов, баны и муты (EssentialsX не нужен).",
         "install_as": "plugins/VoidRpPerms.jar", "config_path": "plugins/VoidRpPerms/config.yml",
         "needs": ["luckperms"],
+        "repo": "voidrp-perms", "release": {"platforms": ["paper", "folia"], "mc": ["1.21.1", "26.2"]},
     },
     {
         "key": "voidrp-guard", "name": "VoidRpGuard", "kind": "ours", "cores": ["paper"],
@@ -151,6 +160,16 @@ CATALOG: list[dict[str, Any]] = [
         "summary": "Античит: флаги GrimAC, проверки клиентов, иксрей и гриф с откатами CoreProtect — всё в разделе «Античит».",
         "install_as": "plugins/VoidRpGuard.jar", "config_path": "plugins/VoidRpGuard/config.yml",
         "needs": ["grimac", "packetevents", "coreprotect"],
+        "repo": "voidrp-guard", "release": {"platforms": ["paper"], "mc": ["26.2"]},
+    },
+    {
+        "key": "voidrp-client-info", "name": "VoidRP Client Info", "kind": "ours", "cores": ["paper"],
+        "required": False, "modules": [], "client_side": True,
+        "summary": "Для клиентского пака на NeoForge: присылает серверу список модов игрока и проверку на инжекты, "
+                   "VoidRpGuard передаёт их в «Античит». Ставится игрокам в пак (скрытым обязательным модом), не на сервер.",
+        "install_as": "mods/voidrp_client_info.jar", "config_path": None,
+        "needs": ["voidrp-guard"],
+        "repo": "voidrp-client-info", "release": {"platforms": ["neoforge"], "mc": ["26.2"]},
     },
     # Third-party: official downloads at the version we run.
     {"key": "luckperms", "name": "LuckPerms", "kind": "third_party", "cores": list(PLUGIN_CORES),

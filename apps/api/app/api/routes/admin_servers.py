@@ -13,13 +13,19 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import get_settings
 from apps.api.app.core import server_provision
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import PermittedServers, require_permission_somewhere, require_reauth
+from apps.api.app.dependencies.admin import (
+    PermittedServers,
+    get_current_staff_user,
+    require_permission_somewhere,
+    require_reauth,
+)
 from apps.api.app.models.game_server import (
     AUTH_SETTINGS_BOUNDS,
     DEFAULT_AUTH_SETTINGS,
     GameServer,
     resolve_auth_settings,
 )
+from apps.api.app.models.user import User
 from apps.api.app.repositories.game_server_repository import GameServerRepository
 from apps.api.app.schemas.game_server import (
     AuthSettingsAdmin,
@@ -314,6 +320,7 @@ def regenerate_secret(
     server_id: UUID,
     session: Annotated[Session, Depends(get_db_session)],
     where: _Where,
+    actor: Annotated[User, Depends(get_current_staff_user)],
 ) -> GameServer:
     _check(where, server_id)
     repo = GameServerRepository(session)
@@ -321,6 +328,11 @@ def regenerate_secret(
     server.game_auth_secret = secrets.token_urlsafe(32)
     session.commit()
     session.refresh(server)
+    if server.is_external:
+        # The partner's plugins stop connecting until they put the new secret in: tell them.
+        from apps.api.app.core import integration_notices
+
+        integration_notices.notify_secret_rotated(session, server, actor.site_login)
     return server
 
 

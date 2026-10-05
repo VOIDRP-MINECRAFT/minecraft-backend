@@ -75,6 +75,9 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
     # Telegram account link (for the aiogram bot: news publishing / admin).
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True, index=True)
     telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # What this staff member wants to hear about the servers they run, in Telegram
+    # (core/integration_notices.py): {"releases": "all"|"important"|"none", "beta": bool, "health": bool}.
+    integration_notify: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
 
     # Roles (like Discord's), read on every permission check — hence selectin.
     staff_roles: Mapped[list["StaffRole"]] = relationship(

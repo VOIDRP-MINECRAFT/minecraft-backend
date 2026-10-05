@@ -141,12 +141,14 @@ def _attach_textures(session: Session, payload: PlayerSkinResponse, player_name:
     """Fill the signed ``textures`` property, or queue it and leave it empty."""
     if skin is not None:
         signed = skin_textures.lookup(session, skin.sha256, skin.model_variant)
-        if signed is None:
+        if signed is not None:
+            payload.textures_value, payload.textures_signature = signed.value, signed.signature
+            payload.textures_source = "voidrp"
+            return
+        if not skin_textures.refused(skin.sha256, skin.model_variant):
             skin_textures.request_signing(skin.sha256, skin.model_variant, skin.original_url, normalized)
             return
-        payload.textures_value, payload.textures_signature = signed.value, signed.signature
-        payload.textures_source = "voidrp"
-        return
+        # MineSkin won't take this picture: show the nickname's Mojang skin instead.
     mojang = skin_textures.mojang_textures(player_name, normalized)
     if mojang:
         payload.textures_value, payload.textures_signature = mojang["value"], mojang["signature"]

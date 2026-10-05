@@ -147,6 +147,10 @@ class Settings(BaseSettings):
     # Published builds of our plugins and mods for the «Интеграция» page (not public: served
     # through the admin API to staff with the right).
     releases_dir: str = "/home/mironoouv/voidrp_releases"
+    # GitHub org of our plugin repos (integration_catalog ``repo``) and a read-only token for
+    # the private ones (fine-grained: Contents + Metadata: read). Public repos need no token.
+    github_org: str = "VOIDRP-MINECRAFT"
+    github_token: str = ""
     # What partner servers are told in generated configs and tips: the public API base (no
     # /api/v1) and the address our backend reaches them from (for their RCON firewall).
     public_api_url: str = "https://api.void-rp.ru"
