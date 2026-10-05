@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.core import server_ops
+from apps.api.app.core.integration_catalog import PLUGIN_CORES
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.server_mod import ServerModMeta
 
@@ -81,7 +82,21 @@ def server_mods_dir(server: GameServer) -> str:
     return d
 
 
+def server_mods_allowed(server: GameServer) -> bool:
+    """Whether mods may be placed on the game server itself.
+
+    Not on a partner's machine (``is_external``), and not on a plugin core (Paper, Folia):
+    there only the client pack takes mods — e.g. Origins and VexVol hand players a NeoForge
+    client while the server runs plugins.
+    """
+    if getattr(server, "is_external", False):
+        return False
+    return (getattr(server, "server_core", None) or "").lower() not in PLUGIN_CORES
+
+
 def _has_server_dir(server: GameServer) -> bool:
+    if not server_mods_allowed(server):
+        return False
     try:
         server_mods_dir(server)
         return True
@@ -231,6 +246,13 @@ def list_mods(session: Session, server: GameServer) -> dict:
         "client_mods_dir": client_dir,
         "server_mods_dir": server_mods_dir(server) if server_present else None,
         "server_dir_available": server_present,
+        # Why there are no server-side mods, for the admin hint: a partner's machine or a
+        # plugin core (Paper/Folia — the server runs plugins, only players get mods).
+        "server_mods_blocked": (
+            "external" if getattr(server, "is_external", False)
+            else "plugin_core" if not server_mods_allowed(server)
+            else None
+        ),
         "counts": {
             "total": len(entries),
             "client": len(client),

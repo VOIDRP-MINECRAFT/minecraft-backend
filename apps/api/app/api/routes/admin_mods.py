@@ -77,12 +77,12 @@ def apply_mods(
     admin: Annotated[User, Depends(get_current_staff_user)],
     payload: ApplyRequest,
 ) -> dict:
-    external = getattr(server, "is_external", False)
+    server_side = mod_ops.server_mods_allowed(server)
     selections = []
     for s in payload.selections:
         d = s.model_dump()
-        if external:
-            d["on_server"] = False   # partner server: no server-side mods (not our machine)
+        if not server_side:
+            d["on_server"] = False   # partner machine or plugin core: client pack only
         selections.append(d)
     try:
         result = mod_ops.apply_staged(
@@ -141,9 +141,9 @@ def set_targets(
     session: Annotated[Session, Depends(get_db_session)],
     actor: Annotated[User, Depends(get_current_staff_user)],
 ) -> dict:
-    # Partner (external) server: its mods folder is on someone else's machine — never place
-    # a mod server-side there. Keep only the client-pack target.
-    on_server = payload.on_server and not getattr(server, "is_external", False)
+    # Partner machine (its mods folder is someone else's) or plugin core (Paper/Folia load
+    # no mods): never place a mod server-side there. Keep only the client-pack target.
+    on_server = payload.on_server and mod_ops.server_mods_allowed(server)
     try:
         return mod_ops.set_targets(server, filename, payload.on_client, on_server,
                                    session=session, updated_by=getattr(actor, "site_login", None))
