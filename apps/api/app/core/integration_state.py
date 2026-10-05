@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.core import integration_catalog as cat
-from apps.api.app.core import server_reports
+from apps.api.app.core import mc_versions, server_reports, support
 from apps.api.app.core.releases import version_key
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.plugin_release import PluginRelease
@@ -22,8 +22,7 @@ def suits(release: PluginRelease, server: GameServer) -> bool:
     core = (server.server_core or "").lower()
     if core and release.platforms and core not in release.platforms:
         return False
-    mc = (server.mc_version or "").strip()
-    return not (mc and release.mc_versions and mc not in release.mc_versions)
+    return mc_versions.matches(server.mc_version, release.mc_versions)
 
 
 def latest_for(releases: list[PluginRelease], server: GameServer, beta: bool = False) -> PluginRelease | None:
@@ -36,6 +35,7 @@ def latest_for(releases: list[PluginRelease], server: GameServer, beta: bool = F
 def release_view(r: PluginRelease) -> dict[str, Any]:
     return {
         "id": str(r.id), "version": r.version, "platforms": r.platforms, "mc_versions": r.mc_versions,
+        "mc_label": mc_versions.label(r.mc_versions),
         "changelog": r.changelog, "filename": r.filename, "size": r.size, "sha256": r.sha256,
         "recommended": r.recommended, "channel": r.channel, "important": r.important, "yanked": r.yanked,
         "source": r.source, "source_url": r.source_url,
@@ -47,6 +47,7 @@ def plugin_items(session: Session, server: GameServer, *, include_yanked: bool =
     """Catalog entries for this server with their builds, what it runs and whether that is old."""
     by_plugin = {r.plugin.lower(): r for r in server_reports.reports(session, server)}
     releases = session.scalars(select(PluginRelease).order_by(PluginRelease.published_at.desc())).all()
+    policy = support.policies(session)
 
     items = []
     for e in cat.for_server(server):
@@ -67,6 +68,12 @@ def plugin_items(session: Session, server: GameServer, *, include_yanked: bool =
                 "modules": rep.modules if rep else {},
             } if rep else None
             item["outdated"] = bool(installed and latest and version_key(installed) < version_key(latest.version))
+            pol = policy.get(e["key"])
+            item["min_supported"] = pol.min_version if pol else None
+            item["support_note"] = pol.note if pol else None
+            # Below the oldest supported version: the update is not optional any more.
+            item["unsupported"] = support.below(installed, pol)
+            item["protocol"] = (rep.data or {}).get("protocol") if rep else None
             # Changes between what the server runs and the build offered, newest first.
             item["changes_since_installed"] = [
                 {"version": r.version, "changelog": r.changelog, "important": r.important}
@@ -82,6 +89,6 @@ def outdated(session: Session, server: GameServer) -> list[dict[str, Any]]:
     """Our plugins this server runs in an older version than the one offered."""
     return [
         {"key": i["key"], "name": i["name"], "installed": i["installed"]["version"], "latest": i["latest"]["version"],
-         "important": any(c["important"] for c in i["changes_since_installed"])}
+         "important": i.get("unsupported") or any(c["important"] for c in i["changes_since_installed"])}
         for i in plugin_items(session, server) if i.get("outdated")
     ]

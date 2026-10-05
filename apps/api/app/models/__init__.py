@@ -40,6 +40,7 @@ from apps.api.app.models.player_game_settings import PlayerGameSettings
 from apps.api.app.models.player_follow import PlayerFollow
 from apps.api.app.models.player_public_profile import PlayerPublicProfile
 from apps.api.app.models.player_skin import PlayerSkin
+from apps.api.app.models.plugin_support import PluginSupport
 from apps.api.app.models.integration_event import IntegrationEvent
 from apps.api.app.models.integration_notice import IntegrationNotice
 from apps.api.app.models.skin_texture import SkinTexture
@@ -120,6 +121,7 @@ __all__ = [
     "PlayerFollow",
     "PlayerPublicProfile",
     "PlayerSkin",
+    "PluginSupport",
     "IntegrationEvent",
     "IntegrationNotice",
     "SkinTexture",

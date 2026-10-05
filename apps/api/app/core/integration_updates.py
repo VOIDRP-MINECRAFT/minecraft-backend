@@ -198,3 +198,26 @@ def old_secret_plugins(server: GameServer) -> list[str]:
     seen = RedisCacheService().get_json(f"integration_old_secret:{server.id}") or {}
     now = utc_now()
     return sorted(p for p, at in seen.items() if now - datetime.fromisoformat(at) < timedelta(minutes=2))
+
+
+# What each protocol version of a plugin understands in the heartbeat's answer. A plugin sends
+# ``data.protocol``; the ones before that are recognised by version (VoidRpPerms 0.6.0 — 1,
+# 0.6.2 — 2). New answers get a new number, so an old plugin never receives what it cannot read.
+FEATURES: dict[str, int] = {"updates": 1, "inventory": 1, "new_secret": 2}
+_LEGACY = {"VoidRpPerms": [("0.6.2", 2), ("0.6.0", 1)]}
+
+
+def protocol_of(report) -> int:
+    proto = (report.data or {}).get("protocol") if report is not None else None
+    if isinstance(proto, int):
+        return proto
+    from apps.api.app.core.releases import version_key as vk
+
+    for since, level in _LEGACY.get(getattr(report, "plugin", ""), []):
+        if report.version and vk(report.version) >= vk(since):
+            return level
+    return 0
+
+
+def supports(report, feature: str) -> bool:
+    return protocol_of(report) >= FEATURES.get(feature, 10**6)

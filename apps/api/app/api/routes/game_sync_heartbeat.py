@@ -44,6 +44,10 @@ def _clean_data(data: dict[str, Any]) -> dict[str, Any]:
         v = data.get(key)
         if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
             out[key] = v
+    # What the plugin's side of the API understands (integration_updates.FEATURES).
+    proto = data.get("protocol")
+    if isinstance(proto, int) and not isinstance(proto, bool) and 0 <= proto < 1000:
+        out["protocol"] = proto
     players = data.get("players")
     if isinstance(players, list):
         out["players"] = [str(p)[:32] for p in players[:500]]
@@ -79,9 +83,9 @@ def heartbeat(
     # here and rewrites the configs of our plugins; the page lists who has not moved yet.
     if getattr(server, "_used_previous_secret", False):
         integration_updates.mark_old_secret(server, body.plugin)
-        if body.plugin == "VoidRpPerms":
+        if integration_updates.supports(report, "new_secret"):
             answer["new_secret"] = server.game_auth_secret
-    if body.plugin == "VoidRpPerms":
+    if integration_updates.supports(report, "updates"):
         # Updates the owner turned on in «Интеграция»: VoidRpPerms puts them in the update folder.
         answer.update(integration_updates.updates_for(session, server))
     return answer

@@ -168,7 +168,35 @@ def list_releases(session: _Db) -> dict:
                 "repo_url": f"https://github.com/{get_settings().github_org}/{e['repo']}" if e.get("repo") else None,
                 "releases": by_plugin.get(e["key"], [])}
                for e in cat.CATALOG if e["kind"] == "ours"]
+    from apps.api.app.core import support
+
+    pol = support.policies(session)
+    for p in plugins:
+        row = pol.get(p["key"])
+        p["min_supported"] = row.min_version if row else None
+        p["support_note"] = row.note if row else None
     return {"plugins": plugins, "github_token": bool((get_settings().github_token or "").strip())}
+
+
+class SupportPolicy(BaseModel):
+    min_version: str | None = Field(default=None, max_length=32)
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.put("/support/{plugin}", dependencies=[Depends(require_admin_access)])
+def put_support(plugin: str, payload: SupportPolicy, session: _Db, request: Request,
+                actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
+    """The oldest supported version of a plugin; servers below it are told once to update."""
+    from apps.api.app.core import support
+
+    if cat.entry(plugin) is None:
+        raise HTTPException(status_code=404, detail="Нет такого плагина")
+    row = support.set_min(session, plugin, payload.min_version, payload.note, by=actor.site_login)
+    record_audit(session, category="integration", action="support_policy", actor=actor,
+                 target_type="plugin", target_id=plugin, target_label=plugin,
+                 meta=payload.model_dump(), request=request)
+    sent = integration_notices.announce_unsupported(session, plugin) if row.min_version else 0
+    return {"plugin": plugin, "min_version": row.min_version, "note": row.note, "notified": sent}
 
 
 @router.patch("/releases/{release_id}", dependencies=[Depends(require_admin_access)])

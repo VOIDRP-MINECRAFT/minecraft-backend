@@ -25,7 +25,7 @@ from sqlalchemy import select
 
 from apps.api.app.config import get_settings
 from apps.api.app.core import integration_catalog as cat
-from apps.api.app.core import releases
+from apps.api.app.core import releases, support
 from apps.api.app.db import SessionLocal
 from apps.api.app.models.plugin_release import PluginRelease
 
@@ -34,7 +34,8 @@ log = logging.getLogger("release_sync")
 API = "https://api.github.com"
 # Not the jar a server installs: sources, docs, the unshaded jar next to a shadow "-all" one.
 _SKIP = re.compile(r"-(sources|javadoc|plain|dev)\.jar$", re.IGNORECASE)
-_MC = re.compile(r"\+mc([0-9][0-9.]*)\.jar$", re.IGNORECASE)
+# "+mc26.2.jar" — one version; "+mc1.21.4-1.21.11.jar" — a range of them.
+_MC = re.compile(r"\+mc([0-9][0-9.]*?)(?:-([0-9][0-9.]*))?\.jar$", re.IGNORECASE)
 
 
 class GitHub:
@@ -94,14 +95,33 @@ def _jars(release: dict) -> list[dict]:
     return shadow or jars
 
 
-def _targets(entry: dict, asset_name: str) -> tuple[list[str], list[str]]:
-    """Platforms and Minecraft versions of one jar, from its name or the catalog's defaults."""
+def _targets(entry: dict, asset_name: str, manifest: dict) -> tuple[list[str], list[str]]:
+    """Platforms and Minecraft versions of one jar: from the release's release.json, else from
+    its name (+mc26.2, +mc1.21.4-1.21.11), else the catalog's defaults."""
+    own = (manifest.get("jars") or {}).get(asset_name) or {}
+    if own.get("platforms") or own.get("mc"):
+        return list(own.get("platforms") or entry["cores"]), list(own.get("mc") or [])
     rules = entry.get("release") or {}
     m = _MC.search(asset_name)
     if m:
-        mc = m.group(1).rstrip(".")
-        return list((rules.get("by_mc") or {}).get(mc) or rules.get("platforms") or entry["cores"]), [mc]
+        lo, hi = m.group(1).rstrip("."), (m.group(2) or "").rstrip(".")
+        mc = [f"[{lo},{hi}]"] if hi else [lo]
+        return list((rules.get("by_mc") or {}).get(lo) or rules.get("platforms") or entry["cores"]), mc
     return list(rules.get("platforms") or entry["cores"]), list(rules.get("mc") or [])
+
+
+def _manifest(gh: "GitHub", release: dict) -> dict:
+    """The release's optional release.json: {"jars": {"<file>": {"platforms": [...], "mc": [...]}},
+    "min_supported": "1.3.0"} — for builds the jar name and catalog cannot describe."""
+    asset = next((a for a in release.get("assets") or [] if a["name"] == "release.json"), None)
+    if asset is None:
+        return {}
+    try:
+        data = json.loads(gh.download(asset).decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (ValueError, httpx.HTTPError, subprocess.SubprocessError) as exc:
+        log.warning("release.json of %s unreadable: %s", release.get("tag_name"), exc)
+        return {}
 
 
 def sync_plugin(gh: GitHub, entry: dict) -> list[PluginRelease]:
@@ -130,12 +150,15 @@ def sync_plugin(gh: GitHub, entry: dict) -> list[PluginRelease]:
                 body = body[len("[important]"):].strip()
             beta = bool(rel.get("prerelease")) or "-" in version
             several = len(_jars(rel)) > 1
+            manifest = _manifest(gh, rel)
+            if manifest.get("min_supported"):
+                support.set_min(session, entry["key"], str(manifest["min_supported"]), by="release.json")
             for asset in jars:
                 data = gh.download(asset)
                 if len(data) != asset.get("size", len(data)):
                     log.warning("%s %s: %s came short, skipped", entry["key"], version, asset["name"])
                     continue
-                platforms, mc = _targets(entry, asset["name"])
+                platforms, mc = _targets(entry, asset["name"], manifest)
                 # One jar per Minecraft version keeps its own name; a single jar is saved under
                 # the name the server installs it as.
                 filename = asset["name"] if several else entry["install_as"].rsplit("/", 1)[-1]

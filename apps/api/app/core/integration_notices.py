@@ -211,6 +211,30 @@ def _release_text(server: GameServer, updates: list[tuple[dict, PluginRelease, s
     return "\n".join(lines)
 
 
+# ── Below the oldest supported version ────────────────────────────────────────
+def announce_unsupported(session: Session, plugin: str) -> int:
+    """Once per policy: servers running a version below the plugin's minimum hear they must update."""
+    from apps.api.app.core import support
+
+    pol = support.policies(session).get(plugin)
+    entry = cat.entry(plugin)
+    if not pol or not pol.min_version or entry is None:
+        return 0
+    sent = 0
+    for server in session.scalars(select(GameServer).where(GameServer.is_external.is_(True))).all():
+        rep = session.scalar(select(ServerPluginReport).where(
+            ServerPluginReport.server_id == server.id, ServerPluginReport.plugin.ilike(entry["name"])))
+        if not rep or not support.below(rep.version, pol):
+            continue
+        note = f"\n{html.escape(pol.note)}" if pol.note else ""
+        sent += _deliver(session, server, recipients(session, server), "unsupported", f"{plugin}:{pol.min_version}",
+                         f"❗️ {html.escape(entry['name'])} {html.escape(rep.version)} на сервере «{html.escape(server.name)}» "
+                         f"больше не поддерживается: нужна версия <b>{html.escape(pol.min_version)}</b> или новее.{note}\n"
+                         "Обновите плагин — в «Интеграции» есть сборка и команда обновления.",
+                         [("Открыть «Интеграцию»", _integration_url(server) + "&tab=plugins")])
+    return sent
+
+
 # ── Required modules going quiet ──────────────────────────────────────────────
 def check_health() -> int:
     """External servers whose required module stopped reporting (and came back since)."""
