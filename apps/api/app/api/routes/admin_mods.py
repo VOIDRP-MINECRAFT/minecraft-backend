@@ -61,6 +61,7 @@ class ApplySelection(BaseModel):
     on_server: bool = False
     optional: bool = False
     required: bool = False
+    default_enabled: bool = True
     display_name: str | None = Field(default=None, max_length=128)
     description: str | None = Field(default=None, max_length=2000)
 
@@ -100,6 +101,7 @@ def apply_mods(
 class MetaRequest(BaseModel):
     optional: bool = False
     required: bool = False
+    default_enabled: bool = True
     display_name: str | None = Field(default=None, max_length=128)
     description: str | None = Field(default=None, max_length=2000)
 
@@ -117,6 +119,7 @@ def update_meta(
         mod_ops.upsert_meta(
             session, server, base,
             optional=payload.optional, required=payload.required,
+            default_enabled=payload.default_enabled,
             display_name=payload.display_name, description=payload.description,
             updated_by=admin.site_login,
         )

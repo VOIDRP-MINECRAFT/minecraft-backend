@@ -37,6 +37,9 @@ class ServerModMeta(UuidPrimaryKeyMixin, ServerScopedMixin, TimestampMixin, Base
     optional: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     # Locked-required optional: shown but can't be disabled by the player.
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Optional (not locked) mod: installed for a player who has not chosen yet. Off → the
+    # player turns it on in the launcher.
+    default_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)

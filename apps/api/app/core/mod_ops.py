@@ -172,11 +172,13 @@ def _fallback_classification(filename: str) -> dict:
         return {
             "optional": True,
             "required": bool(cls.get("required")),
+            "default_enabled": True,
             "display_name": cls.get("displayName"),
             "description": cls.get("description"),
             "source": "auto",
         }
-    return {"optional": False, "required": False, "display_name": None, "description": None, "source": "hidden"}
+    return {"optional": False, "required": False, "default_enabled": True,
+            "display_name": None, "description": None, "source": "hidden"}
 
 
 # ── Listing ──────────────────────────────────────────────────────────────────
@@ -188,6 +190,7 @@ class ModEntry:
     size: int
     optional: bool
     required: bool
+    default_enabled: bool
     display_name: str | None
     description: str | None
     source: str  # "override" | "auto" | "hidden"
@@ -227,6 +230,7 @@ def list_mods(session: Session, server: GameServer) -> dict:
             eff = {
                 "optional": ov.optional,
                 "required": ov.required,
+                "default_enabled": ov.default_enabled,
                 "display_name": ov.display_name,
                 "description": ov.description,
                 "source": "override",
@@ -274,6 +278,7 @@ def upsert_meta(
     display_name: str | None,
     description: str | None,
     updated_by: str | None,
+    default_enabled: bool = True,
 ) -> ServerModMeta:
     row = session.scalar(
         select(ServerModMeta).where(
@@ -285,6 +290,8 @@ def upsert_meta(
         session.add(row)
     row.optional = bool(optional)
     row.required = bool(required and optional)  # required only meaningful when optional
+    # Only an optional, unlocked mod can start switched off.
+    row.default_enabled = bool(default_enabled) or not row.optional or row.required
     row.display_name = (display_name or None)
     row.description = (description or None)
     row.updated_by = updated_by
@@ -370,6 +377,7 @@ def apply_staged(
             session, server, base,
             optional=bool(sel.get("optional")),
             required=bool(sel.get("required")),
+            default_enabled=bool(sel.get("default_enabled", True)),
             display_name=sel.get("display_name"),
             description=sel.get("description"),
             updated_by=updated_by,
