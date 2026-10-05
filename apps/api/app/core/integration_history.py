@@ -36,11 +36,21 @@ def on_heartbeat(session: Session, server: GameServer, plugin: str, old_version:
         add(session, server, "version", plugin, f"{old_version or '?'} → {new_version or '?'}")
     old_modules = old_modules or {}
     for name, state in new_modules.items():
-        was = bool((old_modules.get(name) or {}).get("ok"))
-        now = bool((state or {}).get("ok"))
+        was = _effective_ok(old_modules.get(name))
+        now = _effective_ok(state)
         if was != now:
             detail = name if now else f"{name}: {(state or {}).get('detail') or 'без пояснения'}"
             add(session, server, "module_on" if now else "module_off", plugin, detail)
+
+
+# States a module passes through on every start or on a single missed poll: not worth a line.
+_TRANSIENT = ("ещё не получен", "нет связи с админкой")
+
+
+def _effective_ok(state: dict[str, Any] | None) -> bool:
+    if not state:
+        return False
+    return bool(state.get("ok")) or any(t in (state.get("detail") or "") for t in _TRANSIENT)
 
 
 def trim(session: Session, server: GameServer) -> None:
