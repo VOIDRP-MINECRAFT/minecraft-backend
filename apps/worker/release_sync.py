@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -46,7 +47,9 @@ class GitHub:
 
     def __init__(self) -> None:
         self.token = (get_settings().github_token or "").strip()
-        self.gh = shutil.which("gh") if not self.token else None
+        # cron runs with a bare PATH; the CLI is installed per user.
+        search = os.pathsep.join([os.environ.get("PATH", ""), os.path.expanduser("~/.local/bin"), "/usr/local/bin"])
+        self.gh = shutil.which("gh", path=search) if not self.token else None
         headers = {"Accept": "application/vnd.github+json", "User-Agent": "VoidRP-release-sync",
                    "X-GitHub-Api-Version": "2022-11-28"}
         if self.token:
@@ -120,6 +123,11 @@ def sync_plugin(gh: GitHub, entry: dict) -> list[PluginRelease]:
             if not jars:
                 continue
             version = (rel.get("tag_name") or "").removeprefix("v")
+            # scripts/release_plugin.sh --important puts this marker first in the tag's message.
+            body = (rel.get("body") or "").strip()
+            important = body.lower().startswith("[important]")
+            if important:
+                body = body[len("[important]"):].strip()
             beta = bool(rel.get("prerelease")) or "-" in version
             several = len(_jars(rel)) > 1
             for asset in jars:
@@ -133,11 +141,12 @@ def sync_plugin(gh: GitHub, entry: dict) -> list[PluginRelease]:
                 filename = asset["name"] if several else entry["install_as"].rsplit("/", 1)[-1]
                 row = releases.record(
                     session, plugin=entry["key"], version=version, data=data, filename=filename,
-                    platforms=platforms, mc_versions=mc, changelog=(rel.get("body") or "").strip(),
+                    platforms=platforms, mc_versions=mc, changelog=body,
                     channel="beta" if beta else "stable", recommended=not beta,
                     published_by=(rel.get("author") or {}).get("login"), source="github",
                     github_asset_id=asset["id"], source_url=rel.get("html_url"),
                 )
+                row.important = important
                 session.flush()
                 added.append(row)
                 log.info("%s %s: %s (%s, MC %s, %s)", entry["key"], version, filename,
