@@ -17,7 +17,7 @@ from aiogram.types import (
 
 import apps.api.app.models  # noqa: F401  — register full ORM graph before any query
 from apps.api.app.config import get_settings
-from apps.bot.handlers import admin, games, news, start
+from apps.bot.handlers import admin, games, integration, news, start
 from apps.bot.middlewares import ContextMiddleware
 
 configure_mappers()
@@ -27,6 +27,7 @@ logger = logging.getLogger("voidrp.bot")
 PRIVATE_COMMANDS = [
     BotCommand(command="start", description="Старт / привязка аккаунта"),
     BotCommand(command="whoami", description="Кто я и мои права"),
+    BotCommand(command="servers", description="Мои серверы: состояние и обновления"),
     BotCommand(command="help", description="Справка"),
 ]
 
@@ -58,6 +59,7 @@ def build_dispatcher() -> Dispatcher:
     # Command routers first; the broad news "prepared message" catcher goes last.
     dp.include_router(start.router)
     dp.include_router(admin.router)
+    dp.include_router(integration.router)
     dp.include_router(games.router)
     dp.include_router(news.router)
     return dp

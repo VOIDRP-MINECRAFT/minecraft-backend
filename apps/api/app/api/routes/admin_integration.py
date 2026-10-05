@@ -157,6 +157,7 @@ class NotifyPrefs(BaseModel):
     releases: str = Field(default="all", pattern=r"^(all|important|none)$")
     beta: bool = False
     health: bool = True
+    digest: bool = True
 
 
 @router.get("/notify")
@@ -170,7 +171,8 @@ def get_notify(actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
 @router.put("/notify")
 def put_notify(payload: NotifyPrefs, session: _Db, actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
     user = session.get(User, actor.id)
-    user.integration_notify = payload.model_dump()
+    # Merge: keeps what the bot stores here too (the «тишина на час» mute_until).
+    user.integration_notify = {**(user.integration_notify or {}), **payload.model_dump()}
     session.commit()
     return {"prefs": integration_notices.prefs(user)}
 

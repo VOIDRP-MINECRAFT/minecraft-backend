@@ -36,7 +36,7 @@ from apps.api.app.models.user import User
 
 log = logging.getLogger(__name__)
 
-DEFAULTS: dict[str, Any] = {"releases": "all", "beta": False, "health": True}
+DEFAULTS: dict[str, Any] = {"releases": "all", "beta": False, "health": True, "digest": True}
 # A required module quiet this long is "down" (a restart takes a couple of minutes).
 QUIET_AFTER = timedelta(minutes=5)
 CHANGELOG_LIMIT = 900
