@@ -81,7 +81,8 @@ def analysis(server: GameServer, items: list[dict[str, Any]]) -> dict[str, Any] 
     props = inv.get("server_properties") or {}
     if props.get("online-mode") == "true":
         issues.append({"level": "err", "text": "online-mode=true: игроки VoidRP без лицензии не зайдут. Нужен online-mode=false (вход проверяет VoidRpAuth)."})
-    if props.get("enable-rcon") == "true" and any(r.get("modules", {}).get("console", {}).get("ok")
+    # Our own servers are run over RCON on purpose; a partner's needs it closed.
+    if server.is_external and props.get("enable-rcon") == "true" and any(r.get("modules", {}).get("console", {}).get("ok")
                                                    for r in [i.get("installed") or {} for i in items]):
         issues.append({"level": "warn", "text": f"RCON включён (порт {props.get('rcon.port', '25575')}), хотя консоль идёт через VoidRpPerms — выключите enable-rcon."})
     return {"at": inv["at"], "java": inv["java"], "plugins": inv["plugins"], "issues": issues}
