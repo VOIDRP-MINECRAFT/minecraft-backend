@@ -25,6 +25,9 @@ from apps.api.app.core import (
     integration_notices,
     integration_state,
     integration_updates,
+    integration_diagnose,
+    integration_health,
+    integration_reach,
     server_status,
 )
 from apps.api.app.core import server_reports
@@ -76,7 +79,7 @@ def overview(server: _Server, session: _Db) -> dict:
     if not server.server_core:
         tips.append({"level": "warn", "text": "Не указано ядро сервера (Paper, Folia, NeoForge…) — "
                      "владелец задаёт его в «Серверах». От него зависит, какой способ входа ставить."})
-    return {
+    data = {
         "server": {"slug": server.slug, "name": server.name, "is_external": server.is_external,
                    "item_bans_enabled": (server.features or {}).get("item_bans") is True,
                    "server_core": server.server_core, "core_label": cat.CORE_LABELS.get(server.server_core or ""),
@@ -110,6 +113,11 @@ def overview(server: _Server, session: _Db) -> dict:
         "api_url": get_settings().public_api_url,
         "backend_egress_ip": get_settings().backend_egress_ip,
     }
+    # The outside ping only for a partner's server (ours sit on this machine: no point).
+    data["reach"] = integration_reach.check(server) if server.is_external else None
+    data["health"] = integration_health.score(data)
+    data["diagnosis"] = integration_diagnose.diagnose(data)
+    return data
 
 
 @router.get("/releases/{release_id}/download")
@@ -360,3 +368,34 @@ def discord_test(server: _Server, payload: IntegrationSettings) -> dict:
     if not integration_discord.test(server, hook):
         raise HTTPException(status_code=502, detail="Discord не принял сообщение — проверьте, что вебхук не удалён")
     return {"ok": True}
+
+
+class FixRequest(BaseModel):
+    action: str = Field(pattern=r"^(config|updates|reload|reach)$")
+
+
+FIX_COMMANDS = {
+    "config": "voidrp fix config",
+    "updates": "voidrp update",
+    "reload": "voidrp fix reload",
+}
+
+
+@router.post("/fix", dependencies=[Depends(require_permission("integration.config"))])
+def fix(payload: FixRequest, server: _Server, session: _Db, request: Request,
+        actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
+    """«Починить»: VoidRpPerms 0.7.0+ does it on the server (console queue) and answers what it did.
+    ``reach`` only re-runs the outside ping."""
+    from apps.api.app.core import server_console
+
+    if payload.action == "reach":
+        return {"reach": integration_reach.check(server, fresh=True)}
+    if not server_console.has_module(session, server, "console"):
+        raise HTTPException(status_code=409, detail="Нужен VoidRpPerms 0.7.0+ с модулем консоли")
+    record_audit(session, category="integration", action=f"fix_{payload.action}", actor=actor,
+                 target_type="server", target_id=str(server.id), target_label=server.slug,
+                 server_id=server.id, request=request)
+    try:
+        return {"output": server_console.run(server, FIX_COMMANDS[payload.action], timeout=15)}
+    except server_console.PluginConsoleError as exc:
+        raise HTTPException(status_code=504, detail=str(exc))
