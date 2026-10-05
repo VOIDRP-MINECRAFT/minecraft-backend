@@ -12,12 +12,13 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
+from apps.api.app.api.routes import integration_public
 from apps.api.app.core import integration_catalog as cat
 from apps.api.app.core import integration_notices, integration_state
 from apps.api.app.core import server_reports
@@ -82,6 +83,11 @@ def overview(server: _Server, session: _Db) -> dict:
                      "reported_at": r.reported_at.isoformat(), "fresh": server_reports.is_fresh(r)} for r in reports],
         "tips": tips,
         "fresh_seconds": server_reports.FRESH_SECONDS,
+        "doctor": integration_public.doctor_of(server),
+        "scripts": {
+            "update": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-update.sh | bash",
+            "doctor": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-doctor.sh | bash",
+        },
         "api_url": get_settings().public_api_url,
         "backend_egress_ip": get_settings().backend_egress_ip,
     }
@@ -188,3 +194,64 @@ def sync_releases() -> dict:
 
     added = release_sync.run()
     return {"added": [{"plugin": r.plugin, "version": r.version, "filename": r.filename} for r in added]}
+
+
+@router.post("/install-token", dependencies=[Depends(require_permission("integration.config")), Depends(require_reauth)])
+def install_token(server: _Server, session: _Db, request: Request,
+                  actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
+    """A one-time install.sh link (15 min): it writes configs with the server's secret."""
+    record_audit(session, category="integration", action="install_token", actor=actor,
+                 target_type="server", target_id=str(server.id), target_label=server.slug,
+                 server_id=server.id, request=request)
+    return integration_public.issue_token(server, actor)
+
+
+@router.get("/bundle.zip", dependencies=[Depends(require_permission("integration.config")), Depends(require_reauth)])
+def bundle_zip(server: _Server, session: _Db, request: Request,
+               actor: Annotated[User, Depends(get_current_staff_user)]) -> Response:
+    """Everything in one archive, for hosts with only a web panel: unpack into the server folder."""
+    import io
+    import zipfile
+
+    import httpx
+
+    from apps.api.app.core import integration_scripts
+
+    items = integration_state.plugin_items(session, server)
+    ours = [i for i in items if i["kind"] == "ours" and not i.get("client_side") and i.get("latest")
+            and (i.get("required") or i.get("installed"))]
+    wanted = {n for i in ours for n in (i.get("needs") or [])}
+    folder = "mods" if (server.server_core or "") in cat.MOD_CORES else "plugins"
+    buf = io.BytesIO()
+    readme = [f"VoidRP — файлы для сервера «{server.name}» ({server.slug}).", "",
+              "Распакуйте архив в папку сервера (там, где server.properties), с заменой файлов,",
+              "и перезапустите сервер. Если в plugins/ уже лежат старые версии этих плагинов",
+              "под другими именами — удалите их, чтобы не было двух копий.", "",
+              "Внутри конфиги с секретом сервера: не выкладывайте архив в открытый доступ.", "", "Состав:"]
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for i in ours:
+            r = session.get(PluginRelease, UUID(i["latest"]["id"]))
+            z.write(r.storage_path, f"{folder}/{r.filename}")
+            readme.append(f"  {folder}/{r.filename} — {i['name']} {r.version}")
+            if i.get("has_config"):
+                z.writestr(i["config_path"], cat.CONFIG_BUILDERS[i["key"]](server))
+                readme.append(f"  {i['config_path']}")
+        for i in items:
+            if i["kind"] != "third_party" or i["key"] not in wanted or not i.get("modrinth"):
+                continue
+            f = integration_scripts.modrinth_file(i["modrinth"], i.get("version"), server.mc_version)
+            try:
+                data = httpx.get(f["url"], timeout=60, follow_redirects=True).content if f else None
+            except httpx.HTTPError:
+                data = None
+            if data:
+                z.writestr(f"plugins/{f['filename']}", data)
+                readme.append(f"  plugins/{f['filename']} — {i['name']} {f['version']} (Modrinth)")
+            else:
+                readme.append(f"  {i['name']}: скачайте сами — {i.get('url')}")
+        z.writestr("VOIDRP-README.txt", "\n".join(readme) + "\n")
+    record_audit(session, category="integration", action="bundle_download", actor=actor,
+                 target_type="server", target_id=str(server.id), target_label=server.slug,
+                 server_id=server.id, request=request)
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="voidrp-{server.slug}.zip"'})

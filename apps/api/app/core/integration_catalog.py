@@ -171,17 +171,18 @@ CATALOG: list[dict[str, Any]] = [
         "needs": ["voidrp-guard"],
         "repo": "voidrp-client-info", "release": {"platforms": ["neoforge"], "mc": ["26.2"]},
     },
-    # Third-party: official downloads at the version we run.
-    {"key": "luckperms", "name": "LuckPerms", "kind": "third_party", "cores": list(PLUGIN_CORES),
+    # Third-party: official downloads at the version we run; install.sh takes the same file from
+    # Modrinth (``modrinth`` project, matched by ``plugin_name`` in plugin.yml).
+    {"key": "luckperms", "name": "LuckPerms", "modrinth": "luckperms", "plugin_name": "LuckPerms", "kind": "third_party", "cores": list(PLUGIN_CORES),
      "version": "5.5.71", "url": "https://luckperms.net/download",
      "summary": "Хранит группы и права. Нужен для VoidRpPerms."},
-    {"key": "grimac", "name": "GrimAC", "kind": "third_party", "cores": ["paper"],
+    {"key": "grimac", "name": "GrimAC", "modrinth": "grimac", "plugin_name": "GrimAC", "kind": "third_party", "cores": ["paper"],
      "version": "2.3.74", "url": "https://modrinth.com/plugin/grimac",
      "summary": "Античит движения и боя, его флаги собирает VoidRpGuard."},
-    {"key": "packetevents", "name": "packetevents", "kind": "third_party", "cores": ["paper"],
+    {"key": "packetevents", "name": "packetevents", "modrinth": "packetevents", "plugin_name": "packetevents", "kind": "third_party", "cores": ["paper"],
      "version": "2.13.0", "url": "https://modrinth.com/plugin/packetevents",
      "summary": "Библиотека для GrimAC."},
-    {"key": "coreprotect", "name": "CoreProtect CE", "kind": "third_party", "cores": ["paper"],
+    {"key": "coreprotect", "name": "CoreProtect CE", "modrinth": "coreprotect", "plugin_name": "CoreProtect", "kind": "third_party", "cores": ["paper"],
      "version": "24.1", "url": "https://modrinth.com/plugin/coreprotect",
      "summary": "Журнал блоков: откаты грифа из раздела «Античит»."},
 ]
