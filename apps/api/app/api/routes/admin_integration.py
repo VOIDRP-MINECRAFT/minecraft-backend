@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import get_settings
 from apps.api.app.api.routes import integration_public
 from apps.api.app.core import integration_catalog as cat
-from apps.api.app.core import integration_notices, integration_state
+from apps.api.app.core import integration_notices, integration_state, integration_updates
 from apps.api.app.core import server_reports
 from apps.api.app.core.audit import record_audit
 from apps.api.app.core.security import utc_now
@@ -84,6 +84,9 @@ def overview(server: _Server, session: _Db) -> dict:
         "tips": tips,
         "fresh_seconds": server_reports.FRESH_SECONDS,
         "doctor": integration_public.doctor_of(server),
+        "inventory": integration_updates.analysis(server, items),
+        "settings": {"auto_update": bool((server.integration_settings or {}).get("auto_update")),
+                     "beta": bool((server.integration_settings or {}).get("beta"))},
         "scripts": {
             "update": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-update.sh | bash",
             "doctor": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-doctor.sh | bash",
@@ -255,3 +258,33 @@ def bundle_zip(server: _Server, session: _Db, request: Request,
                  server_id=server.id, request=request)
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="voidrp-{server.slug}.zip"'})
+
+
+class IntegrationSettings(BaseModel):
+    auto_update: bool = False
+    beta: bool = False
+
+
+@router.put("/settings", dependencies=[Depends(require_permission("integration.config"))])
+def put_settings(payload: IntegrationSettings, server: _Server, session: _Db, request: Request,
+                 actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
+    """Auto-update of our plugins on this server (VoidRpPerms 0.6.0+ downloads them)."""
+    srv = session.get(GameServer, server.id)
+    srv.integration_settings = {**(srv.integration_settings or {}), **payload.model_dump()}
+    record_audit(session, category="integration", action="settings", actor=actor,
+                 target_type="server", target_id=str(srv.id), target_label=srv.slug,
+                 server_id=srv.id, meta=payload.model_dump(), request=request)
+    return {"settings": srv.integration_settings}
+
+
+@router.post("/selftest")
+def selftest(server: _Server, session: _Db) -> dict:
+    """«Проверить связь»: VoidRpPerms answers /voidrp status through the console queue."""
+    from apps.api.app.core import server_console
+
+    if not server_console.has_module(session, server, "console"):
+        raise HTTPException(status_code=409, detail="Нужен VoidRpPerms 0.6.0+ с модулем консоли — он отвечает на проверку")
+    try:
+        return {"output": server_console.run(server, "voidrp status", timeout=10)}
+    except server_console.PluginConsoleError as exc:
+        raise HTTPException(status_code=504, detail=str(exc))

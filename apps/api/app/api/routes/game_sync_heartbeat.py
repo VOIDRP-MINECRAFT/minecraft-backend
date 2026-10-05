@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from apps.api.app.core import integration_updates
 from apps.api.app.core.security import utc_now
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
@@ -28,6 +29,8 @@ class Heartbeat(BaseModel):
     modules: dict[str, ModuleState] = Field(default_factory=dict, max_length=32)
     # Monitoring numbers: tps, mspt, online, max, players, memory_used_mb, memory_max_mb, uptime_s.
     data: dict[str, Any] = Field(default_factory=dict)
+    # VoidRpPerms 0.6.0+, every ten minutes: plugins, Java, server.properties (integration_updates).
+    inventory: dict[str, Any] | None = None
 
 
 def _clean_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -63,4 +66,10 @@ def heartbeat(
     report.data = _clean_data(body.data)
     report.reported_at = utc_now()
     session.commit()
-    return {"ok": True, "server": server.slug}
+    if body.inventory:
+        integration_updates.store_inventory(server, body.inventory)
+    answer: dict[str, Any] = {"ok": True, "server": server.slug}
+    if body.plugin == "VoidRpPerms":
+        # Updates the owner turned on in «Интеграция»: VoidRpPerms puts them in the update folder.
+        answer.update(integration_updates.updates_for(session, server))
+    return answer
