@@ -23,6 +23,7 @@ from apps.api.app.api.routes.referrals import router as referrals_router
 from apps.api.app.api.routes.game_auth import router as game_auth_router
 from apps.api.app.api.routes.server_auth import router as server_auth_router
 from apps.api.app.api.routes.servers import router as servers_router
+from apps.api.app.api.routes.status_public import router as status_public_router
 from apps.api.app.api.routes.admin_servers import router as admin_servers_router
 from apps.api.app.api.routes.admin_server_ops import router as admin_server_ops_router
 from apps.api.app.api.routes.admin_backups import router as admin_backups_router
@@ -203,6 +204,7 @@ api_router.include_router(consents_router)
 api_router.include_router(game_ui_battlepass_plugin_router)
 api_router.include_router(game_ui_alliance_router)
 api_router.include_router(servers_router)
+api_router.include_router(status_public_router)
 api_router.include_router(admin_servers_router)
 api_router.include_router(admin_server_ops_router)
 api_router.include_router(admin_backups_router)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -105,9 +105,13 @@ def overview(server: _Server, session: _Db) -> dict:
         "settings": {"auto_update": bool((server.integration_settings or {}).get("auto_update")),
                      "beta": bool((server.integration_settings or {}).get("beta")),
                      "discord_webhook": (server.integration_settings or {}).get("discord_webhook"),
-                     "public_status": public_status_on(server),
                      "restart_window": (server.integration_settings or {}).get("restart_window")
                      or {"enabled": False, "from": "04:00", "to": "06:00"}},
+        "status_page": {"on": public_status_on(server),
+                        "mode": {True: "on", False: "off"}.get((server.integration_settings or {}).get("public_status"), "auto"),
+                        "url": f"{get_settings().website_base_url.rstrip('/')}/status/{server.slug}",
+                        "badge": f"{get_settings().public_api_url.rstrip('/')}/api/v1/status/{server.slug}/badge.svg",
+                        "json": f"{get_settings().public_api_url.rstrip('/')}/api/v1/status/{server.slug}"},
         "scripts": {
             "update": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-update.sh | bash",
             "doctor": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-doctor.sh | bash",
@@ -318,7 +322,8 @@ class IntegrationSettings(BaseModel):
     auto_update: bool = False
     beta: bool = False
     discord_webhook: str | None = Field(default=None, max_length=300)
-    public_status: bool | None = None
+    # The public status page: True / False, or "auto" — on while the server is listed for players.
+    public_status: bool | Literal["auto"] | None = None
     # «Restart when empty» so waiting updates apply: {"enabled": bool, "from": "04:00", "to": "06:00"}.
     restart_window: dict | None = None
 
@@ -344,7 +349,13 @@ def put_settings(payload: IntegrationSettings, server: _Server, session: _Db, re
             raise HTTPException(status_code=422, detail="Окно перезапуска — время в виде ЧЧ:ММ")
         data["restart_window"] = {"enabled": bool(w.get("enabled")), "from": w.get("from") or "04:00",
                                   "to": w.get("to") or "06:00", "tz": "Europe/Moscow"}
-    srv.integration_settings = {**(srv.integration_settings or {}), **data}
+    merged = {**(srv.integration_settings or {}), **data}
+    if merged.get("public_status") == "auto":
+        merged.pop("public_status")
+    srv.integration_settings = merged
+    from apps.api.app.services.redis_cache_service import RedisCacheService
+
+    RedisCacheService().delete(f"public_status:{srv.id}")
     record_audit(session, category="integration", action="settings", actor=actor,
                  target_type="server", target_id=str(srv.id), target_label=srv.slug,
                  server_id=srv.id, meta=payload.model_dump(), request=request)
