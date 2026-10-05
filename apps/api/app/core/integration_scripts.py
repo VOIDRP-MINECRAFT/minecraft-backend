@@ -158,6 +158,24 @@ hash_ok() {
   esac
 }
 
+# --dry-run: says what would change, touches nothing.
+dry_check() {
+  local kind="$1" name="$2" want="$3" filename="$4" old
+  old="$(existing_jar "$kind" "$name")"
+  if [ -n "$old" ] && hash_ok "$old" "$want"; then c_ok "$name: актуален"
+  else c_warn "$name: поставлю $filename${old:+ вместо $(basename "$old")}"; fi
+}
+
+# The server's secret from the config of one of our plugins (for the scripts that need no link).
+find_secret() {
+  local f v
+  for f in plugins/VoidRpPerms/config.yml plugins/VoidRpAuth/config.yml plugins/VoidRpGuard/config.yml config/voidrp-auth-bridge.properties; do
+    [ -f "$DIR/$f" ] || continue
+    v="$(grep -m1 -E '^\s*(secret|game-auth-secret|gameSecret)\s*[:=]' "$DIR/$f" | sed -E "s/^[^:=]*[:=][[:space:]]*['\"]?([^'\" ]+).*/\1/")"
+    [ -n "$v" ] && { echo "$v"; return; }
+  done
+}
+
 BACKUP=""
 backup() {
   [ -e "$1" ] || return 0
@@ -201,11 +219,12 @@ place_jar() {
 INSTALL = r'''#!/usr/bin/env bash
 # VoidRP: подключение сервера «__NAME__» (__SLUG__). Сгенерировано в «Интеграции»,
 # ссылка одноразовая и действует 15 минут. Запускать из папки сервера:
-#   curl -fsSL __API__/i/__TOKEN__ | bash -s -- [папка сервера] [--all]
+#   curl -fsSL __API__/i/__TOKEN__ | bash -s -- [папка сервера] [--all] [--dry-run]
 # --all — поставить и необязательные плагины (античит VoidRpGuard с GrimAC и CoreProtect).
+# --dry-run — только показать, что будет сделано (ссылка при этом остаётся рабочей 15 минут).
 ''' + _COMMON + r'''
-ARGS=(); ALL=0
-for a in "$@"; do case "$a" in --all) ALL=1 ;; *) ARGS+=("$a") ;; esac; done
+ARGS=(); ALL=0; DRY=0
+for a in "$@"; do case "$a" in --all) ALL=1 ;; --dry-run) DRY=1 ;; *) ARGS+=("$a") ;; esac; done
 DIR="$(server_dir "${ARGS[0]:-}")"
 need curl; need sha256sum; need sha512sum; need unzip
 echo "── Подключение к VoidRP: $DIR"
@@ -228,6 +247,19 @@ curl -fsS -o /dev/null --max-time 10 "$API/servers" && c_ok "связь с $API 
 
 RUNNING=0; server_running && RUNNING=1
 [ "$RUNNING" = 1 ] && c_warn "сервер запущен: плагины встанут при перезапуске (через plugins/update/)"
+
+if [ "$DRY" = 1 ]; then
+  echo "── Пробный прогон: ничего не меняю"
+  while read -r tag kind level name want filename url; do
+    [ "$tag" = FILE ] && dry_check "$kind" "$name" "$want" "$filename"
+  done <<<"$BUNDLE"
+  while read -r tag path url; do
+    [ "$tag" = CONFIG ] && c_warn "конфиг $path: $([ -f "$DIR/$path" ] && echo "заменю (старый — в voidrp-backup/)" || echo "создам")"
+  done <<<"$BUNDLE"
+  grep '^NOTE ' <<<"$BUNDLE" | cut -d' ' -f2- | while read -r n; do c_warn "$n"; done || true
+  echo "Запустите без --dry-run, чтобы поставить."
+  exit 0
+fi
 
 while read -r tag kind level name want filename url; do
   [ "$tag" = FILE ] || continue
@@ -254,22 +286,56 @@ else echo "Всё уже стоит."; fi
 
 UPDATE = r'''#!/usr/bin/env bash
 # VoidRP: обновление наших плагинов на сервере. Берёт секрет сервера из конфига плагина,
-# поэтому ссылка не нужна — можно ставить в cron:
-#   curl -fsSL __API__/integration/voidrp-update.sh | bash -s -- [папка сервера] [--dry-run]
+# поэтому ссылка не нужна:
+#   curl -fsSL __API__/integration/voidrp-update.sh | bash -s -- [папка сервера] [флаги]
+#   --dry-run        показать, что обновится, ничего не меняя
+#   --install-cron   обновлять каждую ночь в 05:17 (по времени сервера), лог — logs/voidrp-update.log
+#   --remove-cron    убрать ночное обновление
+#   --uninstall      снять плагины VoidRP (в voidrp-backup/), конфиги оставить; с --purge — и конфиги
 # На работающем Paper новые jar ложатся в plugins/update/ (подменятся при перезапуске),
 # моды — только при остановленном сервере. Конфиги не трогает.
 ''' + _COMMON + r'''
-ARGS=(); DRY=0
-for a in "$@"; do case "$a" in --dry-run) DRY=1 ;; *) ARGS+=("$a") ;; esac; done
+ARGS=(); DRY=0; CRON=""; UNINSTALL=0; PURGE=0
+for a in "$@"; do case "$a" in
+  --dry-run) DRY=1 ;; --install-cron) CRON=add ;; --remove-cron) CRON=remove ;;
+  --uninstall) UNINSTALL=1 ;; --purge) PURGE=1 ;; *) ARGS+=("$a") ;;
+esac; done
 DIR="$(server_dir "${ARGS[0]:-}")"
-need curl; need sha256sum; need sha512sum; need unzip
 
-SECRET=""
-for f in plugins/VoidRpPerms/config.yml plugins/VoidRpAuth/config.yml plugins/VoidRpGuard/config.yml config/voidrp-auth-bridge.properties; do
-  [ -f "$DIR/$f" ] || continue
-  SECRET="$(grep -m1 -E '^\s*(secret|game-auth-secret|gameSecret)\s*[:=]' "$DIR/$f" | sed -E "s/^[^:=]*[:=][[:space:]]*['\"]?([^'\" ]+).*/\1/")"
-  [ -n "$SECRET" ] && break
-done
+if [ -n "$CRON" ]; then
+  need crontab
+  MARK="# voidrp-update $DIR"
+  CUR="$(crontab -l 2>/dev/null | grep -vF "$MARK" || true)"
+  if [ "$CRON" = add ]; then
+    mkdir -p "$DIR/logs"
+    LINE="17 5 * * * curl -fsSL $API/integration/voidrp-update.sh | bash -s -- '$DIR' >> '$DIR/logs/voidrp-update.log' 2>&1 $MARK"
+    printf '%s\n%s\n' "$CUR" "$LINE" | sed '/^$/d' | crontab -
+    c_ok "ночное обновление включено: каждый день в 05:17, лог — logs/voidrp-update.log"
+    c_ok "новые версии встанут при ближайшем перезапуске сервера"
+  else
+    printf '%s\n' "$CUR" | sed '/^$/d' | crontab -
+    c_ok "ночное обновление убрано"
+  fi
+  exit 0
+fi
+
+if [ "$UNINSTALL" = 1 ]; then
+  RUNNING=0; server_running && RUNNING=1
+  [ "$RUNNING" = 1 ] && { c_err "сервер запущен — остановите его, потом снимайте плагины"; exit 1; }
+  for n in VoidRpPerms VoidRpAuth VoidRpGuard VoidRpGameSync; do
+    j="$(existing_jar plugin "$n")"
+    [ -n "$j" ] && { backup "$j"; rm -f "$j"; c_ok "$n снят ($(basename "$j"))"; }
+    [ -f "$DIR/plugins/update/$(basename "${j:-none}")" ] && rm -f "$DIR/plugins/update/$(basename "$j")"
+    if [ "$PURGE" = 1 ] && [ -d "$DIR/plugins/$n" ]; then backup "$DIR/plugins/$n"; rm -rf "$DIR/plugins/$n"; c_ok "папка plugins/$n убрана"; fi
+  done
+  for j in "$DIR"/mods/voidrp_auth_bridge*.jar; do [ -f "$j" ] && { backup "$j"; rm -f "$j"; c_ok "мод $(basename "$j") снят"; }; done
+  [ -n "$BACKUP" ] && echo "Всё снятое — в ${BACKUP#$DIR/}; вернуть можно, скопировав обратно." || echo "Плагинов VoidRP не нашёл."
+  echo "Не забудьте вернуть online-mode и прежний плагин входа, если сервер уходит от VoidRP."
+  exit 0
+fi
+
+need curl; need sha256sum; need sha512sum; need unzip
+SECRET="$(find_secret)"
 [ -n "$SECRET" ] || { c_err "не нашёл секрет сервера в конфигах VoidRP — сначала подключите сервер (install.sh из «Интеграции»)"; exit 1; }
 AUTH_HEADER="X-Game-Auth-Secret: $SECRET"
 
@@ -277,15 +343,12 @@ BUNDLE="$(curl -fsSL -H "$AUTH_HEADER" "$API/game-sync/integration/bundle")" || 
 RUNNING=0; server_running && RUNNING=1
 while read -r tag kind level name want filename url; do
   [ "$tag" = FILE ] || continue
-  if [ "$DRY" = 1 ]; then
-    old="$(existing_jar "$kind" "$name")"
-    if [ -n "$old" ] && hash_ok "$old" "$want"; then c_ok "$name: актуален"; else c_warn "$name: есть $filename${old:+ (стоит $(basename "$old"))}"; fi
-    continue
-  fi
+  if [ "$DRY" = 1 ]; then dry_check "$kind" "$name" "$want" "$filename"; continue; fi
   place_jar "$kind" "$level" "$name" "$want" "$filename" "$url" || true
 done <<<"$BUNDLE"
 [ -n "$BACKUP" ] && echo "Старые файлы — в ${BACKUP#$DIR/}"
 [ "$WAITING" = 1 ] && echo "Новые версии подменятся при следующем перезапуске сервера."
+[ "$DRY" = 0 ] && { crontab -l 2>/dev/null | grep -qF "# voidrp-update $DIR" || echo "Обновлять каждую ночь само: добавьте --install-cron"; }
 exit 0
 '''
 
@@ -307,7 +370,47 @@ inf() { say "[..]   $*"; }
 say "VoidRP doctor · $(date -u '+%Y-%m-%d %H:%M UTC') · $(uname -sr)"
 [ -f "$DIR/server.properties" ] && okk "папка сервера: $DIR" || bad "в $DIR нет server.properties"
 
-if command -v java >/dev/null 2>&1; then okk "Java: $(java -version 2>&1 | head -1)"; else bad "java не найдена в PATH"; fi
+# Запущен ли сервер из этой папки — и на какой Java.
+RUN_PID=""; ABS="$(cd "$DIR" 2>/dev/null && pwd)"
+for p in $(pgrep -x java 2>/dev/null); do [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$ABS" ] && RUN_PID="$p"; done
+
+# Ядро и версия Minecraft: version_history.json (Paper), иначе имя jar ядра (paper-26.2-124.jar).
+MC=""; BUILD=""; CURV=""
+if [ -f "$DIR/version_history.json" ]; then
+  CURV="$(grep -o '"currentVersion"[^,}]*' "$DIR/version_history.json" | sed -E 's/.*: *"([^"]*)".*/\1/')"
+  MC="$(sed -nE 's/.*\(MC: ([0-9.]+)\).*/\1/p' <<<"$CURV")"
+  BUILD="$(sed -nE 's/^[0-9.]+-([0-9]+)-.*/\1/p; s/^git-[A-Za-z]+-([0-9]+).*/\1/p' <<<"$CURV" | head -1)"
+fi
+CORE_JAR="$( { [ -n "$RUN_PID" ] && tr '\0' '\n' < "/proc/$RUN_PID/cmdline" | grep -m1 '\.jar$'; ls "$DIR" 2>/dev/null | grep -m1 -iE '^(paper|folia|purpur)-[0-9.]+-[0-9]+\.jar$'; } | head -1)"
+CORE_JAR="$(basename "${CORE_JAR:-}")"
+if [ -z "$MC" ] && [[ "$CORE_JAR" =~ ^([A-Za-z]+)-([0-9.]+)-([0-9]+)\.jar$ ]]; then
+  MC="${BASH_REMATCH[2]}"; BUILD="${BASH_REMATCH[3]}"; CURV="${BASH_REMATCH[1]} $MC #$BUILD"
+fi
+[ -n "$CURV" ] && inf "ядро: $CURV" || { [ -n "$CORE_JAR" ] && inf "ядро: $CORE_JAR"; }
+if [ -n "$MC" ] && [ -n "$BUILD" ] && grep -qi paper <<<"$CURV $CORE_JAR"; then
+  LATEST="$(curl -fsS -m 10 "https://fill.papermc.io/v3/projects/paper/versions/$MC/builds/latest" 2>/dev/null | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)"
+  if [ -n "$LATEST" ]; then
+    if [ "$BUILD" -ge "$LATEST" ] 2>/dev/null; then okk "Paper $MC: свежая сборка #$BUILD"
+    elif [ $((LATEST - BUILD)) -ge 20 ] 2>/dev/null; then bad "Paper $MC: сборка #$BUILD, вышла #$LATEST — обновите ядро (исправления безопасности и вылетов)"
+    else inf "Paper $MC: сборка #$BUILD, есть #$LATEST"; fi
+  fi
+fi
+
+JAVA_BIN="$( [ -n "$RUN_PID" ] && readlink "/proc/$RUN_PID/exe" || command -v java || true)"
+if [ -n "$JAVA_BIN" ] && [ -x "$JAVA_BIN" ]; then
+  JL="$("$JAVA_BIN" -version 2>&1 | head -1)"; JV="$(sed -E 's/.*version "([0-9]+).*/\1/' <<<"$JL")"
+  NEED=21; case "$MC" in 2[6-9].*|[3-9][0-9].*) NEED=25 ;; 1.20.[5-6]|1.21*) NEED=21 ;; 1.1[89]*|1.20|1.20.[1-4]) NEED=17 ;; esac
+  WHO="$([ -n "$RUN_PID" ] && echo "сервер работает на" || echo "Java в PATH:")"
+  if [ -n "$MC" ] && [ "${JV:-0}" -lt "$NEED" ] 2>/dev/null; then bad "$WHO Java $JV, а Minecraft $MC нужна Java $NEED+"; else okk "$WHO $JL"; fi
+else bad "java не найдена в PATH"; fi
+
+# Память: сколько есть у машины и сколько отдано серверу (-Xmx запущенного процесса).
+if command -v free >/dev/null 2>&1; then
+  read -r _ MT _ _ _ _ MA <<<"$(free -m | awk 'NR==2')"
+  XMX="$( [ -n "$RUN_PID" ] && tr '\0' '\n' < "/proc/$RUN_PID/cmdline" | grep -m1 '^-Xmx' | cut -c5- || true)"
+  inf "память: всего ${MT} МБ, свободно ${MA} МБ${XMX:+, серверу отдано $XMX}"
+  [ "${MA:-0}" -lt 512 ] 2>/dev/null && bad "свободной памяти меньше 512 МБ — сервер может упасть, а система начнёт убивать процессы"
+fi
 for t in curl unzip sha256sum; do command -v $t >/dev/null 2>&1 || bad "нет программы $t"; done
 
 HOST="$(sed -E 's#^https?://([^/:]+).*#\1#' <<<"$API")"
@@ -332,6 +435,11 @@ if [ -f "$DIR/server.properties" ]; then
       bad "RCON слушает все адреса на порту $RP — закройте фаерволом или выключите (консоль идёт через VoidRpPerms)"
     else inf "RCON включён на порту $RP (не на всех адресах)"; fi
   else okk "RCON выключен"; fi
+  SP="$(P server-port)"; SP="${SP:-25565}"
+  if [ -n "${RUN_PID:-}" ]; then
+    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq ":$SP$"; then okk "сервер запущен и слушает порт $SP"
+    else bad "сервер запущен, но порт $SP не слушается — ещё грузится или занят другим процессом"; fi
+  else inf "сервер сейчас не запущен"; fi
 fi
 
 if [ -d "$DIR/plugins" ]; then
@@ -349,16 +457,40 @@ if [ -d "$DIR/plugins" ]; then
   done
   [ -d "$DIR/plugins/update" ] && [ -n "$(ls -A "$DIR/plugins/update" 2>/dev/null)" ] && inf "ждут перезапуска в plugins/update: $(ls "$DIR/plugins/update" | tr '\n' ' ')"
 fi
+# Наши плагины против свежих сборок (по секрету из конфига, как в update.sh).
+SECRET=""
+for f in plugins/VoidRpPerms/config.yml plugins/VoidRpAuth/config.yml plugins/VoidRpGuard/config.yml config/voidrp-auth-bridge.properties; do
+  [ -f "$DIR/$f" ] || continue
+  SECRET="$(grep -m1 -E '^\s*(secret|game-auth-secret|gameSecret)\s*[:=]' "$DIR/$f" | sed -E "s/^[^:=]*[:=][[:space:]]*['\"]?([^'\" ]+).*/\1/")"
+  [ -n "$SECRET" ] && break
+done
+if [ -n "$SECRET" ]; then
+  BUNDLE="$(curl -fsS -m 15 -H "X-Game-Auth-Secret: $SECRET" "$API/game-sync/integration/bundle" 2>/dev/null)"
+  if [ -z "$BUNDLE" ]; then bad "бэкенд не принял секрет из конфига — скачайте свежие конфиги в «Интеграции»"
+  else
+    okk "секрет из конфига принят"
+    OUTD=""
+    while read -r tag kind level name want filename url; do
+      [ "$tag" = FILE ] && [ "$kind" = plugin ] || continue
+      case "$name" in VoidRp*) ;; *) continue ;; esac
+      j=""
+      for c in "$DIR"/plugins/*.jar; do
+        [ -f "$c" ] || continue
+        [ "$(unzip -p "$c" plugin.yml paper-plugin.yml 2>/dev/null | grep -m1 -E '^name:' | sed -E "s/^name:[[:space:]]*['\"]?([^'\" ]+).*/\1/")" = "$name" ] && { j="$c"; break; }
+      done
+      [ -z "$j" ] && continue
+      case "$want" in sha256:*) h="$(sha256sum "$j" | cut -d' ' -f1)"; w="${want#sha256:}" ;; sha512:*) h="$(sha512sum "$j" | cut -d' ' -f1)"; w="${want#sha512:}" ;; *) continue ;; esac
+      [ "$h" = "$w" ] || OUTD="$OUTD $name→$filename"
+    done <<<"$BUNDLE"
+    [ -n "$OUTD" ] && bad "есть обновления:$OUTD — curl -fsSL $API/integration/voidrp-update.sh | bash" || okk "плагины VoidRP свежие"
+  fi
+else inf "секрета VoidRP в конфигах нет — сервер ещё не подключён"; fi
+crontab -l 2>/dev/null | grep -q "voidrp-update" && okk "ночное автообновление (cron) включено" || true
+
 [ -d "$DIR/mods" ] && inf "модов: $(ls "$DIR"/mods/*.jar 2>/dev/null | wc -l)$(ls "$DIR"/mods/voidrp_auth_bridge*.jar >/dev/null 2>&1 && echo ', voidrp-auth-bridge стоит' || echo ', voidrp-auth-bridge НЕ найден')"
 df -h "$DIR" 2>/dev/null | awk 'NR==2 {print "[..]   диск: занято "$5", свободно "$4}' | tee -a "$OUT"
 
 if [ "$SEND" = 1 ]; then
-  SECRET=""
-  for f in plugins/VoidRpPerms/config.yml plugins/VoidRpAuth/config.yml plugins/VoidRpGuard/config.yml config/voidrp-auth-bridge.properties; do
-    [ -f "$DIR/$f" ] || continue
-    SECRET="$(grep -m1 -E '^\s*(secret|game-auth-secret|gameSecret)\s*[:=]' "$DIR/$f" | sed -E "s/^[^:=]*[:=][[:space:]]*['\"]?([^'\" ]+).*/\1/")"
-    [ -n "$SECRET" ] && break
-  done
   if [ -z "$SECRET" ]; then echo "Не отправлено: нет секрета в конфигах VoidRP."
   elif curl -fsS -m 15 -H "X-Game-Auth-Secret: $SECRET" -H "Content-Type: text/plain; charset=utf-8" --data-binary @"$OUT" "$API/game-sync/integration/doctor" >/dev/null; then
     echo "Отчёт отправлен — он в «Интеграции»."
