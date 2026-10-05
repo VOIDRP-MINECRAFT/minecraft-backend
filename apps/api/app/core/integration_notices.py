@@ -110,20 +110,20 @@ def _trim(text: str | None) -> str:
 
 
 def announce_releases(rows: Iterable[PluginRelease]) -> int:
-    """Tells every external server a fresh build suits — and that runs an older one — about it."""
+    """Tells every external server the fresh builds that suit it — and that it runs older — about
+    them: one message per server and person, however many plugins were released together."""
     from apps.api.app.core.integration_state import suits
     from apps.api.app.db import SessionLocal
 
     sent = 0
+    ids = [r.id for r in rows]
     with SessionLocal() as session:
-        servers = session.scalars(select(GameServer).where(GameServer.is_external.is_(True))).all()
-        for row in rows:
-            row = session.get(PluginRelease, row.id)
-            entry = cat.entry(row.plugin) if row else None
-            if row is None or entry is None or row.yanked:
-                continue
-            for server in servers:
-                if not suits(row, server) or server.server_core not in entry["cores"]:
+        fresh = [r for r in (session.get(PluginRelease, i) for i in ids) if r is not None and not r.yanked]
+        for server in session.scalars(select(GameServer).where(GameServer.is_external.is_(True))).all():
+            updates = []
+            for row in fresh:
+                entry = cat.entry(row.plugin)
+                if entry is None or not suits(row, server) or server.server_core not in entry["cores"]:
                     continue
                 rep = session.scalar(select(ServerPluginReport).where(
                     ServerPluginReport.server_id == server.id, ServerPluginReport.plugin.ilike(entry["name"])))
@@ -132,12 +132,21 @@ def announce_releases(rows: Iterable[PluginRelease]) -> int:
                     continue
                 if not installed and not entry.get("required"):
                     continue  # not something they run
-                users = [u for u in recipients(session, server) if _wants_release(u, row)]
-                if not users:
+                updates.append((entry, row, installed))
+            if not updates:
+                continue
+            for user in recipients(session, server):
+                mine = [u for u in updates if _wants_release(user, u[1])]
+                notices = [n for n in (_once(session, server, user, "release", str(u[1].id)) for u in mine) if n]
+                if not notices:
                     continue
-                sent += _deliver(session, server, users, "release", str(row.id),
-                                 _release_text(server, entry, row, installed),
-                                 [("Открыть «Интеграцию»", _integration_url(server))])
+                given = {n.ref for n in notices}
+                text = _release_text(server, [u for u in mine if str(u[1].id) in given])
+                ok = _send(user.telegram_user_id, text, [("Открыть «Интеграцию»", _integration_url(server))])
+                for notice in notices:
+                    notice.telegram_sent = ok
+                session.commit()
+                sent += int(ok)
     return sent
 
 
@@ -148,17 +157,23 @@ def _wants_release(user: User, row: PluginRelease) -> bool:
     return p["releases"] == "all" or (p["releases"] == "important" and row.important)
 
 
-def _release_text(server: GameServer, entry: dict, row: PluginRelease, installed: str | None) -> str:
-    head = "❗️ Важное обновление" if row.important else ("🧪 Бета-сборка" if row.channel == "beta" else "🆕 Обновление")
-    was = f"у вас <b>{html.escape(installed)}</b> → " if installed else "не установлен → "
-    lines = [
-        f"{head} <b>{html.escape(entry['name'])}</b> для сервера «{html.escape(server.name)}»",
-        f"{was}<b>{html.escape(row.version)}</b>",
-    ]
-    if row.changelog:
-        lines += ["", "<b>Что изменилось:</b>", html.escape(_trim(row.changelog))]
-    lines += ["", "Скачать сборку и конфиг — в «Интеграции». Paper подменит jar при перезапуске, "
-                  "если положить его в <code>plugins/update/</code>."]
+def _release_text(server: GameServer, updates: list[tuple[dict, PluginRelease, str | None]]) -> str:
+    important = any(row.important for _, row, _ in updates)
+    head = "❗️ Важные обновления" if important else "🆕 Обновления"
+    if len(updates) == 1:
+        head = head.replace("обновления", "обновление").replace("Обновления", "Обновление")
+    lines = [f"{head} плагинов VoidRP для сервера «{html.escape(server.name)}»"]
+    budget = CHANGELOG_LIMIT
+    for entry, row, installed in updates:
+        tags = (" ❗️важное" if row.important else "") + (" 🧪бета" if row.channel == "beta" else "")
+        was = f"{html.escape(installed)} → " if installed else "не установлен → "
+        lines += ["", f"<b>{html.escape(entry['name'])}</b>: {was}<b>{html.escape(row.version)}</b>{tags}"]
+        if row.changelog and budget > 0:
+            log_text = _trim(row.changelog)[:budget]
+            budget -= len(log_text)
+            lines.append(html.escape(log_text))
+    lines += ["", "Сборки и конфиги — в «Интеграции». Paper подменит jar при перезапуске, "
+                  "если положить его в <code>plugins/update/</code> под тем же именем."]
     return "\n".join(lines)
 
 
