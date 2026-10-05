@@ -203,7 +203,7 @@ def old_secret_plugins(server: GameServer) -> list[str]:
 # What each protocol version of a plugin understands in the heartbeat's answer. A plugin sends
 # ``data.protocol``; the ones before that are recognised by version (VoidRpPerms 0.6.0 — 1,
 # 0.6.2 — 2). New answers get a new number, so an old plugin never receives what it cannot read.
-FEATURES: dict[str, int] = {"updates": 1, "inventory": 1, "new_secret": 2}
+FEATURES: dict[str, int] = {"updates": 1, "inventory": 1, "new_secret": 2, "notices": 3, "restart": 3}
 _LEGACY = {"VoidRpPerms": [("0.6.2", 2), ("0.6.0", 1)]}
 
 
@@ -221,3 +221,30 @@ def protocol_of(report) -> int:
 
 def supports(report, feature: str) -> bool:
     return protocol_of(report) >= FEATURES.get(feature, 10**6)
+
+
+def op_notices(session: Session, server: GameServer) -> list[str]:
+    """What operators of the server are told when they join (VoidRpPerms 0.7+), cached a minute."""
+    cache = RedisCacheService()
+    key = f"integration_op_notices:{server.id}"
+    cached = cache.get_json(key)
+    if cached is not None:
+        return cached
+    out = []
+    for it in integration_state.plugin_items(session, server):
+        if it["kind"] != "ours" or not it.get("installed"):
+            continue
+        if it.get("unsupported"):
+            out.append(f"{it['name']} {it['installed']['version']} больше не поддерживается — нужна {it['min_supported']}+")
+        elif it.get("outdated"):
+            out.append(f"Доступно обновление {it['name']}: {it['installed']['version']} → {it['latest']['version']}")
+    cache.set_json(key, out, ttl_seconds=60)
+    return out
+
+
+def restart_window(server: GameServer) -> dict[str, str] | None:
+    """The owner's «restart when empty» window, for VoidRpPerms 0.7+ (RestartPlanner)."""
+    w = (server.integration_settings or {}).get("restart_window") or {}
+    if not w.get("enabled") or not (server.integration_settings or {}).get("auto_update"):
+        return None
+    return {"from": w.get("from") or "04:00", "to": w.get("to") or "06:00", "tz": w.get("tz") or "Europe/Moscow"}

@@ -105,7 +105,9 @@ def overview(server: _Server, session: _Db) -> dict:
         "settings": {"auto_update": bool((server.integration_settings or {}).get("auto_update")),
                      "beta": bool((server.integration_settings or {}).get("beta")),
                      "discord_webhook": (server.integration_settings or {}).get("discord_webhook"),
-                     "public_status": public_status_on(server)},
+                     "public_status": public_status_on(server),
+                     "restart_window": (server.integration_settings or {}).get("restart_window")
+                     or {"enabled": False, "from": "04:00", "to": "06:00"}},
         "scripts": {
             "update": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-update.sh | bash",
             "doctor": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-doctor.sh | bash",
@@ -317,6 +319,8 @@ class IntegrationSettings(BaseModel):
     beta: bool = False
     discord_webhook: str | None = Field(default=None, max_length=300)
     public_status: bool | None = None
+    # «Restart when empty» so waiting updates apply: {"enabled": bool, "from": "04:00", "to": "06:00"}.
+    restart_window: dict | None = None
 
 
 @router.put("/settings", dependencies=[Depends(require_permission("integration.config"))])
@@ -331,6 +335,15 @@ def put_settings(payload: IntegrationSettings, server: _Server, session: _Db, re
     srv = session.get(GameServer, server.id)
     data = payload.model_dump(exclude_none=True)
     data["discord_webhook"] = hook or None
+    if payload.restart_window is not None:
+        import re as _re
+
+        w = payload.restart_window
+        hhmm = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+        if w.get("enabled") and not (hhmm.match(str(w.get("from", ""))) and hhmm.match(str(w.get("to", "")))):
+            raise HTTPException(status_code=422, detail="Окно перезапуска — время в виде ЧЧ:ММ")
+        data["restart_window"] = {"enabled": bool(w.get("enabled")), "from": w.get("from") or "04:00",
+                                  "to": w.get("to") or "06:00", "tz": "Europe/Moscow"}
     srv.integration_settings = {**(srv.integration_settings or {}), **data}
     record_audit(session, category="integration", action="settings", actor=actor,
                  target_type="server", target_id=str(srv.id), target_label=srv.slug,

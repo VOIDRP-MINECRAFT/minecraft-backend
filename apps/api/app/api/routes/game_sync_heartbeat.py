@@ -90,4 +90,10 @@ def heartbeat(
     if integration_updates.supports(report, "updates"):
         # Updates the owner turned on in «Интеграция»: VoidRpPerms puts them in the update folder.
         answer.update(integration_updates.updates_for(session, server))
+    if integration_updates.supports(report, "notices"):
+        answer["notices"] = integration_updates.op_notices(session, server)
+    if integration_updates.supports(report, "restart"):
+        window = integration_updates.restart_window(server)
+        if window:
+            answer["restart"] = window
     return answer
