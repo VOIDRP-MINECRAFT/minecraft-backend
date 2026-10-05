@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from apps.api.app.core import integration_history, integration_updates
+from apps.api.app.core import integration_history, integration_updates, server_status
 from apps.api.app.core.security import utc_now
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
@@ -78,6 +78,8 @@ def heartbeat(
     session.commit()
     if body.inventory:
         integration_updates.store_inventory(server, body.inventory)
+    server_status.record_heartbeat(session, server, report)
+    session.commit()
     answer: dict[str, Any] = {"ok": True, "server": server.slug}
     # Still on the secret before a smooth rotation: VoidRpPerms 0.6.2+ takes the new one from
     # here and rewrites the configs of our plugins; the page lists who has not moved yet.

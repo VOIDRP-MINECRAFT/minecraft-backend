@@ -20,7 +20,13 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import get_settings
 from apps.api.app.api.routes import integration_public
 from apps.api.app.core import integration_catalog as cat
-from apps.api.app.core import integration_history, integration_notices, integration_state, integration_updates
+from apps.api.app.core import (
+    integration_history,
+    integration_notices,
+    integration_state,
+    integration_updates,
+    server_status,
+)
 from apps.api.app.core import server_reports
 from apps.api.app.core.audit import record_audit
 from apps.api.app.core.security import utc_now
@@ -86,13 +92,17 @@ def overview(server: _Server, session: _Db) -> dict:
         "doctor": integration_public.doctor_of(server),
         "inventory": integration_updates.analysis(server, items),
         "history": integration_history.recent(session, server),
+        "status": server_status.summary(session, server),
+        "incidents": server_status.incidents(session, server),
         "secret": {
             "previous_until": server.previous_secret_until.isoformat()
             if server.previous_secret_until and server.previous_secret_until > utc_now() else None,
             "old_secret_plugins": integration_updates.old_secret_plugins(server),
         },
         "settings": {"auto_update": bool((server.integration_settings or {}).get("auto_update")),
-                     "beta": bool((server.integration_settings or {}).get("beta"))},
+                     "beta": bool((server.integration_settings or {}).get("beta")),
+                     "discord_webhook": (server.integration_settings or {}).get("discord_webhook"),
+                     "public_status": public_status_on(server)},
         "scripts": {
             "update": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-update.sh | bash",
             "doctor": f"curl -fsSL {get_settings().public_api_url.rstrip('/')}/api/v1/integration/voidrp-doctor.sh | bash",
@@ -297,14 +307,23 @@ def bundle_zip(server: _Server, session: _Db, request: Request,
 class IntegrationSettings(BaseModel):
     auto_update: bool = False
     beta: bool = False
+    discord_webhook: str | None = Field(default=None, max_length=300)
+    public_status: bool | None = None
 
 
 @router.put("/settings", dependencies=[Depends(require_permission("integration.config"))])
 def put_settings(payload: IntegrationSettings, server: _Server, session: _Db, request: Request,
                  actor: Annotated[User, Depends(get_current_staff_user)]) -> dict:
     """Auto-update of our plugins on this server (VoidRpPerms 0.6.0+ downloads them)."""
+    from apps.api.app.core import integration_discord
+
+    hook = (payload.discord_webhook or "").strip()
+    if hook and not integration_discord.WEBHOOK.match(hook):
+        raise HTTPException(status_code=422, detail="Это не адрес вебхука Discord (https://discord.com/api/webhooks/…)")
     srv = session.get(GameServer, server.id)
-    srv.integration_settings = {**(srv.integration_settings or {}), **payload.model_dump()}
+    data = payload.model_dump(exclude_none=True)
+    data["discord_webhook"] = hook or None
+    srv.integration_settings = {**(srv.integration_settings or {}), **data}
     record_audit(session, category="integration", action="settings", actor=actor,
                  target_type="server", target_id=str(srv.id), target_label=srv.slug,
                  server_id=srv.id, meta=payload.model_dump(), request=request)
@@ -322,3 +341,22 @@ def selftest(server: _Server, session: _Db) -> dict:
         return {"output": server_console.run(server, "voidrp status", timeout=10)}
     except server_console.PluginConsoleError as exc:
         raise HTTPException(status_code=504, detail=str(exc))
+
+
+def public_status_on(server: GameServer) -> bool:
+    """The public status page and badge: on by default for a listed server, by the owner's switch."""
+    value = (server.integration_settings or {}).get("public_status")
+    return bool(value) if value is not None else bool(server.is_visible and not server.staff_only)
+
+
+@router.post("/discord-test", dependencies=[Depends(require_permission("integration.config"))])
+def discord_test(server: _Server, payload: IntegrationSettings) -> dict:
+    """Sends a test message to the webhook typed in (not saved yet)."""
+    from apps.api.app.core import integration_discord
+
+    hook = (payload.discord_webhook or "").strip()
+    if not integration_discord.WEBHOOK.match(hook):
+        raise HTTPException(status_code=422, detail="Это не адрес вебхука Discord (https://discord.com/api/webhooks/…)")
+    if not integration_discord.test(server, hook):
+        raise HTTPException(status_code=502, detail="Discord не принял сообщение — проверьте, что вебхук не удалён")
+    return {"ok": True}
