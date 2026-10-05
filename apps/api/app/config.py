@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     media_storage_root: str = "./media"
     media_public_mount_path: str = "/media"
     media_public_base_url: str = "https://api.void-rp.ru/media"
+    # MineSkin signs player skins for offline-mode servers (skin_textures). Works without a
+    # key at ~10/min; a key from mineskin.org raises the limit.
+    mineskin_api_key: str = ""
 
     profile_avatar_max_bytes: int = 512 * 1024
     profile_banner_max_bytes: int = 2 * 1024 * 1024

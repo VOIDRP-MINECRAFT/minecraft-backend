@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.core import skin_textures
 from apps.api.app.core.user_messages import localize_player_access_error, translate_user_message
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_auth_secret, require_game_server
@@ -107,7 +108,9 @@ def player_skin(
             sha256=None,
             updated_at=None,
         )
-        cache.set_json(f"player_skin:{normalized}", payload.model_dump(mode="json"), ttl_seconds=20)
+        _attach_textures(session, payload, player_name, normalized, None)
+        cache.set_json(f"player_skin:{normalized}", payload.model_dump(mode="json"),
+                       ttl_seconds=20 if payload.textures_value else 5)
         return payload
 
     skin = session.execute(
@@ -126,8 +129,28 @@ def player_skin(
         sha256=(skin.sha256 if skin else None),
         updated_at=(skin.updated_at.isoformat() if skin and skin.updated_at else None),
     )
-    cache.set_json(f"player_skin:{normalized}", payload.model_dump(mode="json"), ttl_seconds=20)
+    _attach_textures(session, payload, player_name, normalized, skin)
+    # Short while the signature is being made, so the server's retry picks it up.
+    cache.set_json(f"player_skin:{normalized}", payload.model_dump(mode="json"),
+                   ttl_seconds=20 if payload.textures_value else 5)
     return payload
+
+
+def _attach_textures(session: Session, payload: PlayerSkinResponse, player_name: str,
+                     normalized: str, skin: PlayerSkin | None) -> None:
+    """Fill the signed ``textures`` property, or queue it and leave it empty."""
+    if skin is not None:
+        signed = skin_textures.lookup(session, skin.sha256, skin.model_variant)
+        if signed is None:
+            skin_textures.request_signing(skin.sha256, skin.model_variant, skin.original_url, normalized)
+            return
+        payload.textures_value, payload.textures_signature = signed.value, signed.signature
+        payload.textures_source = "voidrp"
+        return
+    mojang = skin_textures.mojang_textures(player_name, normalized)
+    if mojang:
+        payload.textures_value, payload.textures_signature = mojang["value"], mojang["signature"]
+        payload.textures_source = "mojang"
 
 
 @router.get("/settings", response_model=AuthSettingsResponse)

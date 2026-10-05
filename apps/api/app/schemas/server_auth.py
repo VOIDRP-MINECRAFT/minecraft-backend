@@ -42,6 +42,12 @@ class PlayerSkinResponse(BaseModel):
     height: int | None = None
     sha256: str | None = None
     updated_at: str | None = None
+    # Mojang-signed ``textures`` property for an offline-mode server's game profile:
+    # source "voidrp" (the skin above, signed via MineSkin) or "mojang" (no VoidRP skin —
+    # the Mojang skin of the nickname). Absent while the signature is still being made.
+    textures_value: str | None = None
+    textures_signature: str | None = None
+    textures_source: str | None = None
 
 
 class AuthSettingsResponse(BaseModel):

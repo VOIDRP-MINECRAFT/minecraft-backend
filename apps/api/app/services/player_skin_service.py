@@ -163,6 +163,12 @@ class PlayerSkinService:
         self.session.commit()
         self.session.refresh(current)
         self._invalidate_skin_cache(current_user)
+        # Sign it for offline-mode servers right away, so the next login already shows it.
+        from apps.api.app.core import skin_textures
+
+        nick = (current_user.player_account.minecraft_nickname_normalized
+                if current_user.player_account is not None else None)
+        skin_textures.request_signing(current.sha256, current.model_variant, current.original_url, nick)
         return current
 
     def delete_for_user(self, *, current_user: User) -> None:
