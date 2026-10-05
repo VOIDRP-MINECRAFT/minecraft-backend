@@ -16,6 +16,7 @@ import html
 import logging
 from datetime import timedelta
 from typing import Any, Iterable
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -137,6 +138,14 @@ def announce_releases(rows: Iterable[PluginRelease]) -> int:
                 continue
             for user in recipients(session, server):
                 mine = [u for u in updates if _wants_release(user, u[1])]
+                # Not twice about one plugin within RELEASE_QUIET: a quick fix after a release is
+                # recorded as given (the page and the banner show it) but not messaged, unless important.
+                recent = _recently_announced(session, server, user)
+                quiet = [u for u in mine if u[1].plugin in recent and not u[1].important]
+                for _, row, _ in quiet:
+                    _once(session, server, user, "release", str(row.id))
+                session.commit()
+                mine = [u for u in mine if u not in quiet]
                 notices = [n for n in (_once(session, server, user, "release", str(u[1].id)) for u in mine) if n]
                 if not notices:
                     continue
@@ -148,6 +157,27 @@ def announce_releases(rows: Iterable[PluginRelease]) -> int:
                 session.commit()
                 sent += int(ok)
     return sent
+
+
+RELEASE_QUIET = timedelta(hours=12)
+
+
+def _recently_announced(session: Session, server: GameServer, user: User) -> set[str]:
+    """Plugins this person heard about for this server within RELEASE_QUIET (in Telegram)."""
+    since = utc_now() - RELEASE_QUIET
+    refs = session.scalars(select(IntegrationNotice.ref).where(
+        IntegrationNotice.server_id == server.id, IntegrationNotice.user_id == user.id,
+        IntegrationNotice.kind == "release", IntegrationNotice.telegram_sent.is_(True),
+        IntegrationNotice.created_at >= since)).all()
+    ids = []
+    for ref in refs:
+        try:
+            ids.append(UUID(ref))
+        except ValueError:
+            continue
+    if not ids:
+        return set()
+    return set(session.scalars(select(PluginRelease.plugin).where(PluginRelease.id.in_(ids))).all())
 
 
 def _wants_release(user: User, row: PluginRelease) -> bool:

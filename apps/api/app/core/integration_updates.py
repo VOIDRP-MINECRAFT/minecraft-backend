@@ -13,7 +13,6 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from apps.api.app.config import get_settings
 from apps.api.app.core import integration_catalog as cat
 from apps.api.app.core import integration_state
 from apps.api.app.core.releases import version_key
@@ -107,7 +106,6 @@ def updates_for(session: Session, server: GameServer) -> dict[str, Any]:
         return {"auto_update": False}
     from apps.api.app.core import integration_scripts
 
-    api = get_settings().public_api_url.rstrip("/") + "/api/v1"
     items = integration_state.plugin_items(session, server)
     out = []
     for it in items:
@@ -116,7 +114,9 @@ def updates_for(session: Session, server: GameServer) -> dict[str, Any]:
             if latest["channel"] == "beta" and not settings.get("beta"):
                 continue
             out.append({"name": it.get("plugin_name") or it["name"], "version": latest["version"],
-                        "hash": f"sha256:{latest['sha256']}", "url": f"{api}/game-sync/integration/file/{latest['id']}"})
+                        # A path, not a URL: the plugin puts it after its own backend-url, so the
+                        # secret goes exactly where the plugin already talks to.
+                        "hash": f"sha256:{latest['sha256']}", "url": f"/game-sync/integration/file/{latest['id']}"})
     inv = inventory(server) or {}
     have = {p["name"].lower(): p for p in inv.get("plugins", [])}
     for it in items:
