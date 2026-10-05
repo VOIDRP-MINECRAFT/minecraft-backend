@@ -18,16 +18,18 @@ from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.plugin_release import PluginRelease
 
 
-def suits(release: PluginRelease, server: GameServer) -> bool:
-    core = (server.server_core or "").lower()
+def suits(release: PluginRelease, server: GameServer, client_side: bool = False) -> bool:
+    """For a mod of the players' pack (``client_side``) the loader of the pack decides, not the core."""
+    core = ((server.loader if client_side else server.server_core) or "").lower()
     if core and release.platforms and core not in release.platforms:
         return False
     return mc_versions.matches(server.mc_version, release.mc_versions)
 
 
-def latest_for(releases: list[PluginRelease], server: GameServer, beta: bool = False) -> PluginRelease | None:
+def latest_for(releases: list[PluginRelease], server: GameServer, beta: bool = False,
+               client_side: bool = False) -> PluginRelease | None:
     """The build to offer: the newest recommended one that suits, else the newest that suits."""
-    usable = [r for r in releases if not r.yanked and suits(r, server) and (beta or r.channel == "stable")]
+    usable = [r for r in releases if not r.yanked and suits(r, server, client_side) and (beta or r.channel == "stable")]
     usable.sort(key=lambda r: version_key(r.version), reverse=True)
     return next((r for r in usable if r.recommended), usable[0] if usable else None)
 
@@ -56,7 +58,7 @@ def plugin_items(session: Session, server: GameServer, *, include_yanked: bool =
         if e["kind"] == "ours":
             own = [r for r in releases if r.plugin == e["key"] and (include_yanked or not r.yanked)]
             own.sort(key=lambda r: version_key(r.version), reverse=True)
-            latest = latest_for(own, server)
+            latest = latest_for(own, server, client_side=bool(e.get("client_side")))
             item["releases"] = [release_view(r) for r in own]
             item["latest"] = release_view(latest) if latest else None
             rep = by_plugin.get(e["name"].lower())
