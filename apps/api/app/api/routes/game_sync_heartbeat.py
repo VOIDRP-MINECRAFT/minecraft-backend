@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from apps.api.app.core import integration_updates
+from apps.api.app.core import integration_history, integration_updates
 from apps.api.app.core.security import utc_now
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
@@ -57,18 +57,30 @@ def heartbeat(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     report = session.get(ServerPluginReport, (server.id, body.plugin))
+    first = report is None
     if report is None:
         report = ServerPluginReport(server_id=server.id, plugin=body.plugin)
         session.add(report)
+    old_version, old_modules = report.version, dict(report.modules or {})
     report.version = body.version
     report.core = body.core
     report.modules = {k[:32]: v.model_dump() for k, v in body.modules.items()}
+    integration_history.on_heartbeat(session, server, body.plugin, old_version, body.version,
+                                     old_modules, report.modules, first)
+    if first or old_version != body.version:
+        integration_history.trim(session, server)
     report.data = _clean_data(body.data)
     report.reported_at = utc_now()
     session.commit()
     if body.inventory:
         integration_updates.store_inventory(server, body.inventory)
     answer: dict[str, Any] = {"ok": True, "server": server.slug}
+    # Still on the secret before a smooth rotation: VoidRpPerms 0.6.2+ takes the new one from
+    # here and rewrites the configs of our plugins; the page lists who has not moved yet.
+    if getattr(server, "_used_previous_secret", False):
+        integration_updates.mark_old_secret(server, body.plugin)
+        if body.plugin == "VoidRpPerms":
+            answer["new_secret"] = server.game_auth_secret
     if body.plugin == "VoidRpPerms":
         # Updates the owner turned on in «Интеграция»: VoidRpPerms puts them in the update folder.
         answer.update(integration_updates.updates_for(session, server))

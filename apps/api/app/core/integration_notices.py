@@ -151,7 +151,11 @@ def announce_releases(rows: Iterable[PluginRelease]) -> int:
                     continue
                 given = {n.ref for n in notices}
                 text = _release_text(server, [u for u in mine if str(u[1].id) in given])
-                ok = _send(user.telegram_user_id, text, [("Открыть «Интеграцию»", _integration_url(server))])
+                sent_rows = [u for u in mine if str(u[1].id) in given]
+                buttons = [("Открыть «Интеграцию»", _integration_url(server))]
+                if len(sent_rows) == 1 and sent_rows[0][1].source_url:
+                    buttons.insert(0, ("Что изменилось — на GitHub", sent_rows[0][1].source_url))
+                ok = _send(user.telegram_user_id, text, buttons)
                 for notice in notices:
                     notice.telegram_sent = ok
                 session.commit()
@@ -224,6 +228,7 @@ def check_health() -> int:
                     if name in server_reports.REQUIRED_MODULES and isinstance(state, dict) and state.get("ok"):
                         if r.reported_at and (name not in last or r.reported_at > last[name]):
                             last[name] = r.reported_at
+            _history_quiet(session, server, last, now)
             users = [u for u in recipients(session, server) if prefs(u)["health"]]
             if not users:
                 continue
@@ -241,6 +246,28 @@ def check_health() -> int:
                 else:
                     sent += _recovered(session, server, users, name, label)
     return sent
+
+
+def _history_quiet(session: Session, server: GameServer, last: dict[str, Any], now) -> None:
+    """Writes "went quiet" / "back" into the page's history once per outage, notices or not."""
+    from apps.api.app.core import integration_history
+    from apps.api.app.services.redis_cache_service import RedisCacheService
+
+    cache = RedisCacheService()
+    for name, label in server_reports.REQUIRED_MODULES.items():
+        seen = last.get(name)
+        if seen is None:
+            continue
+        key = f"integration_quiet:{server.id}:{name}"
+        flagged = cache.get_json(key)
+        if now - seen > QUIET_AFTER and not flagged:
+            integration_history.add(session, server, "quiet", None, f"{label} — последний отчёт {seen.strftime('%H:%M')} UTC")
+            cache.set_json(key, {"since": seen.isoformat()}, ttl_seconds=30 * 24 * 3600)
+            session.commit()
+        elif now - seen <= QUIET_AFTER and flagged:
+            integration_history.add(session, server, "back", None, label)
+            cache.delete(key)
+            session.commit()
 
 
 def _recovered(session: Session, server: GameServer, users: list[User], name: str, label: str) -> int:
@@ -262,8 +289,14 @@ def _recovered(session: Session, server: GameServer, users: list[User], name: st
 def notify_secret_rotated(session: Session, server: GameServer, by: str | None) -> int:
     ref = utc_now().strftime("%Y%m%d%H%M%S")
     who = f" ({html.escape(by)})" if by else ""
+    if server.previous_secret_until:
+        until = server.previous_secret_until.strftime("%d.%m %H:%M UTC")
+        what = (f"Старый действует до {until}: VoidRpPerms 0.6.2+ сам впишет новый в конфиги наших плагинов. "
+                "Перезапустите сервер в ближайшие часы, чтобы его подхватили все плагины, — в «Интеграции» видно, "
+                "кто ещё на старом.")
+    else:
+        what = ("Старый секрет больше не действует: плагины перестали подключаться. Возьмите в «Интеграции» новые "
+                "конфиги (или команду установки) и перезапустите сервер.")
     return _deliver(session, server, recipients(session, server), "secret", ref,
-                    f"🔑 Секрет сервера «{html.escape(server.name)}» сменён{who}.\n"
-                    "Плагины со старым секретом перестали подключаться: скачайте новые конфиги в «Интеграции» "
-                    "и перезапустите сервер.",
+                    f"🔑 Секрет сервера «{html.escape(server.name)}» сменён{who}.\n{what}",
                     [("Открыть «Интеграцию»", _integration_url(server))])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import get_settings
 from apps.api.app.core import server_provision
+from apps.api.app.core.security import utc_now
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import (
     PermittedServers,
@@ -321,11 +323,25 @@ def regenerate_secret(
     session: Annotated[Session, Depends(get_db_session)],
     where: _Where,
     actor: Annotated[User, Depends(get_current_staff_user)],
+    mode: Annotated[str, Query(pattern=r"^(now|smooth)$")] = "now",
 ) -> GameServer:
+    """``now`` — the old secret stops at once (it leaked); ``smooth`` — it keeps working for a
+    day while VoidRpPerms 0.6.2+ moves the plugins over (``previous_game_auth_secret``)."""
     _check(where, server_id)
     repo = GameServerRepository(session)
     server = _get_or_404(repo, server_id)
+    old = server.game_auth_secret
     server.game_auth_secret = secrets.token_urlsafe(32)
+    if mode == "smooth":
+        server.previous_game_auth_secret = old
+        server.previous_secret_until = utc_now() + timedelta(hours=24)
+    else:
+        server.previous_game_auth_secret = None
+        server.previous_secret_until = None
+    from apps.api.app.core import integration_history
+
+    integration_history.add(session, server, "secret", None,
+                            f"сменён ({'плавно, старый действует сутки' if mode == 'smooth' else 'сразу'}), {actor.site_login}")
     session.commit()
     session.refresh(server)
     if server.is_external:

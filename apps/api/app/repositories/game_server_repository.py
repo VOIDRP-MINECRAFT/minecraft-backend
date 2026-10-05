@@ -35,6 +35,15 @@ class GameServerRepository:
         for server in self.list_all():
             if hmac.compare_digest(server.game_auth_secret, secret):
                 return server
+        # A smoothly rotated secret keeps working until its grace ends (admin_servers).
+        from apps.api.app.core.security import utc_now
+
+        now = utc_now()
+        for server in self.list_all():
+            if (server.previous_game_auth_secret and server.previous_secret_until and now < server.previous_secret_until
+                    and hmac.compare_digest(server.previous_game_auth_secret, secret)):
+                server._used_previous_secret = True  # noqa: SLF001 — read by the heartbeat
+                return server
         return None
 
     def list_all(self) -> list[GameServer]:

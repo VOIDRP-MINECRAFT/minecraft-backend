@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -226,6 +227,10 @@ class GameServer(UuidPrimaryKeyMixin, TimestampMixin, Base):
 
     # ── Game-server auth ──────────────────────────────────────────────────
     game_auth_secret: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    # After a smooth rotation the old secret keeps working until previous_secret_until, so the
+    # plugins can move over (VoidRpPerms 0.6.2+ rewrites their configs) without the server dropping.
+    previous_game_auth_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    previous_secret_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # ── Operations / monitoring (admin dashboard) ─────────────────────────
     # These wire the admin monitoring panel to the actual OS process. The

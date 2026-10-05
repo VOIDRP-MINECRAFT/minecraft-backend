@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import get_settings
 from apps.api.app.api.routes import integration_public
 from apps.api.app.core import integration_catalog as cat
-from apps.api.app.core import integration_notices, integration_state, integration_updates
+from apps.api.app.core import integration_history, integration_notices, integration_state, integration_updates
 from apps.api.app.core import server_reports
 from apps.api.app.core.audit import record_audit
 from apps.api.app.core.security import utc_now
@@ -85,6 +85,12 @@ def overview(server: _Server, session: _Db) -> dict:
         "fresh_seconds": server_reports.FRESH_SECONDS,
         "doctor": integration_public.doctor_of(server),
         "inventory": integration_updates.analysis(server, items),
+        "history": integration_history.recent(session, server),
+        "secret": {
+            "previous_until": server.previous_secret_until.isoformat()
+            if server.previous_secret_until and server.previous_secret_until > utc_now() else None,
+            "old_secret_plugins": integration_updates.old_secret_plugins(server),
+        },
         "settings": {"auto_update": bool((server.integration_settings or {}).get("auto_update")),
                      "beta": bool((server.integration_settings or {}).get("beta"))},
         "scripts": {

@@ -13,6 +13,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from apps.api.app.config import get_settings
+
 from apps.api.app.core import integration_catalog as cat
 from apps.api.app.core import integration_state
 from apps.api.app.core.releases import version_key
@@ -43,9 +45,14 @@ def store_inventory(server: GameServer, inventory: dict[str, Any]) -> None:
     props = {str(k)[:40]: str(v)[:40] for k, v in (inventory.get("server_properties") or {}).items()}
     from apps.api.app.core.security import utc_now
 
+    configs = {}
+    for name, c in list((inventory.get("configs") or {}).items())[:20]:
+        if isinstance(c, dict):
+            configs[str(name)[:64]] = {"keys": [str(k)[:120] for k in (c.get("keys") or [])[:300]],
+                                       "backend_url": str(c.get("backend_url") or "")[:200] or None}
     RedisCacheService().set_json(f"integration_inventory:{server.id}", {
         "plugins": plugins, "java": str(inventory.get("java") or "")[:32], "server_properties": props,
-        "at": utc_now().isoformat(),
+        "configs": configs, "at": utc_now().isoformat(),
     }, ttl_seconds=INVENTORY_TTL)
 
 
@@ -78,6 +85,7 @@ def analysis(server: GameServer, items: list[dict[str, Any]]) -> dict[str, Any] 
         p = have.get((it.get("plugin_name") or it["name"]).lower())
         if p and it.get("version") and version_key(_plain(p["version"])) < version_key(it["version"]):
             issues.append({"level": "info", "text": f"{p['name']} {p['version']} старее проверенной нами {it['version']}."})
+    issues += _config_issues(server, items, inv.get("configs") or {})
     props = inv.get("server_properties") or {}
     if props.get("online-mode") == "true":
         issues.append({"level": "err", "text": "online-mode=true: игроки VoidRP без лицензии не зайдут. Нужен online-mode=false (вход проверяет VoidRpAuth)."})
@@ -86,6 +94,44 @@ def analysis(server: GameServer, items: list[dict[str, Any]]) -> dict[str, Any] 
                                                    for r in [i.get("installed") or {} for i in items]):
         issues.append({"level": "warn", "text": f"RCON включён (порт {props.get('rcon.port', '25575')}), хотя консоль идёт через VoidRpPerms — выключите enable-rcon."})
     return {"at": inv["at"], "java": inv["java"], "plugins": inv["plugins"], "issues": issues}
+
+
+def _leaf_keys(data: Any, prefix: str = "") -> set[str]:
+    if not isinstance(data, dict):
+        return {prefix} if prefix else set()
+    out: set[str] = set()
+    for k, v in data.items():
+        out |= _leaf_keys(v, f"{prefix}.{k}" if prefix else str(k))
+    return out
+
+
+def _config_issues(server: GameServer, items: list[dict[str, Any]], configs: dict[str, Any]) -> list[dict[str, str]]:
+    """Settings the current template has but a plugin's config.yml lacks, and a backend address
+    other than ours — from the key names VoidRpPerms 0.6.2+ reports (never the values)."""
+    import yaml
+    from urllib.parse import urlparse
+
+    out: list[dict[str, str]] = []
+    ours_host = urlparse(get_settings().public_api_url).hostname
+    for it in items:
+        if it["kind"] != "ours" or it["key"] not in cat.CONFIG_BUILDERS or not (it.get("config_path") or "").endswith(".yml"):
+            continue
+        reported = configs.get(it.get("plugin_name") or it["name"])
+        if not reported:
+            continue
+        try:
+            template = _leaf_keys(yaml.safe_load(cat.CONFIG_BUILDERS[it["key"]](server)))
+        except yaml.YAMLError:
+            continue
+        missing = sorted(template - set(reported["keys"]))
+        if missing:
+            shown = ", ".join(missing[:6]) + (f" и ещё {len(missing) - 6}" if len(missing) > 6 else "")
+            out.append({"level": "info", "text": f"В конфиге {it['name']} нет настроек из новой версии: {shown}. "
+                        "Работают значения по умолчанию; чтобы видеть и менять их — возьмите свежий конфиг во вкладке «Плагины»."})
+        url = reported.get("backend_url")
+        if url and urlparse(url).hostname not in (ours_host, "127.0.0.1", "localhost"):
+            out.append({"level": "warn", "text": f"{it['name']} обращается к {url}, а адрес VoidRP — {get_settings().public_api_url}."})
+    return out
 
 
 def _plain(v: str) -> str:
@@ -130,3 +176,25 @@ def updates_for(session: Session, server: GameServer) -> dict[str, Any]:
         if f and f.get("sha512") and it["version"] in f.get("version", ""):
             out.append({"name": p["name"], "version": f["version"], "hash": f"sha512:{f['sha512']}", "url": f["url"]})
     return {"auto_update": True, "updates": out}
+
+
+def mark_old_secret(server: GameServer, plugin: str) -> None:
+    """A plugin of this server still talks with the secret before the rotation."""
+    cache = RedisCacheService()
+    key = f"integration_old_secret:{server.id}"
+    seen = cache.get_json(key) or {}
+    from apps.api.app.core.security import utc_now
+
+    seen[plugin[:64]] = utc_now().isoformat()
+    cache.set_json(key, seen, ttl_seconds=26 * 3600)
+
+
+def old_secret_plugins(server: GameServer) -> list[str]:
+    """Plugins that used the previous secret within the last two minutes."""
+    from datetime import datetime, timedelta
+
+    from apps.api.app.core.security import utc_now
+
+    seen = RedisCacheService().get_json(f"integration_old_secret:{server.id}") or {}
+    now = utc_now()
+    return sorted(p for p, at in seen.items() if now - datetime.fromisoformat(at) < timedelta(minutes=2))
