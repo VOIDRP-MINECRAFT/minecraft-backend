@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
@@ -88,6 +89,34 @@ def _next_free_rcon_port(session: Session) -> int:
     while port in used:
         port += 1
     return port
+
+
+@router.get("/status")
+def servers_status(session: Annotated[Session, Depends(get_db_session)], where: _Where) -> dict:
+    """Live ping of every server this admin may manage — hidden ones too (the public list
+    leaves them out). Same 30 s cache as the site; keyed by server id."""
+    from apps.api.app.api.routes.servers import _ping_status, _warm, status_address
+
+    servers = [s for s in GameServerRepository(session).list_all() if where.allows(s.id)]
+    _warm(servers)
+    return {str(s.id): _ping_status(*status_address(s)).model_dump() for s in servers}
+
+
+class PingRequest(BaseModel):
+    host: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9.-]+$")
+    port: int = Field(ge=1, le=65535)
+
+
+@router.post("/ping")
+def ping(payload: PingRequest, where: _Where) -> dict:
+    """«Проверить пинг» in the editor: an address typed in, not saved yet, pinged fresh."""
+    import time as _time
+
+    from apps.api.app.api.routes.servers import _do_ping
+
+    t0 = _time.monotonic()
+    st = _do_ping(payload.host, payload.port)
+    return {**st.model_dump(), "latency_ms": int((_time.monotonic() - t0) * 1000)}
 
 
 @router.get("/suggest-paths")
