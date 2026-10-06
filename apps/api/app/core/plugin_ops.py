@@ -18,15 +18,37 @@ from apps.api.app.models.game_server import GameServer
 STAGING_BASE = os.path.join(mod_ops.OPS_BASE, "plugin-staging")
 
 
+# A jar's meta never changes while the file stays the same: keyed by path + mtime + size,
+# so the plugins page stops re-opening every jar (~0.05 s each) on every refresh.
+_META_CACHE: dict[tuple[str, int, int], dict] = {}
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
 def read_meta(path: str) -> dict:
     """name, version, authors, dependencies — or {"error": …} for a jar that is no plugin."""
+    try:
+        st = os.stat(path)
+        key = (path, st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
+    if key and key in _META_CACHE:
+        return dict(_META_CACHE[key])
+    meta = _read_meta(path)
+    if key:
+        if len(_META_CACHE) > 2000:
+            _META_CACHE.clear()
+        _META_CACHE[key] = meta
+    return dict(meta)
+
+
+def _read_meta(path: str) -> dict:
     try:
         with zipfile.ZipFile(path) as zf:
             names = set(zf.namelist())
             source = "paper-plugin.yml" if "paper-plugin.yml" in names else ("plugin.yml" if "plugin.yml" in names else None)
             if source is None:
                 return {"error": "В jar нет plugin.yml — это не плагин Paper/Bukkit (мод? библиотека?)"}
-            data = yaml.safe_load(zf.read(source).decode("utf-8", "replace")) or {}
+            data = yaml.load(zf.read(source).decode("utf-8", "replace"), Loader=_YAML_LOADER) or {}
     except (zipfile.BadZipFile, OSError, yaml.YAMLError) as exc:
         return {"error": f"Не читается как плагин: {exc}"}
     authors = data.get("authors") or ([data["author"]] if data.get("author") else [])

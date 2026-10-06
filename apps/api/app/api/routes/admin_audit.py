@@ -27,6 +27,7 @@ def list_audit(
     me: Annotated[User, Depends(get_current_staff_user)],
     q: Annotated[str | None, Query(max_length=120)] = None,
     category: Annotated[str | None, Query(max_length=48)] = None,
+    actor: Annotated[str | None, Query(max_length=64)] = None,
     days: Annotated[int, Query(ge=0, le=365)] = 30,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -49,6 +50,8 @@ def list_audit(
         conds.append(AdminAuditLog.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
     if category:
         conds.append(AdminAuditLog.category == category)
+    if actor:
+        conds.append(AdminAuditLog.actor_name == actor)
     if q:
         like = f"%{q.strip()}%"
         conds.append(
@@ -74,6 +77,29 @@ def list_audit(
         ).all():
             srv_names[sid] = name
 
+    # Targets recorded by id only (devices, users): show a name instead of a UUID.
+    from uuid import UUID as _UUID
+
+    from apps.api.app.models.auth_device import AuthDevice
+
+    def _ids(kind: str) -> set:
+        out = set()
+        for r in rows:
+            if r.target_type == kind and not r.target_label and r.target_id:
+                try:
+                    out.add(_UUID(r.target_id))
+                except ValueError:
+                    pass
+        return out
+
+    names: dict[str, str] = {}
+    if dev_ids := _ids("device"):
+        for d in session.scalars(select(AuthDevice).where(AuthDevice.id.in_(dev_ids))).all():
+            names[str(d.id)] = " · ".join(x for x in (d.device_name or "устройство", d.location or d.ip) if x)
+    if user_ids := _ids("user"):
+        for uid, login in session.execute(select(User.id, User.site_login).where(User.id.in_(user_ids))).all():
+            names[str(uid)] = login
+
     items = [
         {
             "id": str(r.id),
@@ -83,7 +109,7 @@ def list_audit(
             "action": r.action,
             "target_type": r.target_type,
             "target_id": r.target_id,
-            "target_label": r.target_label,
+            "target_label": r.target_label or names.get(r.target_id or ""),
             "server_id": str(r.server_id) if r.server_id else None,
             "server_name": srv_names.get(r.server_id),
             "meta": r.meta,
@@ -98,4 +124,8 @@ def list_audit(
         c for (c,) in session.execute(select(AdminAuditLog.category).distinct().order_by(AdminAuditLog.category)).all()
     ]
 
-    return {"items": items, "total": total, "categories": categories}
+    # Who acted in the period (for the «кто» filter), most active first.
+    actors = [a for (a,) in session.execute(
+        select(AdminAuditLog.actor_name).where(*[c for c in conds if c is not None], AdminAuditLog.actor_name.is_not(None))
+        .group_by(AdminAuditLog.actor_name).order_by(func.count().desc()).limit(40)).all() if a]
+    return {"items": items, "total": total, "categories": categories, "actors": actors}

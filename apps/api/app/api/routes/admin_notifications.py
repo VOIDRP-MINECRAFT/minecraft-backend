@@ -167,3 +167,109 @@ def list_notifications(
             ))
 
     return AdminNotificationsResponse(items=items)
+
+
+def _parse_since(value: str | None, default: datetime) -> datetime:
+    if not value:
+        return default
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return default
+
+
+@router.get("/nav-counts")
+def nav_counts(
+    session: Annotated[Session, Depends(get_db_session)],
+    me: Annotated[User, Depends(get_current_staff_user)],
+    feedback: str | None = None,
+    suggestions: str | None = None,
+    crashes: str | None = None,
+    server: str | None = None,
+) -> dict:
+    """Numbers next to menu items: what arrived since this person last opened the section
+    (the browser keeps those times, passed as ISO in the query; default — the last 7 days),
+    and unreviewed anticheat violations of the selected server for the last day. Same
+    permission rules as the banner; a key is absent when the caller may not see it."""
+    from apps.api.app.core.permissions import access_of
+    from apps.api.app.models.anticheat import AnticheatViolation
+
+    access = access_of(me)
+    week = datetime.now(timezone.utc) - timedelta(days=7)
+    slug_of = {i: slug for i, slug in session.execute(select(GameServer.id, GameServer.slug)).all()}
+
+    def count(model, key: str, since: datetime, by_slug: bool = False) -> int | None:
+        if access.holds_everywhere(key):
+            return int(session.scalar(select(func.count()).select_from(model).where(model.created_at >= since)) or 0)
+        ids = [UUID(i) for i in access.servers_with(key, slug_of)]
+        if not ids:
+            return None
+        where = model.server_slug.in_([slug_of[i] for i in ids]) if by_slug else model.server_id.in_(ids)
+        return int(session.scalar(select(func.count()).select_from(model).where(model.created_at >= since, where)) or 0)
+
+    out: dict[str, int] = {}
+    for name, model, key, raw, by_slug in (
+        ("feedback", PlayerFeedback, "feedback.view", feedback, False),
+        ("suggestions", ModSuggestion, "mod_suggestions.view", suggestions, False),
+        ("crashes", LauncherCrashReport, "crashes.view", crashes, True),
+    ):
+        n = count(model, key, _parse_since(raw, week), by_slug)
+        if n is not None:
+            out[name] = n
+    srv = session.scalar(select(GameServer).where(GameServer.slug == server)) if server else None
+    if srv is not None and "anticheat.view" in access.on(srv.id):
+        out["anticheat"] = int(session.scalar(select(func.count()).select_from(AnticheatViolation).where(
+            AnticheatViolation.server_id == srv.id, AnticheatViolation.reviewed.is_(False),
+            AnticheatViolation.created_at >= datetime.now(timezone.utc) - _WINDOW)) or 0)
+    return out
+
+
+@router.get("/feed")
+def feed(
+    session: Annotated[Session, Depends(get_db_session)],
+    me: Annotated[User, Depends(get_current_staff_user)],
+    limit: int = 40,
+) -> dict:
+    """«Лента событий» (side panel): staff actions, server outages and new plugin builds in
+    one timeline, newest first. Each source only with its permission: the audit log with
+    ``audit.view`` on every server, incidents of servers with ``monitoring.view`` /
+    ``integration.view``, builds for anyone who sees an integration page."""
+    from apps.api.app.core.permissions import access_of
+    from apps.api.app.models.admin_audit_log import AdminAuditLog
+    from apps.api.app.models.plugin_release import PluginRelease
+    from apps.api.app.models.server_incident import ServerIncident
+
+    access = access_of(me)
+    limit = max(5, min(limit, 100))
+    week = datetime.now(timezone.utc) - timedelta(days=7)
+    servers = session.scalars(select(GameServer)).all()
+    name_of = {s.id: s.name for s in servers}
+    events: list[dict] = []
+
+    if access.holds_everywhere("audit.view"):
+        for r in session.scalars(select(AdminAuditLog).order_by(AdminAuditLog.created_at.desc()).limit(limit)).all():
+            events.append({"kind": "audit", "at": r.created_at.isoformat(), "who": r.actor_name, "category": r.category,
+                           "action": r.action, "target": r.target_label, "server": name_of.get(r.server_id)})
+
+    watch = [s.id for s in servers if {"monitoring.view", "integration.view"} & access.on(s.id)]
+    if watch:
+        for i in session.scalars(select(ServerIncident).where(ServerIncident.server_id.in_(watch), ServerIncident.started_at >= week)
+                                 .order_by(ServerIncident.started_at.desc()).limit(limit)).all():
+            events.append({"kind": "incident", "at": i.started_at.isoformat(), "server": name_of.get(i.server_id),
+                           "incident": i.kind, "detail": i.detail, "ended_at": i.ended_at.isoformat() if i.ended_at else None})
+
+    if any("integration.view" in access.on(s.id) for s in servers):
+        from apps.api.app.core import integration_catalog as cat
+
+        seen_builds: set[tuple[str, str]] = set()
+        for r in session.scalars(select(PluginRelease).where(PluginRelease.yanked.is_(False), PluginRelease.published_at >= week)
+                                 .order_by(PluginRelease.published_at.desc()).limit(15)).all():
+            if (r.plugin, r.version) in seen_builds:
+                continue  # one build may ship several jars (per platform / MC version)
+            seen_builds.add((r.plugin, r.version))
+            events.append({"kind": "release", "at": r.published_at.isoformat(), "plugin": (cat.entry(r.plugin) or {}).get("name") or r.plugin,
+                           "version": r.version, "important": r.important, "channel": r.channel})
+
+    events.sort(key=lambda e: e["at"], reverse=True)
+    return {"events": events[:limit]}
