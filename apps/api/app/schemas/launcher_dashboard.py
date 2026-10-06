@@ -54,3 +54,6 @@ class LauncherDashboardRead(BaseModel):
     player_stats: LauncherDashboardPlayerStatsRead | None = None
     recent_activity: list[LauncherDashboardActivityItemRead] = Field(default_factory=list)
     wallet_balance: float = 0
+    # Reminders and the Telegram bonus need a linked bot: the launcher shows a «link» card while false.
+    telegram_linked: bool = False
+    telegram_bot_url: str = "https://t.me/voidrp_bot?start=link"

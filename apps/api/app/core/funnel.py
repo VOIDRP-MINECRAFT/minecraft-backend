@@ -31,12 +31,14 @@ from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.player_activity import PlayerServerActivity
 from apps.api.app.models.player_playtime_daily import PlayerPlaytimeDaily
 from apps.api.app.models.referral_link import ReferralLink
+from apps.api.app.models.refresh_session import RefreshSession
 from apps.api.app.models.user import User
 
 # A chain: each step counts only those who passed the previous one, so the funnel never grows.
 STEPS = [
     ("registered", "Зарегистрировались"),
-    ("launched", "Запустили игру"),
+    ("opened", "Открыли лаунчер"),
+    ("launched", "Нажали «Играть»"),
     ("joined", "Зашли на сервер"),
     ("returned", "Вернулись на другой день"),
     ("week", "Играют через неделю"),
@@ -97,6 +99,20 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
         days[uid].add(last.date())
         last_seen[uid] = max(last_seen.get(uid, last), last)
 
+    # Signed in to the launcher (its refresh sessions, kept 12 months).
+    opened_launcher = {uid for (uid,) in session.execute(select(RefreshSession.user_id).where(
+        RefreshSession.user_id.in_(ids), RefreshSession.device_name.like("VoidRP Launcher%")).distinct()).all()}
+
+    # Login days (since 06.10, every login on every server).
+    from apps.api.app.models.retention import LauncherDownload, PlayerLoginDay
+
+    q = select(PlayerLoginDay.user_id, PlayerLoginDay.day).where(PlayerLoginDay.user_id.in_(ids))
+    if server_id:
+        q = q.where(PlayerLoginDay.server_id == server_id)
+    for uid, day in session.execute(q).all():
+        days[uid].add(day)
+        joined.add(uid)
+
     nick_to_user = {(u.minecraft_nickname or "").lower(): u.id for u in people if u.minecraft_nickname}
     playtime: dict[UUID, int] = defaultdict(int)
     q = select(PlayerPlaytimeDaily.minecraft_nickname_normalized, PlayerPlaytimeDaily.day, PlayerPlaytimeDaily.seconds).where(
@@ -123,6 +139,8 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
         first = d[0] if d else None
         f = {
             "registered": True,
+            # Players on another client never open our launcher: entering a server counts too.
+            "opened": u.id in opened_launcher or u.id in launched or u.id in joined,
             "launched": u.id in launched,
             "joined": u.id in joined,
             "returned": len(d) >= 2,
@@ -158,6 +176,8 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
         cohorts.append({"start": wk.isoformat(), "mature": (now.date() - wk).days >= 14,
                         **{k: sum(1 for f in rows if f[k]) for k, _ in STEPS}})
 
+    tg_of = {u.id: bool(u.telegram_user_id) for u in people}
+
     def person(u) -> dict[str, Any]:
         return {"login": u.site_login, "nickname": u.minecraft_nickname, "email": u.email, "telegram": bool(u.telegram_user_id),
                 "registered_at": u.created_at.isoformat(), "source": source_of(u),
@@ -166,7 +186,8 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
 
     three_days_ago = now - timedelta(days=3)
     stuck = {
-        "no_launch": [person(u) for u in people if not flags[u.id]["launched"] and u.created_at < now - timedelta(hours=6)],
+        "no_open": [person(u) for u in people if not flags[u.id]["opened"] and u.created_at < now - timedelta(hours=6)],
+        "no_launch": [person(u) for u in people if flags[u.id]["opened"] and not flags[u.id]["launched"]],
         "no_join": [person(u) for u in people if flags[u.id]["launched"] and not flags[u.id]["joined"]],
         "one_day": [person(u) for u in people if flags[u.id]["joined"] and not flags[u.id]["returned"]
                     and last_seen.get(u.id, now) < three_days_ago],
@@ -207,4 +228,8 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
         src_counts[source_of(u)] += 1
     return {"steps": steps, "cohorts": cohorts, "stuck": stuck, "total": len(people),
             "playtime_since": playtime_since.isoformat() if playtime_since else None, "sources": dict(src_counts), "weeks": weeks,
-            "played15": played15, "marks": marks}
+            "played15": played15, "marks": marks,
+            "telegram": {"linked": sum(1 for v in tg_of.values() if v), "total": len(tg_of)},
+            "downloads": {"total": session.scalar(select(func.count()).select_from(LauncherDownload).where(LauncherDownload.created_at >= since)) or 0,
+                          "signed_in": session.scalar(select(func.count(func.distinct(LauncherDownload.user_id))).where(
+                              LauncherDownload.created_at >= since, LauncherDownload.user_id.in_(ids))) or 0}}

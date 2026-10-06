@@ -1,10 +1,10 @@
 """Second-day return (core/retention.py): deliveries to players in game and Telegram reminders."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.app.models.base import Base
@@ -40,4 +40,26 @@ class PlayerReminder(Base):
     server_id: Mapped[UUID | None] = mapped_column(ForeignKey("game_servers.id", ondelete="CASCADE"), nullable=True)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PlayerLoginDay(Base):
+    """A day (Moscow) a player logged in to a server — login streaks, funnel return days."""
+
+    __tablename__ = "player_login_days"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    server_id: Mapped[UUID] = mapped_column(ForeignKey("game_servers.id", ondelete="CASCADE"), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+
+
+class LauncherDownload(Base):
+    """A click on «Скачать лаунчер» on the site (the account, when signed in) — for the funnel."""
+
+    __tablename__ = "launcher_downloads"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

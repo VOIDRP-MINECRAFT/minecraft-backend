@@ -28,4 +28,6 @@ def get_my_launcher_dashboard(
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[LauncherDashboardService, Depends(get_launcher_dashboard_service)],
 ) -> LauncherDashboardRead:
-    return service.get_for_user(current_user)
+    out = service.get_for_user(current_user)
+    out.telegram_linked = bool(current_user.telegram_user_id)
+    return out

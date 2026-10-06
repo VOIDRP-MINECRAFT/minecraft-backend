@@ -27,6 +27,12 @@ def overview(server: _Server, session: _Db) -> dict:
             "allowed_commands": sorted(retention.ALLOWED_COMMANDS), "stats": retention.stats(session, server)}
 
 
+class StreakStep(BaseModel):
+    day: int = Field(ge=2, le=60)
+    message: str = Field(default="", max_length=240)
+    commands: list[str] = Field(default_factory=list, max_length=10)
+
+
 class RetentionSettings(BaseModel):
     enabled: bool = False
     window_days: int = Field(default=2, ge=1, le=7)
@@ -37,6 +43,11 @@ class RetentionSettings(BaseModel):
     welcome_lines: list[str] = Field(default_factory=list, max_length=6)
     reminder_enabled: bool = True
     reminder_text: str = Field(default="", max_length=400)
+    tg_bonus_enabled: bool = False
+    tg_bonus_message: str = Field(default="", max_length=240)
+    tg_bonus_commands: list[str] = Field(default_factory=list, max_length=10)
+    streak_enabled: bool = False
+    streak: list[StreakStep] = Field(default_factory=list, max_length=10)
 
 
 @router.put("/settings", dependencies=[Depends(require_permission("retention.manage"))])
@@ -49,8 +60,23 @@ def put_settings(payload: RetentionSettings, server: _Server, session: _Db,
     lines = [x.strip()[:240] for x in payload.welcome_lines if x.strip()]
     if payload.enabled and not cmds:
         raise HTTPException(status_code=422, detail="Добавьте хотя бы одну команду награды")
+
+    def clean(commands: list[str], where: str) -> list[str]:
+        out = [c.strip().lstrip("/") for c in commands if c.strip()]
+        for c in out:
+            if err := retention.validate_command(c):
+                raise HTTPException(status_code=422, detail=f"{where}: {err}")
+        return out
+
+    tg_cmds = clean(payload.tg_bonus_commands, "Бонус за Telegram")
+    days = [st.day for st in payload.streak]
+    if len(days) != len(set(days)):
+        raise HTTPException(status_code=422, detail="Серия: дни не должны повторяться")
+    streak = sorted(({"day": st.day, "message": st.message.strip(), "commands": clean(st.commands, f"Серия, {st.day}-й день")}
+                     for st in payload.streak), key=lambda x: x["day"])
     srv = session.get(GameServer, server.id)
-    srv.retention_settings = {**payload.model_dump(), "commands": cmds, "welcome_lines": lines}
+    srv.retention_settings = {**payload.model_dump(), "commands": cmds, "welcome_lines": lines,
+                              "tg_bonus_commands": tg_cmds, "streak": streak}
     record_audit(session, category="retention", action="settings", actor=actor, target_type="server",
                  target_id=str(srv.id), target_label=srv.slug, server_id=srv.id,
                  meta={"enabled": payload.enabled, "commands": cmds})

@@ -432,7 +432,13 @@ if [ -f "$DIR/server.properties" ]; then
   if [ "$(P enable-rcon)" = "true" ]; then
     RP="$(P rcon.port)"; RP="${RP:-25575}"
     if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "^(0\.0\.0\.0|\*|\[::\]):$RP$"; then
-      bad "RCON слушает все адреса на порту $RP — закройте фаерволом или выключите (консоль идёт через VoidRpPerms)"
+      RPW="$(P rcon.password)"
+      # A long random password makes an open port a small risk — say so instead of raising the alarm.
+      if [ "${#RPW}" -ge 20 ] && grep -q '[0-9]' <<<"$RPW" && grep -q '[A-Za-z]' <<<"$RPW"; then
+        inf "RCON слушает все адреса на порту $RP, пароль надёжный (длина ${#RPW}). Наружу порт не пробрасывайте; можно выключить — консоль идёт через VoidRpPerms"
+      else
+        bad "RCON слушает все адреса на порту $RP, а пароль короткий или простой — закройте фаерволом или выключите (консоль идёт через VoidRpPerms)"
+      fi
     else inf "RCON включён на порту $RP (не на всех адресах)"; fi
   else okk "RCON выключен"; fi
   SP="$(P server-port)"; SP="${SP:-25565}"

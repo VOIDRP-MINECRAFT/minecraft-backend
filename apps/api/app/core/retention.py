@@ -67,6 +67,18 @@ DEFAULTS: dict[str, Any] = {
     ],
     "reminder_enabled": True,
     "reminder_text": "Привет, {player}! Вчера ты впервые заходил на «{server}». Загляни сегодня — тебя ждёт {reward}.",
+    # A bonus for linking Telegram (reminders reach only linked players): once per account, given
+    # on the next login to a server where it is on.
+    "tg_bonus_enabled": False,
+    "tg_bonus_message": "Спасибо, что привязал Telegram, {player}! Держи бонус.",
+    "tg_bonus_commands": ["minecraft:give {player} minecraft:emerald 5"],
+    # Login streak: days in a row on this server → a reward once per milestone.
+    "streak_enabled": False,
+    "streak": [
+        {"day": 3, "message": "Третий день подряд, {player}! Держи награду.", "commands": ["minecraft:give {player} minecraft:iron_ingot 16"]},
+        {"day": 5, "message": "Пять дней подряд — отлично, {player}!", "commands": ["minecraft:give {player} minecraft:gold_ingot 8"]},
+        {"day": 7, "message": "Неделя подряд, {player}! Ты с нами всерьёз.", "commands": ["minecraft:give {player} minecraft:diamond 3"]},
+    ],
 }
 
 
@@ -102,8 +114,32 @@ def _exists(session: Session, server_id: UUID, user_id: UUID, kind: str) -> bool
         RetentionDelivery.server_id == server_id, RetentionDelivery.user_id == user_id, RetentionDelivery.kind == kind)) is not None
 
 
+def _record_day(session: Session, user_id: UUID, server_id: UUID, day) -> None:
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from apps.api.app.models.retention import PlayerLoginDay
+
+    session.execute(pg_insert(PlayerLoginDay).values(user_id=user_id, server_id=server_id, day=day)
+                    .on_conflict_do_nothing(index_elements=["user_id", "server_id", "day"]))
+
+
+def streak_of(session: Session, user_id: UUID, server_id: UUID, today) -> int:
+    """Days in a row up to today (today counted) on this server."""
+    from apps.api.app.models.retention import PlayerLoginDay
+
+    days = set(session.scalars(select(PlayerLoginDay.day).where(
+        PlayerLoginDay.user_id == user_id, PlayerLoginDay.server_id == server_id, PlayerLoginDay.day >= today - timedelta(days=40))).all())
+    days.add(today)
+    n = 0
+    while today - timedelta(days=n) in days:
+        n += 1
+    return n
+
+
 def on_login(session: Session, *, row: PlayerServerActivity, is_new: bool, now: datetime) -> None:
     """Called by PlayerActivityService.record on every login; queues what this login earns."""
+    today = _msk_day(now)
+    _record_day(session, row.user_id, row.server_id, today)
     server = session.get(GameServer, row.server_id)
     if server is None:
         return
@@ -113,15 +149,29 @@ def on_login(session: Session, *, row: PlayerServerActivity, is_new: bool, now: 
     nick = session.scalar(select(PlayerAccount.minecraft_nickname).where(PlayerAccount.user_id == row.user_id))
     if not nick or not NICK.match(nick):
         return
-    if is_new:
-        if cfg["welcome_enabled"] and not _exists(session, server.id, row.user_id, "welcome"):
-            session.add(RetentionDelivery(server_id=server.id, user_id=row.user_id, nickname=nick, kind="welcome",
+
+    def queue(kind: str) -> None:
+        if not _exists(session, server.id, row.user_id, kind):
+            session.add(RetentionDelivery(server_id=server.id, user_id=row.user_id, nickname=nick, kind=kind,
                                           deliver_after=now + timedelta(seconds=40)))
+
+    # Telegram bonus: once per account, on whichever server it is on first.
+    if cfg["tg_bonus_enabled"] and session.scalar(select(User.telegram_user_id).where(User.id == row.user_id)):
+        given = session.scalar(select(RetentionDelivery.id).where(RetentionDelivery.user_id == row.user_id, RetentionDelivery.kind == "tg_link"))
+        if given is None:
+            queue("tg_link")
+    if is_new:
+        if cfg["welcome_enabled"]:
+            queue("welcome")
         return
-    days = (_msk_day(now) - _msk_day(row.first_seen_at)).days
-    if 1 <= days <= int(cfg["window_days"] or 2) and not _exists(session, server.id, row.user_id, "day2"):
-        session.add(RetentionDelivery(server_id=server.id, user_id=row.user_id, nickname=nick, kind="day2",
-                                      deliver_after=now + timedelta(seconds=40)))
+    days = (today - _msk_day(row.first_seen_at)).days
+    if 1 <= days <= int(cfg["window_days"] or 2):
+        queue("day2")
+    if cfg["streak_enabled"]:
+        n = streak_of(session, row.user_id, server.id, today)
+        for m in cfg["streak"] or []:
+            if int(m.get("day") or 0) == n:
+                queue(f"streak{n}")
 
 
 def queue_test(session: Session, server: GameServer, nickname: str, actor: str) -> RetentionDelivery:
@@ -149,7 +199,8 @@ def deliver(session: Session, d: RetentionDelivery) -> None:
     cfg = settings(server)
     reward = cfg["reward_label"]
     fill = lambda t: _fill(t, player=d.nickname, server=server.name, reward=reward)  # noqa: E731
-    lines = [fill(x) for x in cfg["welcome_lines"] if x.strip()] if d.kind == "welcome" else [fill(cfg["reward_message"])]
+    lines, commands = _content(cfg, d.kind)
+    lines = [fill(x) for x in lines if x.strip()]
     d.attempts += 1
     try:
         # Is the player in game? «execute if entity» answers «Test passed / failed» on RCON and in
@@ -167,8 +218,8 @@ def deliver(session: Session, d: RetentionDelivery) -> None:
             _run(server, _tellraw(d.nickname, line, "gold" if i == 0 else "yellow"))
         except Exception as exc:  # noqa: BLE001
             errors.append(str(exc))
-    if d.kind in ("day2", "test"):
-        for cmd in cfg["commands"]:
+    if commands:
+        for cmd in commands:
             if validate_command(cmd):
                 errors.append(f"пропущено: {validate_command(cmd)}")
                 continue
@@ -181,6 +232,19 @@ def deliver(session: Session, d: RetentionDelivery) -> None:
     d.status = "delivered"
     d.delivered_at = utc_now()
     d.last_error = "; ".join(errors)[:300] or None
+
+
+def _content(cfg: dict[str, Any], kind: str) -> tuple[list[str], list[str]]:
+    """Chat lines and commands of a delivery kind."""
+    if kind == "welcome":
+        return list(cfg["welcome_lines"]), []
+    if kind == "tg_link":
+        return [cfg["tg_bonus_message"]], list(cfg["tg_bonus_commands"])
+    if kind.startswith("streak"):
+        n = int(kind[6:] or 0)
+        m = next((x for x in cfg["streak"] or [] if int(x.get("day") or 0) == n), None)
+        return ([m.get("message") or ""], list(m.get("commands") or [])) if m else ([], [])
+    return [cfg["reward_message"]], list(cfg["commands"])  # day2, test
 
 
 def _retry(d: RetentionDelivery, why: str) -> None:
@@ -239,10 +303,12 @@ def send_reminders(session: Session) -> int:
 
 def stats(session: Session, server: GameServer, days: int = 30) -> dict[str, Any]:
     since = utc_now() - timedelta(days=days)
-    acts = session.execute(select(PlayerServerActivity.first_seen_at, PlayerServerActivity.last_seen_at).where(
+    acts = session.execute(select(PlayerServerActivity.first_seen_at, PlayerServerActivity.last_seen_at, User.telegram_user_id)
+                           .join(User, User.id == PlayerServerActivity.user_id).where(
         PlayerServerActivity.server_id == server.id, PlayerServerActivity.first_seen_at >= since)).all()
     newcomers = len(acts)
-    returned = sum(1 for f, last in acts if _msk_day(last) > _msk_day(f))
+    returned = sum(1 for f, last, _ in acts if _msk_day(last) > _msk_day(f))
+    tg_linked = sum(1 for _, _, tg in acts if tg)
     counts = {f"{k}_{s}": n for k, s, n in session.execute(
         select(RetentionDelivery.kind, RetentionDelivery.status, func.count()).where(
             RetentionDelivery.server_id == server.id, RetentionDelivery.created_at >= since)
@@ -255,6 +321,7 @@ def stats(session: Session, server: GameServer, days: int = 30) -> dict[str, Any
     return {
         "days": days, "newcomers": newcomers, "returned": returned,
         "returned_pct": round(returned * 100 / newcomers, 1) if newcomers else None,
+        "tg_linked": tg_linked, "tg_pct": round(tg_linked * 100 / newcomers, 1) if newcomers else None,
         "deliveries": counts, "reminders_sent": int(reminders),
         "recent": [{"id": r.id, "nickname": r.nickname, "kind": r.kind, "status": r.status, "attempts": r.attempts,
                     "created_at": r.created_at.isoformat(), "delivered_at": r.delivered_at.isoformat() if r.delivered_at else None,
