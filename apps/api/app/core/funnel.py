@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.play_ticket import PlayTicket
@@ -41,7 +41,6 @@ STEPS = [
     ("returned", "Вернулись на другой день"),
     ("week", "Играют через неделю"),
 ]
-PLAYTIME_SINCE = date(2026, 9, 9)
 
 
 def _week_start(d: date) -> date:
@@ -69,7 +68,7 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
     ids = [u.id for u in people]
     if not ids:
         return {"steps": [{"key": k, "label": label, "count": 0} for k, label in STEPS], "cohorts": [], "stuck": {},
-                "total": 0, "playtime_since": PLAYTIME_SINCE.isoformat(), "sources": {}}
+                "total": 0, "playtime_since": None, "sources": {}, "weeks": weeks, "played15": {"joined": 0, "played15": 0}}
 
     # Activity days per user: tickets issued, server presence, playtime.
     days: dict[UUID, set[date]] = defaultdict(set)
@@ -111,6 +110,14 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
             if secs:
                 days[uid].add(day)
 
+    if server_id:
+        # Registration is platform-wide: for one server the funnel starts with its newcomers —
+        # who signed up from it, or launched / entered it at least once.
+        people = [u for u in people if u.registration_server_id == server_id or u.id in launched or u.id in joined]
+        if not people:
+            return {"steps": [{"key": k, "label": label, "count": 0} for k, label in STEPS], "cohorts": [], "stuck": {},
+                    "total": 0, "playtime_since": None, "sources": {}, "weeks": weeks, "played15": {"joined": 0, "played15": 0}}
+
     def steps_of(u) -> dict[str, bool]:
         d = sorted(days.get(u.id, ()))
         first = d[0] if d else None
@@ -134,6 +141,8 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
     prev = None
     for k, label in STEPS:
         n = counts[k]
+        if k == "registered" and server_id:
+            label = "Новички сервера"
         steps.append({"key": k, "label": label, "count": n,
                       "of_prev": round(n * 100 / prev, 1) if prev else None,
                       "of_first": round(n * 100 / counts["registered"], 1) if counts["registered"] else None,
@@ -166,14 +175,19 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
         stuck[k].sort(key=lambda p: p["registered_at"], reverse=True)
         stuck[k] = stuck[k][:50]
 
-    # 15+ minutes: a side number — playtime exists only since PLAYTIME_SINCE, so count among those
-    # who got in and signed up after it.
-    recent_joined = [u for u in people if flags[u.id]["joined"] and u.created_at.date() >= PLAYTIME_SINCE]
+    # 15+ minutes: a side number — time in game is collected only since some day (09.09 on the main
+    # server through GameSync; VoidRpPerms 0.7.1 servers from 06.10), so count among those who got
+    # in and signed up after the first recorded day of the chosen server(s).
+    q = select(func.min(PlayerPlaytimeDaily.day))
+    if server_id:
+        q = q.where(PlayerPlaytimeDaily.server_id == server_id)
+    playtime_since = session.scalar(q)
+    recent_joined = [u for u in people if playtime_since and flags[u.id]["joined"] and u.created_at.date() >= playtime_since]
     played15 = {"joined": len(recent_joined), "played15": sum(1 for u in recent_joined if flags[u.id]["played15"])}
 
     src_counts: dict[str, int] = defaultdict(int)
     for u in users:
         src_counts[source_of(u)] += 1
     return {"steps": steps, "cohorts": cohorts, "stuck": stuck, "total": len(people),
-            "playtime_since": PLAYTIME_SINCE.isoformat(), "sources": dict(src_counts), "weeks": weeks,
+            "playtime_since": playtime_since.isoformat() if playtime_since else None, "sources": dict(src_counts), "weeks": weeks,
             "played15": played15}
