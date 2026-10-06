@@ -5,7 +5,8 @@
 To the people running the server (``integration.view``, linked Telegram, ``digest`` on): the
 week's uptime, incidents and downtime, peak online, average TPS, connection grade, waiting
 updates and what to do. Platform admins get one message with every external server. Once per
-ISO week per person and server (``integration_notices`` kind ``digest``).
+ISO week per person and server (``integration_notices`` kind ``digest``); also to the server's
+Discord webhook when one is set.
 """
 from __future__ import annotations
 
@@ -40,6 +41,10 @@ def main() -> int:
         for server in servers:
             data = brief.overview(session, server)
             texts[server.id] = (server, data, brief.digest(session, server, data))
+            if not args.dry_run:
+                from apps.api.app.core import integration_discord
+
+                sent += int(integration_discord.digest(server, ref, texts[server.id][2]))
             for user in notices.recipients(session, server):
                 if not notices.prefs(user).get("digest", True):
                     continue

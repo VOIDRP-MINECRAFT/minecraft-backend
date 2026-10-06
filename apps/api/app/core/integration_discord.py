@@ -101,6 +101,23 @@ def secret(server: GameServer, text: str) -> None:
         log.exception("Discord webhook of %s failed", server.slug)
 
 
+def digest(server: GameServer, ref: str, text_html: str) -> bool:
+    """The Monday digest (``integration_brief.digest``) as an embed: once per ISO week."""
+    import re as _re
+
+    url = webhook_of(server)
+    if not url or not _once(server, f"digest:{ref}"):
+        return False
+    lines = [_re.sub(r"</?b>", "**", ln) for ln in text_html.splitlines()[1:]]
+    import html as _html
+
+    try:
+        return bool(post(url, f"📅 {server.name} — неделя", _html.unescape("\n".join(lines)), "info", link=_page(server)))
+    except Exception:  # noqa: BLE001
+        log.exception("Discord digest of %s failed", server.slug)
+        return False
+
+
 def test(server: GameServer, url: str) -> bool:
     return post(url, f"✅ {server.name}: вебхук VoidRP подключён",
                 "Сюда будут приходить новые версии плагинов VoidRP, сбои и восстановление сервера.", "ok",
