@@ -20,8 +20,12 @@ from apps.api.app.models.plugin_release import PluginRelease
 def version_key(v: str | None) -> tuple:
     """Orders 1.10.0 after 1.9.0, and 1.4.0-beta.1 before 1.4.0."""
     main, _, pre = (v or "").partition("-")
+    if not main.strip():
+        return ((-1,),)  # no version at all sorts before every real one
     parts: list[tuple] = []
     for p in main.split("."):
+        if not p:
+            continue  # "" / None: no version at all sorts first, not after every number
         parts.append((0, int(p)) if p.isdigit() else (1, p))
     # A release sorts after any of its pre-releases.
     parts.append((1,) if not pre else (0, pre))
