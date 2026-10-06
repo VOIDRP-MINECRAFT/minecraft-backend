@@ -86,9 +86,10 @@ def public_status(slug: str, session: _Db) -> JSONResponse:
     return JSONResponse(build(session, _public_server(session, slug)), headers=_CORS)
 
 
-def _text_width(text: str) -> int:
-    # Close enough for Verdana 11px, the badge font: wide letters count more.
-    return int(sum(7.2 if c.isupper() or c in "mwшщжюМШЩЖЮ" else 6.1 for c in text) + 10)
+def _text_width(text: str, bold: bool = False) -> int:
+    # Verdana/DejaVu 11px, the badge font, with room to spare: Cyrillic and capitals run wide.
+    w = sum(8.4 if c.isupper() or c in "mwшщжюыМШЩЖЮЫ" else 4.0 if c in " .:il|" else 7.2 for c in text)
+    return int(w * (1.1 if bold else 1.0) + 12)
 
 
 @router.api_route("/{slug}/badge.svg", methods=["GET", "HEAD"])
@@ -103,7 +104,7 @@ def badge(slug: str, session: _Db) -> Response:
         color = "#16a34a"
     else:
         right, color = "● офлайн", "#dc2626"
-    lw, rw = _text_width(left) + 22, _text_width(right)
+    lw, rw = _text_width(left) + 22, _text_width(right, bold=True)
     w = lw + rw
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="22" role="img" aria-label="{escape(left)}: {escape(right)}">
 <title>{escape(left)}: {escape(right)}</title>

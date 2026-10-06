@@ -425,3 +425,43 @@ def fix(payload: FixRequest, server: _Server, session: _Db, request: Request,
         return {"output": server_console.run(server, FIX_COMMANDS[payload.action], timeout=15)}
     except server_console.PluginConsoleError as exc:
         raise HTTPException(status_code=504, detail=str(exc))
+
+
+# ── All partner servers at once (platform admins) ─────────────────────────────
+@router.get("/fleet", dependencies=[Depends(require_admin_access)])
+def fleet(session: _Db) -> dict:
+    """«Партнёры»: every external server (and ours that report) in one table — state, grade,
+    uptime, players, waiting updates, open incident, the top advice."""
+    from apps.api.app.core import integration_brief as brief
+
+    rows = []
+    for server in session.scalars(select(GameServer).order_by(GameServer.sort_order, GameServer.name)).all():
+        if not (server.is_external or server_reports.reports(session, server)):
+            continue
+        data = overview(server, session)
+        emoji, words = brief.state_of(data)
+        st = data.get("status") or {}
+        last = next((p for p in reversed(st.get("series_24h") or []) if p.get("online") is not None), None)
+        ours = [i for i in data["items"] if i["kind"] == "ours" and not i.get("client_side") and i.get("installed")]
+        top = next((f for f in (data.get("diagnosis") or {}).get("findings") or [] if f["severity"] in ("err", "warn")), None)
+        rows.append({
+            "slug": server.slug, "name": server.name, "icon_url": server.icon_url, "is_external": server.is_external,
+            "core": cat.CORE_LABELS.get(server.server_core or "") or server.server_core,
+            "maintenance": server.maintenance, "visible": server.is_visible and not server.staff_only,
+            "state": {"🟢": "ok", "🟠": "warn", "🔴": "err"}.get(emoji, "new"), "state_text": words,
+            "health": data.get("health"), "reach": data.get("reach"),
+            "uptime_24h": st.get("uptime_24h"), "uptime_7d": st.get("uptime_7d"), "bars_30d": st.get("bars_30d"),
+            "players": last and last.get("online"), "tps": last and last.get("tps"), "peak_24h": st.get("peak_24h"),
+            "plugins": [{"name": i["name"], "version": i["installed"]["version"], "outdated": i.get("outdated"),
+                         "unsupported": i.get("unsupported"),
+                         "latest": (i.get("latest") or {}).get("version")} for i in ours],
+            "open_incident": next((i for i in data.get("incidents") or [] if not i.get("ended_at")), None),
+            "incidents_30d": len(data.get("incidents") or []),
+            "auto_update": (data.get("settings") or {}).get("auto_update"),
+            "last_report": max((r["reported_at"] for r in data["reports"]), default=None),
+            "advice": top and top["title"],
+            "status_page": (data.get("status_page") or {}).get("url") if (data.get("status_page") or {}).get("on") else None,
+        })
+    order = {"err": 0, "warn": 1, "new": 2, "ok": 3}
+    rows.sort(key=lambda r: (order[r["state"]], not r["is_external"], r["name"].lower()))
+    return {"servers": rows, "generated_at": utc_now().isoformat()}
