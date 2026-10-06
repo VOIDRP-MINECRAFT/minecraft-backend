@@ -93,3 +93,30 @@ def push_playtime(
     )
     db.execute(stmt)
     db.commit()
+
+
+class PlaytimeBatch(BaseModel):
+    items: list[PlaytimePush] = Field(default_factory=list, max_length=1000)
+
+
+@plugin_router.post("/batch", status_code=status.HTTP_204_NO_CONTENT)
+def push_playtime_batch(
+    payload: PlaytimeBatch,
+    db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> None:
+    """Many players at once (VoidRpPerms ≥ 0.7.1 sends one batch every 5 minutes)."""
+    today = datetime.now(timezone.utc).date()
+    for item in payload.items:
+        if item.seconds <= 0:
+            continue
+        # One push never claims more than a day: a plugin queue after an outage is capped too.
+        secs = min(item.seconds, 86400)
+        db.execute(
+            pg_insert(PlayerPlaytimeDaily)
+            .values(id=uuid4(), server_id=server.id, minecraft_nickname=item.minecraft_nickname.strip(),
+                    minecraft_nickname_normalized=item.minecraft_nickname.strip().lower(), day=item.day or today, seconds=secs)
+            .on_conflict_do_update(constraint="uq_playtime_daily_server_nick_day",
+                                   set_={"seconds": PlayerPlaytimeDaily.seconds + secs})
+        )
+    db.commit()
