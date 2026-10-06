@@ -54,7 +54,7 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
     since = now - timedelta(weeks=weeks)
 
     users = session.execute(
-        select(User.id, User.site_login, User.email, User.created_at, User.telegram_user_id,
+        select(User.id, User.site_login, User.email, User.created_at, User.telegram_user_id, User.signup_source,
                PlayerAccount.minecraft_nickname, PlayerAccount.registration_source, PlayerAccount.registration_server_id)
         .join(PlayerAccount, PlayerAccount.user_id == User.id, isouter=True)
         .where(User.is_admin.is_(False), User.is_moderator.is_(False), User.created_at >= since)
@@ -62,8 +62,11 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
     referred = {u for (u,) in session.execute(select(ReferralLink.invited_user_id)).all()}
 
     def source_of(row) -> str:
+        # A referral beats the label; then the first visit's label; then where the account was made.
         if row.id in referred:
             return "referral"
+        if row.signup_source:
+            return row.signup_source
         return "game" if row.registration_source == "game" else "site"
 
     people = [u for u in users if not source or source_of(u) == source]
@@ -223,12 +226,21 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
             elif label not in marks.get(wk, ""):
                 marks[wk] = (marks[wk] + f", {label}") if wk in marks else f"включён возврат игроков: {label}"
 
+    # Every source through the chain: which channel brings players who stay.
+    by_src: dict[str, dict[str, int]] = defaultdict(lambda: {k: 0 for k, _ in STEPS})
+    for u in people:
+        f = flags[u.id]
+        for k, _ in STEPS:
+            by_src[source_of(u)][k] += int(f[k])
+    by_source = sorted(({"source": k, **v} for k, v in by_src.items()), key=lambda r: -r["registered"])
+
     src_counts: dict[str, int] = defaultdict(int)
     for u in users:
         src_counts[source_of(u)] += 1
     return {"steps": steps, "cohorts": cohorts, "stuck": stuck, "total": len(people),
             "playtime_since": playtime_since.isoformat() if playtime_since else None, "sources": dict(src_counts), "weeks": weeks,
             "played15": played15, "marks": marks,
+            "by_source": by_source,
             "telegram": {"linked": sum(1 for v in tg_of.values() if v), "total": len(tg_of)},
             "downloads": {"total": session.scalar(select(func.count()).select_from(LauncherDownload).where(LauncherDownload.created_at >= since)) or 0,
                           "signed_in": session.scalar(select(func.count(func.distinct(LauncherDownload.user_id))).where(

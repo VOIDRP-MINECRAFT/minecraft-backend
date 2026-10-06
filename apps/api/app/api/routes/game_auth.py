@@ -243,6 +243,8 @@ def game_register(
     # Remember that this account was born in game, and on which server.
     account.registration_source = "game"
     account.registration_server_id = server.id
+    if user is not None and not getattr(user, "signup_source", None):
+        user.signup_source = "game"
 
     _record_consents(
         session,

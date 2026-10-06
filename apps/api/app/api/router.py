@@ -24,6 +24,7 @@ from apps.api.app.api.routes.game_auth import router as game_auth_router
 from apps.api.app.api.routes.server_auth import router as server_auth_router
 from apps.api.app.api.routes.servers import router as servers_router
 from apps.api.app.api.routes.status_public import router as status_public_router
+from apps.api.app.api.routes.votes_public import router as votes_public_router
 from apps.api.app.api.routes.launcher_downloads import router as launcher_downloads_router
 from apps.api.app.api.routes.admin_retention import router as admin_retention_router
 from apps.api.app.api.routes.admin_funnel import router as admin_funnel_router
@@ -209,6 +210,7 @@ api_router.include_router(game_ui_battlepass_plugin_router)
 api_router.include_router(game_ui_alliance_router)
 api_router.include_router(servers_router)
 api_router.include_router(status_public_router)
+api_router.include_router(votes_public_router)
 api_router.include_router(launcher_downloads_router)
 api_router.include_router(admin_retention_router)
 api_router.include_router(admin_funnel_router)

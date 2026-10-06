@@ -20,7 +20,7 @@ router = APIRouter(prefix="/admin/funnel", tags=["admin", "funnel"],
 def get_funnel(
     session: Annotated[Session, Depends(get_db_session)],
     server_slug: Annotated[str | None, Query(max_length=64)] = None,
-    source: Annotated[str | None, Query(pattern="^(site|game|referral)$")] = None,
+    source: Annotated[str | None, Query(pattern=r"^[a-z0-9_.:\-]{1,64}$")] = None,
     weeks: Annotated[int, Query(ge=2, le=52)] = 12,
 ) -> dict:
     server_id = None

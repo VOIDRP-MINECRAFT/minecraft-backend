@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from apps.api.app.core import retention
+from apps.api.app.config import get_settings
+from apps.api.app.core import retention, votes
 from apps.api.app.core.audit import record_audit
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import get_current_staff_user, require_permission
@@ -24,13 +25,35 @@ _Server = Annotated[GameServer, Depends(resolve_server)]
 def overview(server: _Server, session: _Db) -> dict:
     return {"server": {"slug": server.slug, "name": server.name, "is_external": server.is_external},
             "settings": retention.settings(server), "defaults": retention.DEFAULTS,
-            "allowed_commands": sorted(retention.ALLOWED_COMMANDS), "stats": retention.stats(session, server)}
+            "allowed_commands": sorted(retention.ALLOWED_COMMANDS), "stats": retention.stats(session, server),
+            "votes": {"presets": votes.PRESETS, "stats": votes.stats(session, server),
+                      "url": f"{get_settings().public_api_url.rstrip('/')}/api/v1/votes/{server.slug}/"}}
 
 
 class StreakStep(BaseModel):
     day: int = Field(ge=2, le=60)
     message: str = Field(default="", max_length=240)
     commands: list[str] = Field(default_factory=list, max_length=10)
+
+
+class VoteProvider(BaseModel):
+    key: str = Field(max_length=32)
+    name: str = Field(default="", max_length=60)
+    secret: str = Field(default="", max_length=200)
+    nick_field: str = Field(default="nick", max_length=40)
+    time_field: str = Field(default="time", max_length=40)
+    sign_field: str = Field(default="sign", max_length=40)
+    algo: str = Field(default="sha1", max_length=8)
+    formula: str = Field(default="{nick}{time}{secret}", max_length=120)
+    ok_text: str = Field(default="ok", max_length=40)
+    max_skew_minutes: int = Field(default=60, ge=0, le=1440)
+
+
+class VoteSettings(BaseModel):
+    enabled: bool = False
+    message: str = Field(default="", max_length=240)
+    commands: list[str] = Field(default_factory=list, max_length=10)
+    providers: list[VoteProvider] = Field(default_factory=list, max_length=12)
 
 
 class RetentionSettings(BaseModel):
@@ -46,6 +69,12 @@ class RetentionSettings(BaseModel):
     tg_bonus_enabled: bool = False
     tg_bonus_message: str = Field(default="", max_length=240)
     tg_bonus_commands: list[str] = Field(default_factory=list, max_length=10)
+    referral_enabled: bool = False
+    referral_invited_message: str = Field(default="", max_length=240)
+    referral_invited_commands: list[str] = Field(default_factory=list, max_length=10)
+    referral_inviter_message: str = Field(default="", max_length=240)
+    referral_inviter_commands: list[str] = Field(default_factory=list, max_length=10)
+    votes: VoteSettings = Field(default_factory=VoteSettings)
     streak_enabled: bool = False
     streak: list[StreakStep] = Field(default_factory=list, max_length=10)
 
@@ -69,6 +98,18 @@ def put_settings(payload: RetentionSettings, server: _Server, session: _Db,
         return out
 
     tg_cmds = clean(payload.tg_bonus_commands, "Бонус за Telegram")
+    ref_inv = clean(payload.referral_invited_commands, "Награда приглашённому")
+    ref_owner = clean(payload.referral_inviter_commands, "Награда пригласившему")
+    vote_cmds = clean(payload.votes.commands, "Награда за голос")
+    from apps.api.app.core import votes as _votes
+
+    providers = [p.model_dump() for p in payload.votes.providers]
+    keys = [p["key"] for p in providers]
+    if len(keys) != len(set(keys)):
+        raise HTTPException(status_code=422, detail="Мониторинги: ключи не должны повторяться")
+    for p in providers:
+        if err := _votes.validate_provider(p):
+            raise HTTPException(status_code=422, detail=f"Мониторинг: {err}")
     days = [st.day for st in payload.streak]
     if len(days) != len(set(days)):
         raise HTTPException(status_code=422, detail="Серия: дни не должны повторяться")
@@ -76,7 +117,9 @@ def put_settings(payload: RetentionSettings, server: _Server, session: _Db,
                      for st in payload.streak), key=lambda x: x["day"])
     srv = session.get(GameServer, server.id)
     srv.retention_settings = {**payload.model_dump(), "commands": cmds, "welcome_lines": lines,
-                              "tg_bonus_commands": tg_cmds, "streak": streak}
+                              "tg_bonus_commands": tg_cmds, "streak": streak,
+                              "referral_invited_commands": ref_inv, "referral_inviter_commands": ref_owner,
+                              "votes": {**payload.votes.model_dump(), "commands": vote_cmds, "providers": providers}}
     record_audit(session, category="retention", action="settings", actor=actor, target_type="server",
                  target_id=str(srv.id), target_label=srv.slug, server_id=srv.id,
                  meta={"enabled": payload.enabled, "commands": cmds})

@@ -73,6 +73,9 @@ class User(UuidPrimaryKeyMixin, TimestampMixin, Base):
                     or self.mfa_passkeys)
 
     # Telegram account link (for the aiogram bot: news publishing / admin).
+    # Where the player came from (first visit to the site: ?from= / utm_source / referrer), for the funnel.
+    signup_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    signup_landing: Mapped[str | None] = mapped_column(String(200), nullable=True)
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True, index=True)
     telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # What this staff member wants to hear about the servers they run, in Telegram

@@ -52,6 +52,14 @@ def get_auth_service(
     return AuthService(session=session, email_service=get_email_service())
 
 
+def _clean_source(value: str | None) -> str | None:
+    """«TikTok», «utm:vk», «ref:yandex.ru» → a short lowercase label, or None."""
+    import re as _re
+
+    v = _re.sub(r"[^a-z0-9_.:\-]+", "", (value or "").strip().lower())[:64]
+    return v or None
+
+
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 def register(
     payload: RegisterRequest,
@@ -81,6 +89,12 @@ def register(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=translate_user_message(str(exc)),
         ) from exc
+
+    src = _clean_source(payload.source)
+    if src or payload.landing:
+        user.signup_source = src
+        user.signup_landing = (payload.landing or "")[:200] or None
+        auth_service.session.commit()
 
     consents = ConsentService(auth_service.session)
     meta = {"source": "register", "ip": client_ip(request), "user_agent": request.headers.get("user-agent")}

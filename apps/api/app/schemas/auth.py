@@ -12,6 +12,9 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     password_repeat: str = Field(min_length=8, max_length=128)
     referral_code: str | None = Field(default=None, min_length=3, max_length=32)
+    # Where the player came from (the site keeps the first visit's ?from= / utm_source / referrer).
+    source: str | None = Field(default=None, max_length=64)
+    landing: str | None = Field(default=None, max_length=200)
     # Consents are separate checkboxes on the registration form (152-FZ art. 9, 10.1).
     accept_offer: bool = False
     accept_personal_data: bool = False

@@ -72,6 +72,15 @@ DEFAULTS: dict[str, Any] = {
     "tg_bonus_enabled": False,
     "tg_bonus_message": "Спасибо, что привязал Telegram, {player}! Держи бонус.",
     "tg_bonus_commands": ["minecraft:give {player} minecraft:emerald 5"],
+    # Referrals count when the invited player comes back on a second day (not at sign-up: empty
+    # accounts must not farm it); then both get a reward.
+    "referral_enabled": False,
+    "referral_invited_message": "Ты пришёл по приглашению {inviter} и вернулся — держи награду, {player}!",
+    "referral_invited_commands": ["minecraft:give {player} minecraft:diamond 2"],
+    "referral_inviter_message": "Твой друг {invited} вернулся в игру — награда за приглашение, {player}!",
+    "referral_inviter_commands": ["minecraft:give {player} minecraft:diamond 3"],
+    # Votes on monitoring sites (core/votes.py): reward per vote, providers with their check.
+    "votes": {"enabled": False, "message": "Спасибо за голос, {player}!", "commands": ["minecraft:give {player} minecraft:emerald 3"], "providers": []},
     # Login streak: days in a row on this server → a reward once per milestone.
     "streak_enabled": False,
     "streak": [
@@ -136,6 +145,28 @@ def streak_of(session: Session, user_id: UUID, server_id: UUID, today) -> int:
     return n
 
 
+def _qualify_referral(session: Session, server: GameServer, cfg: dict[str, Any], invited_id: UUID, now: datetime) -> None:
+    """The invited player came back on another day: the referral counts, both get a reward."""
+    from apps.api.app.models.referral_link import ReferralLink
+
+    link = session.scalar(select(ReferralLink).where(ReferralLink.invited_user_id == invited_id, ReferralLink.status == "pending"))
+    if link is None:
+        return
+    link.status, link.qualified_at = "qualified", now
+    if not (cfg["enabled"] and cfg["referral_enabled"]):
+        return
+    nick_of = dict(session.execute(select(PlayerAccount.user_id, PlayerAccount.minecraft_nickname).where(
+        PlayerAccount.user_id.in_((invited_id, link.inviter_user_id)))).all())
+    inv, owner = nick_of.get(invited_id), nick_of.get(link.inviter_user_id)
+    tag = f"ref:{invited_id}"[:64]
+    if inv and NICK.match(inv):
+        session.add(RetentionDelivery(server_id=server.id, user_id=invited_id, nickname=inv, kind="ref_inv", created_by=tag,
+                                      deliver_after=now + timedelta(seconds=40)))
+    if owner and NICK.match(owner):
+        session.add(RetentionDelivery(server_id=server.id, user_id=link.inviter_user_id, nickname=owner, kind="ref_owner", created_by=tag,
+                                      deliver_after=now + timedelta(seconds=40)))
+
+
 def on_login(session: Session, *, row: PlayerServerActivity, is_new: bool, now: datetime) -> None:
     """Called by PlayerActivityService.record on every login; queues what this login earns."""
     today = _msk_day(now)
@@ -143,7 +174,14 @@ def on_login(session: Session, *, row: PlayerServerActivity, is_new: bool, now: 
     server = session.get(GameServer, row.server_id)
     if server is None:
         return
+    # What was owed (a vote, a friend's return while away) goes out now that the player is here.
+    for owed in session.scalars(select(RetentionDelivery).where(
+            RetentionDelivery.user_id == row.user_id, RetentionDelivery.server_id == server.id, RetentionDelivery.status == "owed")).all():
+        owed.status, owed.attempts, owed.deliver_after = "pending", 0, now + timedelta(seconds=40)
     cfg = settings(server)
+    days_since_first = (today - _msk_day(row.first_seen_at)).days
+    if not is_new and days_since_first >= 1:
+        _qualify_referral(session, server, cfg, row.user_id, now)
     if not cfg["enabled"]:
         return
     nick = session.scalar(select(PlayerAccount.minecraft_nickname).where(PlayerAccount.user_id == row.user_id))
@@ -164,7 +202,7 @@ def on_login(session: Session, *, row: PlayerServerActivity, is_new: bool, now: 
         if cfg["welcome_enabled"]:
             queue("welcome")
         return
-    days = (today - _msk_day(row.first_seen_at)).days
+    days = days_since_first
     if 1 <= days <= int(cfg["window_days"] or 2):
         queue("day2")
     if cfg["streak_enabled"]:
@@ -198,7 +236,14 @@ def deliver(session: Session, d: RetentionDelivery) -> None:
         return
     cfg = settings(server)
     reward = cfg["reward_label"]
-    fill = lambda t: _fill(t, player=d.nickname, server=server.name, reward=reward)  # noqa: E731
+    extra = _referral_names(session, d) if d.kind in ("ref_inv", "ref_owner") else {}
+
+    def fill(t: str) -> str:
+        out = _fill(t, player=d.nickname, server=server.name, reward=reward)
+        for k, v in extra.items():
+            out = out.replace("{" + k + "}", v)
+        return out
+
     lines, commands = _content(cfg, d.kind)
     lines = [fill(x) for x in lines if x.strip()]
     d.attempts += 1
@@ -234,12 +279,32 @@ def deliver(session: Session, d: RetentionDelivery) -> None:
     d.last_error = "; ".join(errors)[:300] or None
 
 
+def _referral_names(session: Session, d: RetentionDelivery) -> dict[str, str]:
+    from apps.api.app.models.referral_link import ReferralLink
+
+    try:
+        invited_id = UUID((d.created_by or "").split(":", 1)[1])
+    except (IndexError, ValueError):
+        return {"inviter": "друга", "invited": "друг"}
+    link = session.scalar(select(ReferralLink).where(ReferralLink.invited_user_id == invited_id))
+    ids = [invited_id] + ([link.inviter_user_id] if link else [])
+    nick = dict(session.execute(select(PlayerAccount.user_id, PlayerAccount.minecraft_nickname).where(PlayerAccount.user_id.in_(ids))).all())
+    return {"invited": nick.get(invited_id) or "друг", "inviter": (nick.get(link.inviter_user_id) if link else None) or "друга"}
+
+
 def _content(cfg: dict[str, Any], kind: str) -> tuple[list[str], list[str]]:
     """Chat lines and commands of a delivery kind."""
     if kind == "welcome":
         return list(cfg["welcome_lines"]), []
     if kind == "tg_link":
         return [cfg["tg_bonus_message"]], list(cfg["tg_bonus_commands"])
+    if kind == "vote":
+        v = cfg.get("votes") or {}
+        return [v.get("message") or ""], list(v.get("commands") or [])
+    if kind == "ref_inv":
+        return [cfg["referral_invited_message"]], list(cfg["referral_invited_commands"])
+    if kind == "ref_owner":
+        return [cfg["referral_inviter_message"]], list(cfg["referral_inviter_commands"])
     if kind.startswith("streak"):
         n = int(kind[6:] or 0)
         m = next((x for x in cfg["streak"] or [] if int(x.get("day") or 0) == n), None)
@@ -247,10 +312,15 @@ def _content(cfg: dict[str, Any], kind: str) -> tuple[list[str], list[str]]:
     return [cfg["reward_message"]], list(cfg["commands"])  # day2, test
 
 
+# Rewards earned while the player may be away (a vote on a site, a friend's return): never lost —
+# after the retries they wait for the player's next login.
+OWED_KINDS = ("vote", "ref_inv", "ref_owner", "tg_link")
+
+
 def _retry(d: RetentionDelivery, why: str) -> None:
     d.last_error = why
     if d.attempts >= MAX_ATTEMPTS:
-        d.status = "failed"
+        d.status = "owed" if d.kind in OWED_KINDS else "failed"
     else:
         d.deliver_after = utc_now() + RETRY_EVERY
 
