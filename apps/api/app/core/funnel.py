@@ -185,9 +185,26 @@ def build(session: Session, *, server_id: UUID | None = None, source: str | None
     recent_joined = [u for u in people if playtime_since and flags[u.id]["joined"] and u.created_at.date() >= playtime_since]
     played15 = {"joined": len(recent_joined), "played15": sum(1 for u in recent_joined if flags[u.id]["played15"])}
 
+    # Weeks something changed for newcomers (to compare cohorts before / after): «Возврат игроков»
+    # switched on, from the audit log.
+    from apps.api.app.models.admin_audit_log import AdminAuditLog
+
+    q = select(AdminAuditLog.created_at, AdminAuditLog.target_label, AdminAuditLog.meta).where(
+        AdminAuditLog.category == "retention", AdminAuditLog.action == "settings").order_by(AdminAuditLog.created_at)
+    if server_id:
+        q = q.where(AdminAuditLog.server_id == server_id)
+    marks: dict[str, str] = {}
+    for at, label, meta in session.execute(q).all():
+        if (meta or {}).get("enabled"):
+            wk = _week_start(at.date()).isoformat()
+            if server_id:
+                marks[wk] = "включён возврат игроков"
+            elif label not in marks.get(wk, ""):
+                marks[wk] = (marks[wk] + f", {label}") if wk in marks else f"включён возврат игроков: {label}"
+
     src_counts: dict[str, int] = defaultdict(int)
     for u in users:
         src_counts[source_of(u)] += 1
     return {"steps": steps, "cohorts": cohorts, "stuck": stuck, "total": len(people),
             "playtime_since": playtime_since.isoformat() if playtime_since else None, "sources": dict(src_counts), "weeks": weeks,
-            "played15": played15}
+            "played15": played15, "marks": marks}

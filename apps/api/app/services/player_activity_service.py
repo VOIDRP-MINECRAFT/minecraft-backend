@@ -42,8 +42,10 @@ class PlayerActivityService:
                 external_logins=0 if client == CLIENT_LAUNCHER else 1,
             )
             self.session.add(row)
+            self._retention(row, True, now)
             return row
 
+        self._retention(row, False, now)
         row.last_seen_at = now
         row.last_client = client
         if client == CLIENT_LAUNCHER:
@@ -51,3 +53,15 @@ class PlayerActivityService:
         else:
             row.external_logins += 1
         return row
+
+    def _retention(self, row: PlayerServerActivity, is_new: bool, now) -> None:
+        """Second-day return (core/retention.py): queue the welcome / reward this login earns.
+        Never allowed to break a login."""
+        try:
+            from apps.api.app.core import retention
+
+            retention.on_login(self.session, row=row, is_new=is_new, now=now)
+        except Exception:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).exception("retention on_login failed")

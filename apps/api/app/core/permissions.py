@@ -42,6 +42,8 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "salary.manage", "label": "Зарплата за игру: менять суммы и лимиты", "sensitive": True},
             {"key": "items.bans.view", "label": "Бан предметов (список запрещённых)"},
             {"key": "items.bans.manage", "label": "Бан предметов: запрещать, разрешать, менять сообщение", "sensitive": True},
+            {"key": "retention.view", "label": "Возврат игроков: награда второго дня, напоминания (просмотр)"},
+            {"key": "retention.manage", "label": "Возврат игроков: менять награду, приветствие, напоминание", "sensitive": True},
             {"key": "integration.view", "label": "Интеграция: инструкции, плагины, чек-лист подключения"},
             {"key": "integration.config", "label": "Интеграция: скачивать готовые конфиги с секретом сервера (после пароля)", "sensitive": True},
         ],
@@ -171,7 +173,7 @@ SERVER_SCOPED_PREFIXES: tuple[str, ...] = (
     "monitoring.", "mods.", "players.online.", "market.", "nations.", "anticheat.",
     "salary.", "backups.", "punishments.", "battlepass.", "upgrader.",
     "trader.", "news.", "files.", "plugins.", "donate.", "audit.", "feedback.", "mod_suggestions.",
-    "badges.", "game.", "items.", "integration.",
+    "badges.", "game.", "items.", "integration.", "retention.",
 )
 # Per-server keys outside those prefixes. Crash reports carry the server picked in the
 # launcher; the crash *rules* stay platform-wide, their buttons touch players' files.

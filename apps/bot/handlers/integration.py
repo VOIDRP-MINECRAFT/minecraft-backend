@@ -208,3 +208,21 @@ async def on_unmute(cb: CallbackQuery, user: User | None, session: Session) -> N
         await cb.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=kept) if kept else None)
     except Exception:  # noqa: BLE001
         pass
+
+
+@router.callback_query(F.data == "remind:off")
+async def on_remind_off(cb: CallbackQuery, user: User | None, session: Session) -> None:
+    """Under the second-day reminder (core/retention.py): never send it again."""
+    if user is None:
+        await cb.answer("Аккаунт не привязан", show_alert=True)
+        return
+    from apps.api.app.models.retention import PlayerReminder
+
+    if not session.scalar(select(PlayerReminder.id).where(PlayerReminder.user_id == user.id, PlayerReminder.kind == "optout")):
+        session.add(PlayerReminder(user_id=user.id, kind="optout", sent=False))
+        session.commit()
+    await cb.answer("Хорошо, больше не напомню")
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
