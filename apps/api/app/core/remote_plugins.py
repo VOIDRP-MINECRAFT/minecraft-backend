@@ -8,6 +8,11 @@ effect at the next restart, as Paper reads plugins only at start:
 - a new plugin → plugins/<file>;
 - off / on → plugins/disabled/ and back; remove → plugins/.voidrp-trash/.
 Uploaded jars are checked here (plugin.yml) and fetched by the plugin from a blob.
+
+With PlugMan(X) on the server every change is applied at once through the plugin's console
+(the same queue as the admin's console): a new plugin is loaded, a new version replaces the
+old one (unload, swap the jar, load), off/remove unload, on loads. Its answers come back with
+the result; without PlugMan everything waits for the restart.
 """
 from __future__ import annotations
 
@@ -17,7 +22,7 @@ import time
 
 from sqlalchemy.orm import Session
 
-from apps.api.app.core import integration_updates, remote_files
+from apps.api.app.core import integration_updates, remote_files, server_console
 from apps.api.app.core.remote_files import RemoteFileError
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.services import remote_file_store as rfs
@@ -34,6 +39,38 @@ def _jars(server: GameServer, folder: str) -> list[dict]:
             return []
         raise
     return [e for e in entries if e["type"] == "file" and e["name"].lower().endswith(".jar")]
+
+
+def _plugman(server: GameServer) -> str | None:
+    """PlugMan's name if the server runs it (from the plugin's inventory)."""
+    inv = integration_updates.inventory(server) or {}
+    for p in inv.get("plugins") or []:
+        if (p.get("name") or "").lower() in ("plugmanx", "plugman") and p.get("enabled", True):
+            return p["name"]
+    return None
+
+
+def _loaded_name(server: GameServer, filename: str) -> str | None:
+    inv = integration_updates.inventory(server) or {}
+    for p in inv.get("plugins") or []:
+        if p.get("file") == filename and p.get("enabled", True):
+            return p.get("name")
+    return None
+
+
+def _console(server: GameServer, command: str) -> str:
+    from apps.api.app.core.server_ops import strip_color_codes
+
+    try:
+        out = server_console.run(server, command, timeout=25.0)
+    except OSError as exc:
+        out = f"ошибка: {exc}"
+    out = strip_color_codes(out or "").strip().replace("[PlugMan] ", "")
+    return f"{command} → {out[:200] or 'ок'}"
+
+
+def _stem(filename: str) -> str:
+    return re.sub(r"\.jar$", "", filename, flags=re.I)
 
 
 def _guess_name(filename: str) -> str:
@@ -58,11 +95,13 @@ def list_plugins(session: Session, server: GameServer) -> dict:
         }
 
     enabled = [item(e, True) for e in top if e["type"] == "file" and e["name"].lower().endswith(".jar")]
+    plugman = _plugman(server)
     return {
         "available": True,
         "remote": True,
-        "note": "Изменения начнут работать после перезапуска сервера.",
-        "plugman": {"installed": False, "name": None},
+        "note": (f"Стоит {plugman}: изменения применяются сразу, без перезапуска." if plugman
+                 else "Изменения начнут работать после перезапуска сервера."),
+        "plugman": {"installed": bool(plugman), "name": plugman},
         "enabled": enabled,
         "disabled": [item(e, False) for e in _jars(server, "plugins/disabled")],
         "updates": [item(e, False) for e in _jars(server, "plugins/update")],
@@ -92,17 +131,26 @@ def apply_staged(server: GameServer, staging_dir: str, filenames: list[str], ins
         blob = remote_files.put_blob(server, data, base)
         old = by_name.get(meta["name"].lower())
         was_on = bool(old) and old["filename"] in enabled_files
-        if old and old["filename"] == base and was_on:
-            target = f"plugins/update/{base}"     # Paper swaps a same-named jar in at start
-        else:
-            target = f"plugins/{base}"
         label = (f"{meta['name']} {old.get('version') or ''} → {meta['version']}" if old
                  else f"{meta['name']} {meta['version']} (новый)")
-        remote_files.call(server, "fetch", timeout=120.0, url=blob["url"], path=target, sha256=blob["sha256"])
-        if old and (old["filename"] != base or not was_on):
-            where = "plugins" if was_on else "plugins/disabled"
-            remote_files.call(server, "rename", path=f"{where}/{old['filename']}", to=_trash_name(old["filename"]))
-        done.append({"filename": base, "status": "applied", "label": label, "result": AFTER_RESTART})
+        log: list[str] = []
+        loaded_old = _loaded_name(server, old["filename"]) if (old and was_on) else None
+        # PlugMan cannot reload itself: a new PlugMan waits for the restart like any plugin
+        hot = _plugman(server) if meta["name"].lower() not in ("plugmanx", "plugman") else None
+        if hot and loaded_old:
+            log.append(_console(server, f"plugman unload {loaded_old}"))
+        if old and old["filename"] == base and was_on and not hot:
+            # no PlugMan: Paper swaps a same-named jar in from plugins/update at start
+            remote_files.call(server, "fetch", timeout=120.0, url=blob["url"], path=f"plugins/update/{base}", sha256=blob["sha256"])
+        else:
+            if old and (old["filename"] != base or not was_on or hot):
+                where = "plugins" if was_on else "plugins/disabled"
+                remote_files.call(server, "rename", path=f"{where}/{old['filename']}", to=_trash_name(old["filename"]))
+            remote_files.call(server, "fetch", timeout=120.0, url=blob["url"], path=f"plugins/{base}", sha256=blob["sha256"])
+        if hot:
+            log.append(_console(server, f"plugman load {_stem(base)}"))
+        result = "\n".join(log) if hot else AFTER_RESTART
+        done.append({"filename": base, "status": "applied", "label": label, "result": result})
     return done
 
 
@@ -110,13 +158,22 @@ def change(server: GameServer, filename: str, op: str) -> dict:
     name = rfs.norm(filename)
     if "/" in name or not name.lower().endswith(".jar"):
         raise RemoteFileError("Некорректное имя файла", 400)
+    if op not in ("disable", "enable", "remove"):
+        raise RemoteFileError("Неизвестное действие", 400)
+    hot = _plugman(server)
+    loaded = _loaded_name(server, name) if op in ("disable", "remove") else None
+    if hot and loaded and loaded.lower() in ("plugmanx", "plugman"):
+        hot = None   # PlugMan does not unload itself: that one waits for the restart
+    log: list[str] = []
+    if hot and loaded:
+        log.append(_console(server, f"plugman unload {loaded}"))
     if op == "disable":
         remote_files.call(server, "rename", path=f"plugins/{name}", to=f"plugins/disabled/{name}")
     elif op == "enable":
         remote_files.call(server, "rename", path=f"plugins/disabled/{name}", to=f"plugins/{name}")
-    elif op == "remove":
+        if hot:
+            log.append(_console(server, f"plugman load {_stem(name)}"))
+    else:
         src = f"plugins/{name}" if rfs.stat(server, f"plugins/{name}") else f"plugins/disabled/{name}"
         remote_files.call(server, "rename", path=src, to=_trash_name(name))
-    else:
-        raise RemoteFileError("Неизвестное действие", 400)
-    return {"status": "applied", "result": AFTER_RESTART}
+    return {"status": "applied", "result": "\n".join(log) if hot and log else AFTER_RESTART}
