@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core import mod_ops, plugin_ops, server_changes
 from apps.api.app.core.audit import record_audit
+from apps.api.app.core.remote_files import RemoteFileError
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import get_current_staff_user, require_any_permission, require_permission
 from apps.api.app.dependencies.server_context import resolve_server
@@ -32,7 +33,7 @@ _MANAGE = Depends(require_permission("plugins.manage"))
 
 
 def _fail(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=400, detail=str(exc))
+    return HTTPException(status_code=getattr(exc, "status", 400) if isinstance(exc, RemoteFileError) else 400, detail=str(exc))
 
 
 def _audit(session: Session, actor: User, server: GameServer, action: str, target: str, **meta) -> None:
@@ -45,7 +46,10 @@ def list_plugins(
     server: Annotated[GameServer, Depends(resolve_server)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
-    return plugin_ops.list_plugins(session, server)
+    try:
+        return plugin_ops.list_plugins(session, server)
+    except RemoteFileError as exc:
+        raise _fail(exc)
 
 
 @router.post("/upload", dependencies=[_MANAGE])
@@ -61,8 +65,10 @@ async def upload(
             raise HTTPException(status_code=413, detail=f"{f.filename}: больше 300 МБ")
         payload.append((f.filename or "", data))
     try:
-        return plugin_ops.stage(session, server, payload)
-    except mod_ops.ModOpsError as exc:
+        from starlette.concurrency import run_in_threadpool
+
+        return await run_in_threadpool(plugin_ops.stage, session, server, payload)
+    except (mod_ops.ModOpsError, RemoteFileError) as exc:
         raise _fail(exc)
 
 
@@ -80,7 +86,7 @@ def apply(
 ) -> dict:
     try:
         result = plugin_ops.apply_staged(session, server, req.token, req.filenames, actor.site_login)
-    except (mod_ops.ModOpsError, server_changes.ChangeError) as exc:
+    except (mod_ops.ModOpsError, server_changes.ChangeError, RemoteFileError) as exc:
         raise _fail(exc)
     for q in result["queued"]:
         _audit(session, actor, server, "upload", q["filename"], label=q["label"], status=q["status"])
@@ -102,6 +108,18 @@ def change(
     if req.op not in ("disable", "enable", "remove"):
         raise HTTPException(status_code=400, detail="Неизвестное действие")
     words = {"disable": "выключить", "enable": "включить", "remove": "удалить"}
+    from apps.api.app.services import remote_file_store as rfs
+
+    if rfs.is_remote(server):
+        from apps.api.app.core import remote_plugins
+
+        try:
+            rfs.require_module(session, server)
+            out = remote_plugins.change(server, filename, req.op)
+        except RemoteFileError as exc:
+            raise _fail(exc)
+        _audit(session, actor, server, req.op, filename, status=out["status"], remote=True)
+        return out
     try:
         c = server_changes.queue(session, server, kind="plugin", op=req.op, filename=filename,
                                  label=f"{words[req.op]} {filename}", created_by=actor.site_login)
@@ -137,9 +155,12 @@ def list_changes(
               .order_by(ServerFileChange.updated_at.desc()).limit(15).all())
     job = (session.query(ServerRestartJob).filter(ServerRestartJob.server_id == server.id)
            .order_by(ServerRestartJob.created_at.desc()).first())
-    info = plugin_ops.list_plugins(session, server)
+    try:
+        info = plugin_ops.list_plugins(session, server)
+    except RemoteFileError:
+        info = {"available": False}
     return {"pending": [_change_out(c) for c in pending], "recent": [_change_out(c) for c in recent],
-            "job": _job_out(job), "running": server_changes.running(server),
+            "job": _job_out(job), "running": server_changes.running(server), "remote": bool(info.get("remote")),
             "can_restart": bool(server.systemd_unit and server.rcon_port),
             "has_plugins": bool(info.get("available")),
             "plugman": (info.get("plugman") or {}).get("installed", False)}

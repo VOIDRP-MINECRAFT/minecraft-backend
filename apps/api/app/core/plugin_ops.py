@@ -82,6 +82,13 @@ def _scan(directory: str) -> list[dict]:
 
 
 def list_plugins(session: Session, server: GameServer) -> dict:
+    from apps.api.app.services import remote_file_store as rfs
+
+    if rfs.is_remote(server):
+        from apps.api.app.core import remote_plugins
+
+        rfs.require_module(session, server)
+        return remote_plugins.list_plugins(session, server)
     try:
         base = server_changes.folder(server, "plugin")
     except server_changes.ChangeError:
@@ -145,6 +152,12 @@ def apply_staged(session: Session, server: GameServer, token: str, filenames: li
     if not os.path.isdir(d):
         raise mod_ops.ModOpsError("Загрузка не найдена или устарела — загрузите заново")
     installed = list_plugins(session, server)
+    if installed.get("remote"):
+        from apps.api.app.core import remote_plugins
+
+        queued = remote_plugins.apply_staged(server, d, filenames, installed, read_meta, mod_ops.sanitize_jar)
+        shutil.rmtree(d, ignore_errors=True)
+        return {"queued": queued}
     by_name = {p["name"].lower(): p for p in installed["enabled"] + installed["disabled"] if p.get("name")}
     queued = []
     for fname in filenames:
