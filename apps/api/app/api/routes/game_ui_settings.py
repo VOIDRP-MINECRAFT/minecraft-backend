@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
@@ -49,7 +49,7 @@ class SettingsPatch(BaseModel):
 def get_settings(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> SettingsOut:
     row = db.execute(
         select(PlayerGameSettings).where(
@@ -65,7 +65,7 @@ def update_settings(
     payload: SettingsPatch,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> SettingsOut:
     row = db.execute(
         select(PlayerGameSettings).where(

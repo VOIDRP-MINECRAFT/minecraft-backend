@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
@@ -216,7 +216,7 @@ def _state(db: Session, server: GameServer, service: TraderService, visit: Trade
 @ui_router.get("/state")
 def state(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     service = TraderService(db, server.id)
@@ -235,7 +235,7 @@ class TradeRequest(BaseModel):
 def trade(
     payload: TradeRequest,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     service = TraderService(db, server.id)
@@ -252,7 +252,7 @@ def trade(
 def transaction(
     tx_id: UUID,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     tx = db.get(TraderTransaction, tx_id)

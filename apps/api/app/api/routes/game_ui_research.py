@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.nation import Nation
@@ -44,14 +44,16 @@ class PluginResearchPurchaseRequest(BaseModel):
 
 def _service(
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> NationResearchService:
     return NationResearchService(db, server.id)
 
 
-def _resolve_player_nation(player: PlayerAccount, db: Session) -> tuple[Nation, NationMember]:
+def _resolve_player_nation(player: PlayerAccount, db: Session, server_id) -> tuple[Nation, NationMember]:
+    # membership is per server: an unscoped lookup found the player's nation on another server
+    # and the overview then tried to create its stats here (500 on a duplicate key)
     member = db.execute(
-        select(NationMember).where(NationMember.user_id == player.user_id)
+        select(NationMember).where(NationMember.user_id == player.user_id, NationMember.server_id == server_id)
     ).scalar_one_or_none()
     if member is None:
         raise HTTPException(
@@ -73,7 +75,7 @@ def get_research_overview(
     db: Annotated[Session, Depends(get_db_session)],
     svc: Annotated[NationResearchService, Depends(_service)],
 ) -> NationResearchOverview:
-    nation, member = _resolve_player_nation(player, db)
+    nation, member = _resolve_player_nation(player, db, svc.server_id)
     return svc.build_overview(nation, member.role)
 
 
@@ -84,7 +86,7 @@ def purchase_research(
     db: Annotated[Session, Depends(get_db_session)],
     svc: Annotated[NationResearchService, Depends(_service)],
 ) -> ResearchPurchaseResponse:
-    nation, member = _resolve_player_nation(player, db)
+    nation, member = _resolve_player_nation(player, db, svc.server_id)
     try:
         return svc.purchase(
             nation=nation,

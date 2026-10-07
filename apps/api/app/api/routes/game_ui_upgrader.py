@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
@@ -136,7 +136,7 @@ class RecentWin(BaseModel):
 def get_rewards(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> RewardsResponse:
     _require_feature(server)
     svc = VoidUpgraderService(db, server.id)
@@ -166,7 +166,7 @@ def spin(
     req: SpinRequest,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     _require_feature(server)
     svc = VoidUpgraderService(db, server.id)
@@ -181,7 +181,7 @@ def daily_spin(
     req: DailySpinRequest,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     _require_feature(server)
     svc = VoidUpgraderService(db, server.id)
@@ -195,7 +195,7 @@ def daily_spin(
 def get_jackpot(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> JackpotOut:
     _require_feature(server)
     return JackpotOut(**VoidUpgraderService(db, server.id).jackpot())
@@ -205,7 +205,7 @@ def get_jackpot(
 def get_leaderboard(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> LeaderboardOut:
     _require_feature(server)
     return LeaderboardOut(**VoidUpgraderService(db, server.id).weekly_leaderboard())
@@ -224,7 +224,7 @@ class WinningOut(BaseModel):
 def get_winnings(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> list[WinningOut]:
     svc = VoidUpgraderService(db, server.id)
     return [
@@ -239,7 +239,7 @@ def claim_winning(
     winning_id: UUID,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     try:
         return VoidUpgraderService(db, server.id).claim(player, winning_id)
@@ -252,7 +252,7 @@ def sell_winning(
     winning_id: UUID,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     try:
         return VoidUpgraderService(db, server.id).sell(player, winning_id)
@@ -271,7 +271,7 @@ def upgrade_winning(
     req: UpgradeWinningRequest,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     _require_feature(server)
     try:
@@ -286,7 +286,7 @@ def upgrade_winning(
 def sell_all_winnings(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     try:
         return VoidUpgraderService(db, server.id).sell_all(player)
@@ -298,7 +298,7 @@ def sell_all_winnings(
 def claim_all_winnings(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     try:
         return VoidUpgraderService(db, server.id).claim_all(player)
@@ -310,7 +310,7 @@ def claim_all_winnings(
 def get_stats(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> StatsOut:
     svc = VoidUpgraderService(db, server.id)
     return StatsOut(**svc.stats(player.user_id))
@@ -320,7 +320,7 @@ def get_stats(
 def recent_wins(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> list[RecentWin]:
     _require_feature(server)
     svc = VoidUpgraderService(db, server.id)
@@ -341,7 +341,7 @@ def recent_wins(
 def get_history(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> list[HistoryItem]:
     svc = VoidUpgraderService(db, server.id)
     active_seed = svc.active_seed_value(player)   # spins under the STILL-active seed stay committed-only
@@ -370,7 +370,7 @@ class RotateOut(BaseModel):
 def get_fairness(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> FairnessOut:
     return FairnessOut(**VoidUpgraderService(db, server.id).fairness(player))
 
@@ -379,6 +379,6 @@ def get_fairness(
 def rotate_fairness(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> RotateOut:
     return RotateOut(**VoidUpgraderService(db, server.id).rotate_seed(player))

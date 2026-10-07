@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/game-ui/nation-market", tags=["game-ui", "nation-mar
 
 def _service(
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> MarketPublicService:
     return MarketPublicService(db, server.id)
 

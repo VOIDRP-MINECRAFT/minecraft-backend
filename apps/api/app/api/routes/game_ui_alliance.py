@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.alliance import Alliance, AllianceMember, AllianceProposal
 from apps.api.app.models.game_server import GameServer
@@ -62,9 +62,9 @@ class AllianceInfo(BaseModel):
     player_role: str
 
 
-def _find_player_nation(player: PlayerAccount, db: Session) -> tuple[Nation, NationMember] | None:
+def _find_player_nation(player: PlayerAccount, db: Session, server_id) -> tuple[Nation, NationMember] | None:
     member = db.execute(
-        select(NationMember).where(NationMember.user_id == player.user_id)
+        select(NationMember).where(NationMember.user_id == player.user_id, NationMember.server_id == server_id)
     ).scalar_one_or_none()
     if member is None:
         return None
@@ -78,8 +78,9 @@ def _find_player_nation(player: PlayerAccount, db: Session) -> tuple[Nation, Nat
 def get_my_alliance(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> AllianceInfo:
-    result = _find_player_nation(player, db)
+    result = _find_player_nation(player, db, server.id)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Игрок не состоит в государстве.")
     nation, nation_membership = result
@@ -164,7 +165,7 @@ def vote_on_proposal(
     payload: AllianceVoteInput,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     """Vote on an alliance proposal directly from the WebGUI (by proposal_id).
 
@@ -172,7 +173,7 @@ def vote_on_proposal(
     browser can't drive it — this votes by id through the same service the command
     uses. The service enforces the leader/officer permission check.
     """
-    result = _find_player_nation(player, db)
+    result = _find_player_nation(player, db, server.id)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Игрок не состоит в государстве.")
     nation, _ = result

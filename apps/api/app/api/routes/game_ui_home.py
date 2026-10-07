@@ -16,7 +16,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from apps.api.app.core.rcon_client import send_rcon_command
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.nation import Nation
@@ -159,7 +159,7 @@ class TopBar(BaseModel):
 def get_features(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> dict:
     """Per-server feature toggles (game_servers.features) so the WebGUI can hide
     disabled tabs. Absent/unknown key ⇒ enabled. Also exposes is_admin for admin-only tabs."""
@@ -173,7 +173,7 @@ def get_features(
 def get_topbar(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> TopBar:
     nick = player.minecraft_nickname
     skin = db.execute(select(PlayerSkin).where(PlayerSkin.user_id == player.user_id)).scalar_one_or_none()
@@ -216,7 +216,7 @@ class NationEvent(BaseModel):
 def get_nation_activity(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
     limit: int = 12,
 ) -> list[NationEvent]:
     """Recent activity of the player's own nation, for the home feed."""
@@ -256,7 +256,7 @@ def get_nation_activity(
 def get_home(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> HomeProfile:
     nick = player.minecraft_nickname
 
@@ -342,7 +342,7 @@ class SkinChangeResponse(BaseModel):
 async def change_skin(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
     file: UploadFile | None = File(default=None),
     from_username: str | None = Form(default=None),
     model_variant: str | None = Form(default=None),

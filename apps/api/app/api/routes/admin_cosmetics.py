@@ -85,7 +85,7 @@ def _notify_granted(db: Session, user_id, cosmetic_name: str) -> None:
     try:
         from apps.api.app.models.game_server import GameServer
         from apps.api.app.services.notification_service import NotificationService
-        server_id = db.execute(select(GameServer.id).where(GameServer.is_default.is_(True))).scalar_one_or_none()
+        server_id = db.execute(select(GameServer.id).where(GameServer.slug == get_settings().webgui_server_slug)).scalar_one_or_none()
         if server_id is None:
             return
         NotificationService(db, server_id).create(

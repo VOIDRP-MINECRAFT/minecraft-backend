@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/game-ui/market", tags=["game-ui", "player-market"])
 
 def _service(
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> PlayerMarketService:
     return PlayerMarketService(db, server.id)
 
@@ -79,7 +79,7 @@ class MoversOut(BaseModel):
 @router.get("/movers", response_model=MoversOut)
 def get_movers(
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
     _player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     days: int = 7,
     limit: int = 5,
@@ -123,7 +123,7 @@ def get_movers(
 def get_price_history(
     item_key: str,
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
     _player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     days: int = 14,
 ):
@@ -247,7 +247,7 @@ def create_pending_action(
     req: WebActionRequest,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ):
     allowed = {"buy", "sell", "cancel_buy", "cancel_sell", "pickup", "command", "open_gui"}
     if req.action_type not in allowed:

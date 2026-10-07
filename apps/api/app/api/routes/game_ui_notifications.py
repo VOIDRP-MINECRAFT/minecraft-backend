@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.player_account import PlayerAccount
@@ -64,7 +64,7 @@ class NotificationPush(BaseModel):
 def get_feed(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> NotificationFeed:
     svc = NotificationService(db, server.id)
     items = svc.feed(player.user_id)
@@ -80,7 +80,7 @@ def get_feed(
 def get_history(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> NotificationFeed:
     """The in-game notification center: recent undismissed notifications, does not mark seen."""
     svc = NotificationService(db, server.id)
@@ -93,7 +93,7 @@ def dismiss(
     notification_id: UUID,
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> None:
     NotificationService(db, server.id).dismiss(notification_id, player.user_id)
     db.commit()

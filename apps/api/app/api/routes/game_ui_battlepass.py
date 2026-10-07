@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.server_auth import require_game_server
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.battlepass import BattlePassProgress
 from apps.api.app.models.game_server import GameServer
@@ -88,7 +88,7 @@ def push_track(
 @router.get("/track", response_model=BpTrack)
 def get_track(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> BpTrack:
     data = RedisCacheService().get_json(_track_key(server.id, player.minecraft_nickname))
     if not data:
@@ -137,7 +137,7 @@ def push_quests(
 @router.get("/quests", response_model=BpQuests)
 def get_quests(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> BpQuests:
     data = RedisCacheService().get_json(_quests_key(server.id, player.minecraft_nickname))
     if not data:
@@ -286,7 +286,7 @@ def get_rewards_for_plugin(
 
 def _service(
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> BattlePassService:
     return BattlePassService(session=db, server_id=server.id)
 
@@ -303,7 +303,7 @@ class BuyPremiumResponse(BaseModel):
 def buy_premium(
     player: Annotated[PlayerAccount, Depends(get_webgui_player)],
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> BuyPremiumResponse:
     """Unlock Battle Pass premium for the current season by spending Void Coins."""
     # Resolve the player's minecraft UUID (premium is keyed by uuid) from their BP progress.

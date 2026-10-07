@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.server_context import resolve_server
+from apps.api.app.dependencies.server_context import resolve_webgui_server
 from apps.api.app.dependencies.webgui_auth import get_webgui_player
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.nation import Nation
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/game-ui/treasury", tags=["game-ui", "treasury"])
 
 def _stats_service(
     db: Annotated[Session, Depends(get_db_session)],
-    server: Annotated[GameServer, Depends(resolve_server)],
+    server: Annotated[GameServer, Depends(resolve_webgui_server)],
 ) -> NationStatsService:
     return NationStatsService(db, server.id)
 
@@ -36,9 +36,9 @@ class TreasurySummary(BaseModel):
     transactions: NationTreasuryTransactionListResponse
 
 
-def _resolve_player_nation(player: PlayerAccount, db: Session) -> tuple[Nation, NationMember]:
+def _resolve_player_nation(player: PlayerAccount, db: Session, server_id) -> tuple[Nation, NationMember]:
     member = db.execute(
-        select(NationMember).where(NationMember.user_id == player.user_id)
+        select(NationMember).where(NationMember.user_id == player.user_id, NationMember.server_id == server_id)
     ).scalar_one_or_none()
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Игрок не состоит в государстве.")
@@ -56,7 +56,7 @@ def get_treasury_summary(
     db: Annotated[Session, Depends(get_db_session)],
     svc: Annotated[NationStatsService, Depends(_stats_service)],
 ) -> TreasurySummary:
-    nation, member = _resolve_player_nation(player, db)
+    nation, member = _resolve_player_nation(player, db, svc.server_id)
     try:
         stats = svc.get_stats_by_slug(nation.slug)
         transactions = svc.list_transactions_for_nation(nation.slug)
