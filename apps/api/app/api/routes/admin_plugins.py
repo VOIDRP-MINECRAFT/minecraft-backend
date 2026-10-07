@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from apps.api.app.core import mod_ops, plugin_ops, server_changes
+from apps.api.app.core import mod_ops, plugin_history, plugin_ops, server_changes
 from apps.api.app.core.audit import record_audit
 from apps.api.app.core.remote_files import RemoteFileError
 from apps.api.app.db import get_db_session
@@ -127,6 +127,43 @@ def change(
         raise _fail(exc)
     _audit(session, actor, server, req.op, filename, status=c.status)
     return {"status": c.status, "result": c.result}
+
+
+@router.get("/history")
+def history(
+    server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """Earlier versions in the trash, to put one back."""
+    try:
+        return plugin_history.versions(session, server)
+    except RemoteFileError as exc:
+        raise _fail(exc)
+
+
+class RollbackRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=300)
+
+
+@router.post("/rollback", dependencies=[_MANAGE])
+def rollback(
+    req: RollbackRequest,
+    server: Annotated[GameServer, Depends(resolve_server)],
+    session: Annotated[Session, Depends(get_db_session)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
+) -> dict:
+    from apps.api.app.services import remote_file_store as rfs
+
+    try:
+        if rfs.is_remote(server):
+            rfs.require_module(session, server)
+        out = plugin_history.rollback(session, server, req.id, actor.site_login)
+    except plugin_history.HistoryError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    except (mod_ops.ModOpsError, server_changes.ChangeError, RemoteFileError) as exc:
+        raise _fail(exc)
+    _audit(session, actor, server, "rollback", out["label"], version=req.id, status=out["status"])
+    return out
 
 
 # ── The queue ────────────────────────────────────────────────────────────────

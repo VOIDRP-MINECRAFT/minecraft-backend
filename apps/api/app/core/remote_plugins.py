@@ -13,6 +13,9 @@ With PlugMan(X) on the server every change is applied at once through the plugin
 (the same queue as the admin's console): a new plugin is loaded, a new version replaces the
 old one (unload, swap the jar, load), off/remove unload, on loads. Its answers come back with
 the result; without PlugMan everything waits for the restart.
+
+Every jar moved to the trash is remembered (name, version) for «Версии» and rollback()
+(core/plugin_history.py).
 """
 from __future__ import annotations
 
@@ -109,8 +112,18 @@ def list_plugins(session: Session, server: GameServer) -> dict:
     }
 
 
-def _trash_name(filename: str) -> str:
-    return f"{TRASH}/{int(time.time())}-{filename}"
+def _to_trash(server: GameServer, path: str, filename: str, name: str | None, version: str | None) -> None:
+    """Moves a jar to the trash and remembers what it was, for «Версии» (core/plugin_history.py)."""
+    from apps.api.app.core import plugin_history
+
+    trash_name = f"{int(time.time())}-{filename}"
+    remote_files.call(server, "rename", path=path, to=f"{TRASH}/{trash_name}")
+    plugin_history.remember(server, trash_name, name=name or _guess_name(filename), version=version)
+
+
+def _inventory_entry(server: GameServer, filename: str) -> dict:
+    inv = integration_updates.inventory(server) or {}
+    return next((p for p in inv.get("plugins") or [] if p.get("file") == filename), {})
 
 
 def apply_staged(server: GameServer, staging_dir: str, filenames: list[str], installed: dict, read_meta, sanitize) -> list[dict]:
@@ -145,7 +158,7 @@ def apply_staged(server: GameServer, staging_dir: str, filenames: list[str], ins
         else:
             if old and (old["filename"] != base or not was_on or hot):
                 where = "plugins" if was_on else "plugins/disabled"
-                remote_files.call(server, "rename", path=f"{where}/{old['filename']}", to=_trash_name(old["filename"]))
+                _to_trash(server, f"{where}/{old['filename']}", old["filename"], old.get("name"), old.get("version"))
             remote_files.call(server, "fetch", timeout=120.0, url=blob["url"], path=f"plugins/{base}", sha256=blob["sha256"])
         if hot:
             log.append(_console(server, f"plugman load {_stem(base)}"))
@@ -175,5 +188,43 @@ def change(server: GameServer, filename: str, op: str) -> dict:
             log.append(_console(server, f"plugman load {_stem(name)}"))
     else:
         src = f"plugins/{name}" if rfs.stat(server, f"plugins/{name}") else f"plugins/disabled/{name}"
-        remote_files.call(server, "rename", path=src, to=_trash_name(name))
+        inv = _inventory_entry(server, name)
+        _to_trash(server, src, name, inv.get("name"), inv.get("version"))
     return {"status": "applied", "result": "\n".join(log) if hot and log else AFTER_RESTART}
+
+
+def rollback(server: GameServer, found: dict, cur: dict | None, installed: dict) -> dict:
+    """Puts a version from the trash back (see core/plugin_history.py): the current one goes to
+    the trash, the chosen one into its place — loaded at once through PlugMan when it runs."""
+    from apps.api.app.core import plugin_history
+
+    filename, trash_name = found["filename"], found["id"]
+    enabled_files = {p["filename"] for p in installed["enabled"]}
+    cur_on = bool(cur) and cur["filename"] in enabled_files
+    if cur and cur["filename"] != filename and any(
+            p["filename"] == filename for p in installed["enabled"] + installed["disabled"]):
+        raise RemoteFileError(f"Файл {filename} уже занят другим плагином", 409)
+    is_plugman = (found.get("name") or "").lower() in ("plugmanx", "plugman")
+    hot = None if is_plugman else _plugman(server)
+    log: list[str] = []
+    if cur and cur_on and not hot and cur["filename"] == filename:
+        # Same file name, no PlugMan: Paper swaps it in from plugins/update at start; the
+        # running jar is not touched (it cannot be kept — the swap overwrites it).
+        remote_files.call(server, "rename", path=f"{TRASH}/{trash_name}", to=f"plugins/update/{filename}")
+        plugin_history.forget(server, trash_name)
+        return {"status": "applied", "result": AFTER_RESTART}
+    if cur:
+        if hot and cur_on:
+            loaded = _loaded_name(server, cur["filename"])
+            if loaded:
+                log.append(_console(server, f"plugman unload {loaded}"))
+        _to_trash(server, f"{'plugins' if cur_on else 'plugins/disabled'}/{cur['filename']}", cur["filename"],
+                  cur.get("name"), cur.get("version"))
+    dest = "plugins" if (cur_on or not cur) else "plugins/disabled"
+    remote_files.call(server, "rename", path=f"{TRASH}/{trash_name}", to=f"{dest}/{filename}")
+    plugin_history.forget(server, trash_name)
+    if hot and dest == "plugins":
+        log.append(_console(server, f"plugman load {_stem(filename)}"))
+    if dest == "plugins/disabled":
+        return {"status": "applied", "result": "возвращён выключенным, как и был"}
+    return {"status": "applied", "result": "\n".join(log) if hot else AFTER_RESTART}

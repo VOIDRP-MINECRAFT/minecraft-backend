@@ -91,11 +91,13 @@ def apply_one(session: Session, server: GameServer, change: ServerFileChange) ->
         if change.op == "add":
             if not change.source_path or not os.path.isfile(change.source_path):
                 raise ChangeError("Загруженный файл пропал — загрузите заново")
-            if change.replaces and change.replaces != change.filename:
+            # The version it replaces goes to the trash, switched on or off (a rollback may
+            # bring back a jar whose plugin is off now).
+            if change.replaces:
                 for old in (os.path.join(base, change.replaces), os.path.join(disabled_dir, change.replaces)):
                     if os.path.isfile(old):
                         mod_ops._trash(server.slug, side, old)
-            elif os.path.isfile(target):
+            if os.path.isfile(target):
                 mod_ops._trash(server.slug, side, target)
             mod_ops._atomic_copy(change.source_path, target)
             os.remove(change.source_path)
