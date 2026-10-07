@@ -61,7 +61,7 @@ def list_plugins(session: Session, server: GameServer) -> dict:
     return {
         "available": True,
         "remote": True,
-        "note": "Изменения " + AFTER_RESTART + ".",
+        "note": "Изменения начнут работать после перезапуска сервера.",
         "plugman": {"installed": False, "name": None},
         "enabled": enabled,
         "disabled": [item(e, False) for e in _jars(server, "plugins/disabled")],
