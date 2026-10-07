@@ -98,6 +98,10 @@ modules:
   log: auto
   item_bans: auto
   punishments: auto
+  playtime: auto
+  # Файлы и плагины сервера в админке VoidRP (просмотр, правка конфигов, загрузка и выключение
+  # плагинов) — только внутри папки сервера. Включайте (true), если доверяете админам VoidRP.
+  files: false
 '''
 
 
@@ -149,7 +153,8 @@ CATALOG: list[dict[str, Any]] = [
         "key": "voidrp-perms", "name": "VoidRpPerms", "kind": "ours", "cores": list(PLUGIN_CORES),
         "required": True, "modules": ["monitoring", "perms", "chat", "console", "log", "item_bans", "punishments"],
         "summary": "Мониторинг для админки (TPS, игроки, память), права в игре из раздела «Права в игре», чат с префиксами, "
-                   "консоль, лог и чат сервера в админке (RCON не нужен), бан предметов, баны и муты (EssentialsX не нужен).",
+                   "консоль, лог и чат сервера в админке (RCON не нужен), бан предметов, баны и муты (EssentialsX не нужен), "
+                   "по желанию владельца — файлы и плагины сервера в админке (модуль files, 0.8.0+).",
         "install_as": "plugins/VoidRpPerms.jar", "config_path": "plugins/VoidRpPerms/config.yml",
         "needs": ["luckperms"],
         "repo": "voidrp-perms", "release": {"platforms": ["paper", "folia"], "mc": ["1.21.1", "26.2"]},
