@@ -22,8 +22,11 @@ ZIP_LIMIT = 50 * 1024 * 1024
 
 
 def is_remote(server: GameServer) -> bool:
-    """A partner's machine (or a server without a folder here): files go through its plugin."""
-    return bool(server.is_external) or not server.data_dir
+    """A partner's machine (or a server without a folder here): files go through its plugin.
+    Ours may have no data_dir and take the folder from its systemd unit (Evolution)."""
+    if server.is_external:
+        return True
+    return not (server.data_dir or server.systemd_unit)
 
 
 def require_module(session: Session, server: GameServer) -> None:
