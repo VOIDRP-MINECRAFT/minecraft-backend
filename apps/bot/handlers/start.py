@@ -55,6 +55,8 @@ async def cmd_whoami(message: Message, user: User | None, perms: set[str]) -> No
 @router.message(Command("help"))
 async def cmd_help(message: Message, user: User | None, perms: set[str]) -> None:
     parts = [texts.HELP_BASE]
+    if user is not None and user.is_admin:
+        parts.append(texts.HELP_PLATFORM_ADMIN)
     if user is not None and can_publish_any_news(perms):
         parts.append(texts.HELP_NEWS)
     if user is not None and can_manage_games(perms):

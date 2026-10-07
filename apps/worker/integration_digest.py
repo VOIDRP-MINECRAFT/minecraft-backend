@@ -1,4 +1,5 @@
-"""The Monday digest of each external server, in Telegram (cron, Mondays 10:00 MSK).
+"""The Monday digests in Telegram (cron, Mondays 10:00 MSK): each external server's, and the
+week of our own servers for the platform's admins (core/weekly_report.py).
 
     .venv/bin/python -m apps.worker.integration_digest [--dry-run]
 
@@ -24,6 +25,32 @@ from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.user import User
 
 log = logging.getLogger("integration_digest")
+
+
+def _our_week(session, ref: str, dry_run: bool) -> int:
+    """The past week of our own servers, to the platform's admins (core/weekly_report.py)."""
+    from apps.api.app.core import weekly_report
+    from apps.api.app.repositories.game_server_repository import GameServerRepository
+
+    primary = GameServerRepository(session).get_primary()
+    if primary is None:
+        return 0
+    text = weekly_report.text(weekly_report.build(session, weekly_report.last_full_week()))
+    admins = session.scalars(select(User).where(User.is_admin.is_(True), User.is_active.is_(True),
+                                                User.telegram_user_id.is_not(None))).all()
+    sent = 0
+    for admin in admins:
+        if not notices.prefs(admin).get("digest", True):
+            continue
+        if dry_run:
+            print(f"--- our week to {admin.site_login} ---\n{text}\n")
+            continue
+        if notices._once(session, primary, admin, "weekly_ours", ref) is None:
+            continue
+        ok = notices._send(admin.telegram_user_id, text[:4000], [("Воронка новичка", f"{brief._site()}/admin/funnel")])
+        session.commit()
+        sent += int(ok)
+    return sent
 
 
 def main() -> int:
@@ -74,6 +101,7 @@ def main() -> int:
                                    [("Все серверы в админке", f"{(brief._site())}/admin/integration")])
                 session.commit()
                 sent += int(ok)
+        sent += _our_week(session, ref, args.dry_run)
     log.info("digest %s: sent %d", ref, sent)
     return 0
 

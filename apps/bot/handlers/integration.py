@@ -4,6 +4,7 @@
   uptime, connection grade, waiting updates, the top advice) with buttons.
 * ``int:s:<slug>`` — open / refresh the card; ``int:au:<slug>`` — auto-update on/off
   (``integration.config``); ``int:t:<slug>`` — «проверить связь» through the server console.
+* ``/week`` — the last 7 days of our own servers (platform admins; core/weekly_report.py).
 * ``intmute:<slug>`` — under an outage notice: an hour of silence; ``intunmute`` brings them back.
 """
 from __future__ import annotations
@@ -113,6 +114,21 @@ async def cmd_servers(message: Message, user: User | None, session: Session) -> 
         await message.answer("Сначала привяжи аккаунт VoidRP: /start")
         return
     await _show_list(message, user, session, edit=False)
+
+
+@router.message(Command("week"))
+async def cmd_week(message: Message, user: User | None, session: Session) -> None:
+    """The last 7 days of our servers (core/weekly_report.py) — platform admins only."""
+    if message.chat.type != ChatType.PRIVATE:
+        return
+    from apps.api.app.core import weekly_report
+    from apps.api.app.core.permissions import Access
+
+    if user is None or not Access(user).platform_admin:
+        await message.answer("Сводка недели — для администраторов платформы.")
+        return
+    report = await asyncio.to_thread(weekly_report.build, session, weekly_report.rolling_first())
+    await message.answer(weekly_report.text(report, rolling=True)[:4000], disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "int:list")
