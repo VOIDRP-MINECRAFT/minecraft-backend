@@ -248,7 +248,7 @@ def coverage(
     reports = session.scalars(stmt.order_by(desc(LauncherCrashReport.created_at))).all()
 
     repo = GameServerRepository(session)
-    default_server = repo.get_default()
+    default_server = repo.get_primary()   # reports without a slug predate multi-server
     rules_cache: dict[str | None, list[dict[str, Any]]] = {}
     counts: Counter[str] = Counter()
     unrecognized: list[dict[str, Any]] = []

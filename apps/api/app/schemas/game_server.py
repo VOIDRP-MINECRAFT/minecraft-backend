@@ -43,7 +43,7 @@ class GameServerPublic(BaseModel):
     # The caller may play here despite maintenance (servers.maintenance.join or a platform
     # admin); the launcher unlocks «Играть» on it. Always false for anonymous callers.
     can_join_maintenance: bool = False
-    # A donation shop is connected: the server's own EasyDonate key, or the default server
+    # A donation shop is connected: the server's own EasyDonate key, or the main server
     # (which falls back to the global key). The admin shows «Донаты» only then.
     donate_enabled: bool = False
     # Modules our plugins on the server report working right now (fresh heartbeats) —
@@ -53,6 +53,9 @@ class GameServerPublic(BaseModel):
     accent_color: str | None = None
     features: dict[str, bool] = Field(default_factory=dict)
     is_default: bool = False
+    # The platform's main server (PRIMARY_SERVER_SLUG): its modpack guide and mod list, the
+    # .env donate shop. Not the same as is_default, which is only the site's starting server.
+    is_primary: bool = False
     # Only ever true for callers allowed to see it — the catalogue filters the
     # row out entirely otherwise. Lets the site/launcher badge it as hidden.
     staff_only: bool = False

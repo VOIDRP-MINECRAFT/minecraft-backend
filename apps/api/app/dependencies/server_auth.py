@@ -21,19 +21,20 @@ def require_game_server(
 
     Returns the matched :class:`GameServer` so callers can scope data by
     ``server.id``. Backward compatible: if the secret equals the legacy global
-    ``GAME_AUTH_SHARED_SECRET`` it maps to the default server.
+    ``GAME_AUTH_SHARED_SECRET`` it maps to the main server (PRIMARY_SERVER_SLUG) — the one
+    that secret always belonged to, whatever the site's default server is.
     """
     repo = GameServerRepository(session)
 
     server = repo.get_by_secret(x_game_auth_secret) if x_game_auth_secret else None
 
-    # Legacy fallback: global shared secret -> default server.
+    # Legacy fallback: global shared secret -> the main server.
     if server is None and x_game_auth_secret:
         settings = get_settings()
         if settings.game_auth_shared_secret and hmac.compare_digest(
             x_game_auth_secret, settings.game_auth_shared_secret
         ):
-            server = repo.get_default()
+            server = repo.get_primary()
 
     if server is None:
         raise HTTPException(

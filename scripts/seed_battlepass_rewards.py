@@ -24,7 +24,8 @@ from sqlalchemy import delete, select  # noqa: E402
 
 from apps.api.app.db import SessionLocal  # noqa: E402
 from apps.api.app.models.battlepass_reward import BattlePassReward  # noqa: E402
-from apps.api.app.models.game_server import GameServer  # noqa: E402
+from apps.api.app.models.game_server import GameServer
+from apps.api.app.repositories.game_server_repository import GameServerRepository  # noqa: E402
 
 
 def _norm(entry: dict) -> dict:
@@ -76,7 +77,7 @@ def main() -> int:
         if args.server_slug:
             server = session.scalar(select(GameServer).where(GameServer.slug == args.server_slug))
         else:
-            server = session.scalar(select(GameServer).where(GameServer.is_default.is_(True)))
+            server = GameServerRepository(session).get_primary()
         if server is None:
             print("server not found", file=sys.stderr)
             return 1

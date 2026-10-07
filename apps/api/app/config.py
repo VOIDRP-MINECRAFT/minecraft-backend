@@ -37,9 +37,11 @@ class Settings(BaseSettings):
     # Base64-encoded 32-byte secret shared with the WebGUI Fabric mod (config/webgui/server.json).
     # Used to verify ?webgui_token= query params on game-ui routes.
     webgui_token_secret_base64: str = Field(default="")
-    # The server whose WebGUI mod signs those tokens (only it holds the secret). game-ui routes
-    # resolve to it when the page names no server, NOT to the site's default server.
-    webgui_server_slug: str = Field(default="voidrp")
+    # The platform's main server: the one that owns everything that predates multi-server —
+    # the WebGUI token secret (game-ui pages), the legacy GAME_AUTH_SHARED_SECRET, the .env
+    # EasyDonate shop and crash reports without a server. NOT the same as the site's default
+    # server (game_servers.is_default), which the admin may point at any server for visitors.
+    primary_server_slug: str = Field(default="voidrp")
 
     cors_allow_origins: list[str] = Field(
         default_factory=lambda: [

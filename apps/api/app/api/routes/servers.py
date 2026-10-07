@@ -101,7 +101,9 @@ def _to_public(server: GameServer, with_status: bool = True, may_join=None, modu
     dto = GameServerPublic.model_validate(server)
     dto.modules = sorted((modules or {}).get(server.id, ()))
     dto.can_join_maintenance = bool(server.maintenance and may_join is not None and may_join(server))
-    dto.donate_enabled = bool((server.easydonate_shop_key or "").strip()) or bool(server.is_default)
+    primary = server.slug == get_settings().primary_server_slug
+    dto.is_primary = primary
+    dto.donate_enabled = bool((server.easydonate_shop_key or "").strip()) or primary
     if with_status:
         dto.status = _ping_status(*status_address(server))
     return dto
@@ -111,11 +113,11 @@ def status_address(server: GameServer) -> tuple[str, int]:
     """Where to ping a server for its status (also used by the admin dashboard)."""
     host = server.status_host
     port = server.status_port
-    # For the default server, if no explicit status host is set, ping the
+    # For the main server, if no explicit status host is set, ping the
     # configured internal MC address rather than the public domain — the
     # backend runs on the same box and pinging the public domain fails
     # (no NAT hairpin), which would wrongly report the server as offline.
-    if not host and server.is_default:
+    if not host and server.slug == get_settings().primary_server_slug:
         settings = get_settings()
         host = settings.minecraft_server_host or server.host
         port = port or settings.minecraft_server_port or server.port

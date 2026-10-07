@@ -20,6 +20,12 @@ class GameServerRepository:
         statement = select(GameServer).where(GameServer.slug == slug)
         return self.session.execute(statement).scalar_one_or_none()
 
+    def get_primary(self) -> GameServer | None:
+        """The platform's main server (PRIMARY_SERVER_SLUG), falling back to the default one."""
+        from apps.api.app.config import get_settings
+
+        return self.get_by_slug(get_settings().primary_server_slug) or self.get_default()
+
     def get_default(self) -> GameServer | None:
         statement = (
             select(GameServer)

@@ -210,7 +210,7 @@ def gift_cosmetic(
     try:
         from apps.api.app.models.game_server import GameServer
         from apps.api.app.services.notification_service import NotificationService
-        sid = db.execute(select(GameServer.id).where(GameServer.slug == get_settings().webgui_server_slug)).scalar_one_or_none()
+        sid = db.execute(select(GameServer.id).where(GameServer.slug == get_settings().primary_server_slug)).scalar_one_or_none()
         if sid is not None:
             NotificationService(db, sid).create(
                 user_id=target.user_id, type="cosmetic",

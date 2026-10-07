@@ -6,7 +6,6 @@ from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.permissions import HIDDEN_SERVERS_PERMISSION
-from apps.api.app.config import get_settings
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.auth import get_optional_current_user
 from apps.api.app.models.game_server import GameServer
@@ -82,18 +81,19 @@ def resolve_webgui_server(
 ) -> GameServer:
     """Server for an in-game WebGUI (game-ui) request.
 
-    A webgui token is signed only by the WebGUI mod of one server (``WEBGUI_SERVER_SLUG``), so
+    A webgui token is signed only by the WebGUI mod of the main server (``PRIMARY_SERVER_SLUG``), so
     a page that names no server belongs to that one — not to the site's default server, which
     the admin may point at another server for visitors (that broke the main server's menu on
     05.10). ``X-Server-Slug`` is ignored here: it is the site's server picker state, not the
     game's. An explicit ``?server=`` still wins.
     """
     repo = GameServerRepository(session)
-    slug = server or get_settings().webgui_server_slug
-    found = repo.get_by_slug(slug) if slug else None
-    if found is None and server:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown server '{server}'")
-    found = found or repo.get_default()
+    if server:
+        found = repo.get_by_slug(server)
+        if found is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown server '{server}'")
+    else:
+        found = repo.get_primary()
     if found is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No default server configured")
     return found

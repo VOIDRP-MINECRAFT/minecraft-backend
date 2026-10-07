@@ -42,7 +42,7 @@ class EasyDonateService:
                  shop_key: str | None = None, use_global: bool = True) -> None:
         s = settings or get_settings()
         # A server's own shop key (game_servers.easydonate_shop_key) wins over the global one.
-        # The global key is the default server's shop: other servers without a key of their
+        # The global key is the main server's shop: other servers without a key of their
         # own have no shop at all (use_global=False) rather than showing the main one.
         self._key = shop_key or (s.easydonate_shop_key if use_global else None)
         # Caches are per shop: two shops must never see each other's payments.
@@ -58,8 +58,11 @@ class EasyDonateService:
 
     @classmethod
     def for_server(cls, server, settings: Settings | None = None) -> "EasyDonateService":
+        # the .env shop is the main server's (PRIMARY_SERVER_SLUG), not whichever server the
+        # site shows by default — switching the default must not move the shop
+        s = settings or get_settings()
         return cls(settings=settings, server_id=server.easydonate_server_id,
-                   shop_key=server.easydonate_shop_key, use_global=bool(server.is_default))
+                   shop_key=server.easydonate_shop_key, use_global=server.slug == s.primary_server_slug)
 
     def _ck(self, key: str) -> str:
         return f"{self._shop}:{key}"

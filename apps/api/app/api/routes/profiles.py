@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.legal_documents import DISTRIBUTION_PROFILE
 from apps.api.app.core.user_messages import translate_user_message
 from apps.api.app.db import get_db_session
+from apps.api.app.models.game_server import GameServer
+from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.dependencies.auth import get_current_user, get_optional_current_user
 from apps.api.app.models.user import User
 from apps.api.app.schemas.profile import (
@@ -90,8 +92,10 @@ def get_public_profile_game_stats(
     slug: str,
     viewer: Annotated[User | None, Depends(get_optional_current_user)],
     session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated["GameServer", Depends(resolve_server)],
 ):
-    """Public game stats + achievements for a profile (default server), for the shareable page."""
+    """Public game stats + achievements for a profile on the server the site has selected
+    (``?server=`` / ``X-Server-Slug``, else the site default), for the shareable page."""
     from sqlalchemy import func, select
 
     from apps.api.app.api.routes.game_ui_home import (
@@ -130,10 +134,6 @@ def get_public_profile_game_stats(
     if not nick:
         return {"nickname": None, "stats": HomeStats().model_dump(), "achievements": []}
 
-    server = session.execute(
-        select(GameServer).where(GameServer.is_default.is_(True))
-    ).scalar_one_or_none()
-
     stats = HomeStats()
     if server is not None:
         stat = session.execute(
@@ -166,6 +166,7 @@ def get_public_profile_game_stats(
     achievements = _compute_achievements(stats, has_nation)
     return {
         "nickname": nick,
+        "server": {"slug": server.slug, "name": server.name},
         "stats": stats.model_dump(),
         "achievements": [a.model_dump() for a in achievements],
     }
