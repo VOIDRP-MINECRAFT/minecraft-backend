@@ -1,17 +1,21 @@
 """Royale (battle royale) results: the VoidRpRoyale plugin posts every finished game here,
 and the admin panel lists them, shows each in full and exports them as a table for the
 Academy's teaching staff (CSV that opens in Excel).
+
+The plugin also posts the live state every couple of seconds; it lives in Redis for a short
+while and the public /royale/live feeds the projector page on the site.
 """
 from __future__ import annotations
 
 import csv
 import io
+import json
 from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.audit import record_audit
@@ -22,10 +26,12 @@ from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.royale import RoyaleMatch
 from apps.api.app.models.user import User
+from apps.api.app.services.redis_cache_service import RedisCacheService
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
 plugin_router = APIRouter(prefix="/game-sync/royale", tags=["game-sync", "royale"])
+public_router = APIRouter(prefix="/royale", tags=["royale"])
 admin_router = APIRouter(
     prefix="/admin/royale",
     tags=["admin", "royale"],
@@ -70,6 +76,45 @@ def receive_match(
     row.payload = payload
     session.commit()
     return {"ok": True, "id": str(row.id)}
+
+
+# ── Live state ────────────────────────────────────────────────────────────────
+
+_LIVE_TTL = 20            # the plugin posts every 2 s; silent this long = the server is off
+_LIVE_MAX_BYTES = 256_000
+
+
+def _live_key(server: GameServer) -> str:
+    return f"royale_live:{server.id}"
+
+
+@plugin_router.post("/live")
+async def receive_live(
+    request: Request,
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> dict:
+    raw = await request.body()
+    if len(raw) > _LIVE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Live state is too large")
+    try:
+        state = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Live state is not JSON") from exc
+    if not isinstance(state, dict):
+        raise HTTPException(status_code=400, detail="Live state is not an object")
+    state["received_at"] = datetime.now(tz=MOSCOW).isoformat()
+    RedisCacheService().set_json(_live_key(server), state, ttl_seconds=_LIVE_TTL)
+    return {"ok": True}
+
+
+@public_router.get("/live")
+def live(server: Annotated[GameServer, Depends(resolve_server)], response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    state = RedisCacheService().get_json(_live_key(server))
+    if not state:
+        return {"state": "offline", "server": server.slug}
+    state["server"] = server.slug
+    return state
 
 
 # ── The admin panel ───────────────────────────────────────────────────────────

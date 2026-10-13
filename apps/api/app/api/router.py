@@ -36,7 +36,11 @@ from apps.api.app.api.routes.admin_watchdog import router as admin_watchdog_rout
 from apps.api.app.api.routes.admin_files import router as admin_files_router
 from apps.api.app.api.routes.admin_plugins import changes_router as server_changes_router, router as admin_plugins_router
 from apps.api.app.api.routes.playtime_pay import admin_router as salary_admin_router, plugin_router as salary_plugin_router
-from apps.api.app.api.routes.royale import admin_router as royale_admin_router, plugin_router as royale_plugin_router
+from apps.api.app.api.routes.royale import (
+    admin_router as royale_admin_router,
+    plugin_router as royale_plugin_router,
+    public_router as royale_public_router,
+)
 from apps.api.app.api.routes.admin_audit import router as admin_audit_router
 from apps.api.app.api.routes.admin_roles import router as admin_roles_router
 from apps.api.app.api.routes.security import router as security_router
@@ -228,6 +232,7 @@ api_router.include_router(salary_admin_router)
 api_router.include_router(salary_plugin_router)
 api_router.include_router(royale_admin_router)
 api_router.include_router(royale_plugin_router)
+api_router.include_router(royale_public_router)
 api_router.include_router(admin_audit_router)
 api_router.include_router(admin_roles_router)
 api_router.include_router(security_router)
