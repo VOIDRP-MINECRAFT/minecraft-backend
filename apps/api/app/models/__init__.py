@@ -167,3 +167,4 @@ from apps.api.app.models.trader import (
     TraderTransaction,
     TraderVisit,
 )
+from apps.api.app.models.royale import RoyaleMatch
