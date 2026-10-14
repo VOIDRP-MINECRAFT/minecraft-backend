@@ -10,7 +10,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -251,6 +251,118 @@ def _csv(rows: list[RoyaleMatch], with_match: bool) -> Response:
         content=data.encode("utf-8"),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+# ── The day's standings ───────────────────────────────────────────────────────
+# Points for a team's place and for a kill, as the plugin's day-points default. A match saved by
+# a newer plugin carries its own points per team and player; these are for the older ones.
+
+PLACE_POINTS = [10, 6, 5, 4, 3, 2, 1, 1]
+KILL_POINTS = 1
+
+
+def _points(place: int, kills: int) -> int:
+    base = PLACE_POINTS[place - 1] if 1 <= place <= len(PLACE_POINTS) else 0
+    return base + kills * KILL_POINTS
+
+
+def _day(text: str | None) -> date:
+    if not text:
+        return datetime.now(tz=MOSCOW).date()
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD") from exc
+
+
+def _day_matches(session: Session, server: GameServer, day: date) -> list[RoyaleMatch]:
+    start = datetime.combine(day, time.min, tzinfo=MOSCOW)
+    return (
+        session.query(RoyaleMatch)
+        .filter(
+            RoyaleMatch.server_slug == server.slug,
+            RoyaleMatch.aborted.is_(False),
+            RoyaleMatch.started_at >= start,
+            RoyaleMatch.started_at < start + timedelta(days=1),
+        )
+        .order_by(RoyaleMatch.started_at.asc())
+        .all()
+    )
+
+
+def _standings(rows: list[RoyaleMatch]) -> dict:
+    teams: dict[str, dict] = {}
+    players: dict[str, dict] = {}
+    for row in rows:
+        payload = row.payload or {}
+        for t in payload.get("teams") or []:
+            key = str(t.get("color") or "")
+            if not key:
+                continue
+            place, kills = int(t.get("placement") or 0), int(t.get("kills") or 0)
+            agg = teams.setdefault(key, {"color": key, "title": t.get("title") or key, "points": 0, "wins": 0, "kills": 0, "games": 0})
+            agg["points"] += int(t["points"]) if t.get("points") is not None else _points(place, kills)
+            agg["kills"] += kills
+            agg["games"] += 1
+            agg["wins"] += 1 if place == 1 else 0
+        for p in payload.get("players") or []:
+            name = str(p.get("name") or "")
+            if not name:
+                continue
+            place, kills = int(p.get("placement") or 0), int(p.get("kills") or 0)
+            agg = players.setdefault(name, {"name": name, "team": None, "team_title": None, "points": 0, "wins": 0, "kills": 0, "assists": 0, "games": 0})
+            agg["points"] += int(p["points"]) if p.get("points") is not None else _points(place, kills)
+            agg["kills"] += kills
+            agg["assists"] += int(p.get("assists") or 0)
+            agg["games"] += 1
+            agg["wins"] += 1 if place == 1 else 0
+            agg["team"], agg["team_title"] = p.get("team"), p.get("team_title")
+    order = lambda r: (-r["points"], -r["wins"], -r["kills"])  # noqa: E731
+    return {
+        "games": len(rows),
+        "matches": [_summary(r) for r in rows],
+        "teams": sorted(teams.values(), key=order),
+        "players": sorted(players.values(), key=lambda r: (-r["points"], -r["kills"], r["name"])),
+        "place_points": PLACE_POINTS,
+        "kill_points": KILL_POINTS,
+    }
+
+
+@admin_router.get("/standings/day")
+def day_standings(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    day: str | None = Query(default=None, alias="date"),
+) -> dict:
+    d = _day(day)
+    return {"date": d.isoformat(), **_standings(_day_matches(session, server, d))}
+
+
+@admin_router.get("/standings/day.csv")
+def day_standings_csv(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    day: str | None = Query(default=None, alias="date"),
+) -> Response:
+    d = _day(day)
+    data = _standings(_day_matches(session, server, d))
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow([f"Итоги дня {d.strftime('%d.%m.%Y')}", f"игр: {data['games']}",
+                     "очки за место: " + "/".join(map(str, PLACE_POINTS)), f"за убийство: {KILL_POINTS}"])
+    writer.writerow([])
+    writer.writerow(["Место", "Команда", "Очки", "Побед", "Убийств", "Игр"])
+    for i, t in enumerate(data["teams"], 1):
+        writer.writerow([i, t["title"], t["points"], t["wins"], t["kills"], t["games"]])
+    writer.writerow([])
+    writer.writerow(["Место", "Игрок", "Команда (последняя игра)", "Очки", "Побед", "Убийств", "Помощь", "Игр"])
+    for i, p in enumerate(data["players"], 1):
+        writer.writerow([i, p["name"], p["team_title"] or "", p["points"], p["wins"], p["kills"], p["assists"], p["games"]])
+    return Response(
+        content=("\ufeff" + buf.getvalue()).encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="royale_day_{d.isoformat()}.csv"'},
     )
 
 
