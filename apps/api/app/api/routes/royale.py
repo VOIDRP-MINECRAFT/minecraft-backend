@@ -110,10 +110,15 @@ async def receive_live(
 @public_router.get("/live")
 def live(server: Annotated[GameServer, Depends(resolve_server)], response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
+    # What the children type in «Add server»: the default port needs no number.
+    address = server.host or ""
+    if server.port and server.port != 25565:
+        address = f"{address}:{server.port}"
     state = RedisCacheService().get_json(_live_key(server))
     if not state:
-        return {"state": "offline", "server": server.slug}
+        return {"state": "offline", "server": server.slug, "address": address}
     state["server"] = server.slug
+    state["address"] = address
     return state
 
 
