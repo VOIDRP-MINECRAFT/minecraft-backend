@@ -45,7 +45,7 @@ PERMISSION_CATALOG: list[dict] = [
             {"key": "retention.view", "label": "Возврат игроков: награда второго дня, напоминания (просмотр)"},
             {"key": "retention.manage", "label": "Возврат игроков: менять награду, приветствие, напоминание", "sensitive": True},
             {"key": "royale.view", "label": "Королевская битва: матчи, статистика игроков, выгрузка таблицей"},
-            {"key": "royale.manage", "label": "Королевская битва: удалять тестовые матчи", "sensitive": True},
+            {"key": "royale.manage", "label": "Королевская битва: удалять тестовые матчи, менять размер команд", "sensitive": True},
             {"key": "integration.view", "label": "Интеграция: инструкции, плагины, чек-лист подключения"},
             {"key": "integration.config", "label": "Интеграция: скачивать готовые конфиги с секретом сервера (после пароля)", "sensitive": True},
         ],

@@ -4,6 +4,10 @@ Academy's teaching staff (CSV that opens in Excel).
 
 The plugin also posts the live state every couple of seconds; it lives in Redis for a short
 while and the public /royale/live feeds the projector page on the site.
+
+Game settings set in the admin panel (the team size) go back to the plugin in the answer to
+that live post, so a change reaches the server within ~2 s with no restart. They are kept in
+``game_servers.integration_settings["royale"]`` (the Royale server is temporary: no column).
 """
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.audit import record_audit
@@ -104,7 +109,17 @@ async def receive_live(
         raise HTTPException(status_code=400, detail="Live state is not an object")
     state["received_at"] = datetime.now(tz=MOSCOW).isoformat()
     RedisCacheService().set_json(_live_key(server), state, ttl_seconds=_LIVE_TTL)
-    return {"ok": True}
+    wanted = _settings(server)
+    return {"ok": True, "settings": wanted} if wanted else {"ok": True}
+
+
+def _settings(server: GameServer) -> dict:
+    """What the admin panel set for this server's game ({} = the plugin's config.yml rules)."""
+    raw = (server.integration_settings or {}).get("royale") or {}
+    out = {}
+    if isinstance(raw.get("team_size"), int) and 1 <= raw["team_size"] <= 20:
+        out["team_size"] = raw["team_size"]
+    return out
 
 
 @public_router.get("/live")
@@ -153,6 +168,43 @@ def list_matches(
         q = q.filter(RoyaleMatch.aborted.is_(False))
     rows = q.order_by(RoyaleMatch.started_at.desc().nullslast(), RoyaleMatch.created_at.desc()).limit(limit).all()
     return {"items": [_summary(r) for r in rows]}
+
+
+# Declared before /{match_id}: that one would take "settings" for an id.
+
+@admin_router.get("/settings")
+def royale_settings(server: Annotated[GameServer, Depends(resolve_server)]) -> dict:
+    """The team size set here, and what the server runs now (from its live state)."""
+    live_state = RedisCacheService().get_json(_live_key(server)) or {}
+    current = live_state.get("team_size")
+    return {
+        "team_size": _settings(server).get("team_size"),
+        "current": current if isinstance(current, int) else None,
+        "online": bool(live_state),
+        "in_game": live_state.get("state") not in (None, "lobby", "countdown"),
+    }
+
+
+class RoyaleSettingsIn(BaseModel):
+    team_size: int = Field(ge=1, le=20)
+
+
+@admin_router.put("/settings", dependencies=[Depends(require_permission("royale.manage"))])
+def put_settings(
+    body: RoyaleSettingsIn,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
+) -> dict:
+    before = _settings(server).get("team_size")
+    integration = dict(server.integration_settings or {})
+    integration["royale"] = {**(integration.get("royale") or {}), "team_size": body.team_size}
+    server.integration_settings = integration
+    record_audit(session, category="royale", action="royale.settings", actor=actor,
+                 target_type="server", target_id=server.slug, target_label=server.name,
+                 server_id=server.id, commit=False, meta={"team_size": [before, body.team_size]})
+    session.commit()
+    return royale_settings(server)
 
 
 def _get(session: Session, match_id: UUID) -> RoyaleMatch:
