@@ -14,6 +14,8 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
+import re
 from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any
 from uuid import UUID
@@ -23,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from apps.api.app.core import server_ops
 from apps.api.app.core.audit import record_audit
 from apps.api.app.db import get_db_session
 from apps.api.app.dependencies.admin import get_current_staff_user, require_permission
@@ -170,19 +173,34 @@ def list_matches(
     return {"items": [_summary(r) for r in rows]}
 
 
-# Declared before /{match_id}: that one would take "settings" for an id.
+# Declared before /{match_id}: that one would take "settings" (or "live", "aborted") for an id.
 
 @admin_router.get("/settings")
 def royale_settings(server: Annotated[GameServer, Depends(resolve_server)]) -> dict:
     """The team size set here, and what the server runs now (from its live state)."""
     live_state = RedisCacheService().get_json(_live_key(server)) or {}
     current = live_state.get("team_size")
+    maps, current_map = _maps(server) if live_state else ([], None)
     return {
         "team_size": _settings(server).get("team_size"),
         "current": current if isinstance(current, int) else None,
         "online": bool(live_state),
         "in_game": live_state.get("state") not in (None, "lobby", "countdown"),
+        "maps": maps,
+        "map": current_map or live_state.get("map"),
     }
+
+
+def _maps(server: GameServer) -> tuple[list[str], str | None]:
+    """The arenas the plugin has, from «/br map»: "Карты: a, b (сейчас a)"."""
+    try:
+        out = server_ops.strip_color_codes(server_ops.rcon_command(server, "br map", timeout=4.0))
+    except Exception:  # noqa: BLE001 — the panel just shows no list
+        return [], None
+    m = re.search(r"Карты:\s*(.*?)\s*\(сейчас\s+([^)]+)\)", out)
+    if not m:
+        return [], None
+    return [x.strip() for x in m.group(1).split(",") if x.strip()], m.group(2).strip()
 
 
 class RoyaleSettingsIn(BaseModel):
@@ -205,6 +223,134 @@ def put_settings(
                  server_id=server.id, commit=False, meta={"team_size": [before, body.team_size]})
     session.commit()
     return royale_settings(server)
+
+
+# ── The host panel: the game driven from the admin panel ─────────────────────
+# Through the plugin's own commands over RCON (what the host types in game), so nothing on the
+# server changes for it. Only the actions below; a nickname and a colour are checked first.
+
+_NICK = re.compile(r"^[A-Za-z0-9_]{1,16}$")
+_MAP_ID = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+_COLORS = {"red", "blue", "green", "yellow", "orange", "purple", "aqua", "pink"}
+_GAME_ACTIONS = {
+    "start": "br start",
+    "start_force": "br start force",
+    "again": "br again",
+    "stop": "br stop",
+    "pause": "br pause",
+    "resume": "br resume",
+    "phase": "br phase",
+    "drop": "br drop",
+    "clearresults": "br clearresults",
+    "whitelist_on": "whitelist on",
+    "whitelist_off": "whitelist off",
+}
+_ACTION_LABELS = {
+    "start": "старт игры", "start_force": "старт без проверок", "again": "игра заново", "stop": "остановка игры",
+    "pause": "пауза", "resume": "продолжение", "phase": "следующая фаза", "drop": "припасы сейчас",
+    "clearresults": "итоги в архив", "whitelist_on": "вайтлист включён", "whitelist_off": "вайтлист выключен",
+    "team": "перевод в команду", "mute": "мут", "unmute": "снят мут", "kick": "кик", "map": "карта следующей игры",
+}
+
+
+def _whitelist_on(server: GameServer) -> bool | None:
+    """From server.properties (the server writes it there on /whitelist on|off)."""
+    path = os.path.join(server_ops.resolve_data_dir(server) or "", "server.properties")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("white-list="):
+                    return line.strip().split("=", 1)[1].lower() == "true"
+    except OSError:
+        return None
+    return None
+
+
+def _online(server: GameServer) -> list[str] | None:
+    try:
+        out = server_ops.strip_color_codes(server_ops.rcon_command(server, "list", timeout=3.0))
+    except Exception:  # noqa: BLE001 — offline or RCON closed: no list
+        return None
+    names = out.split(":", 1)[1] if ":" in out else ""
+    return sorted((n.strip() for n in names.split(",") if _NICK.match(n.strip())), key=str.lower)
+
+
+@admin_router.get("/live")
+def admin_live(server: Annotated[GameServer, Depends(resolve_server)], players: bool = Query(default=True)) -> dict:
+    """The live state (what the projector shows) plus what the host panel needs: the whitelist
+    and who is online (by RCON, only when asked — the panel asks every few seconds)."""
+    state = RedisCacheService().get_json(_live_key(server)) or {"state": "offline"}
+    state["whitelist"] = _whitelist_on(server)
+    if players:
+        state["players"] = _online(server) if state.get("state") != "offline" else []
+    return state
+
+
+class RoyaleCommandIn(BaseModel):
+    action: str = Field(max_length=32)
+    player: str | None = Field(default=None, max_length=16)
+    team: str | None = Field(default=None, max_length=16)
+    minutes: int | None = Field(default=None, ge=1, le=120)
+    map: str | None = Field(default=None, max_length=32)
+
+
+def _command_line(body: RoyaleCommandIn) -> str:
+    if body.action in _GAME_ACTIONS:
+        return _GAME_ACTIONS[body.action]
+    if body.action == "map":
+        if not body.map or not _MAP_ID.match(body.map):
+            raise HTTPException(status_code=400, detail="Unknown map")
+        return f"br map use {body.map}"
+    if body.action not in ("team", "mute", "unmute", "kick"):
+        raise HTTPException(status_code=400, detail="Unknown action")
+    if not body.player or not _NICK.match(body.player):
+        raise HTTPException(status_code=400, detail="Player nickname is required")
+    if body.action == "team":
+        team = (body.team or "").lower()
+        if team != "none" and team not in _COLORS:
+            raise HTTPException(status_code=400, detail="Unknown team colour")
+        return f"br team {body.player} {team}"
+    if body.action == "mute":
+        return f"br mute {body.player} {body.minutes or 5}"
+    if body.action == "unmute":
+        return f"br unmute {body.player}"
+    return f"kick {body.player} Ведущий отключил тебя от сервера. Можно зайти снова."
+
+
+@admin_router.post("/command", dependencies=[Depends(require_permission("royale.control"))])
+def admin_command(
+    body: RoyaleCommandIn,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
+) -> dict:
+    line = _command_line(body)
+    try:
+        out = server_ops.strip_color_codes(server_ops.rcon_command(server, line, timeout=8.0)).strip()
+    except Exception as exc:  # noqa: BLE001 — the host sees why
+        raise HTTPException(status_code=502, detail=f"Сервер не ответил: {exc}") from exc
+    out = re.sub(r"^Royale:\s*", "", out)
+    record_audit(session, category="royale", action="royale.command", actor=actor,
+                 target_type="server", target_id=server.slug, target_label=_ACTION_LABELS.get(body.action, body.action),
+                 server_id=server.id, meta={"command": line, "answer": out[:300]})
+    return {"ok": True, "command": line, "answer": out or "Готово"}
+
+
+@admin_router.delete("/aborted", dependencies=[Depends(require_permission("royale.manage"))])
+def delete_aborted(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
+) -> dict:
+    """Every stopped match of this server (test games) at once."""
+    rows = session.query(RoyaleMatch).filter(RoyaleMatch.server_slug == server.slug, RoyaleMatch.aborted.is_(True)).all()
+    for row in rows:
+        session.delete(row)
+    record_audit(session, category="royale", action="royale.match.delete_aborted", actor=actor,
+                 target_type="server", target_id=server.slug, target_label=server.name,
+                 server_id=server.id, commit=False, meta={"deleted": len(rows)})
+    session.commit()
+    return {"ok": True, "deleted": len(rows)}
 
 
 def _get(session: Session, match_id: UUID) -> RoyaleMatch:
@@ -363,12 +509,17 @@ def _standings(rows: list[RoyaleMatch]) -> dict:
             if not name:
                 continue
             place, kills = int(p.get("placement") or 0), int(p.get("kills") or 0)
-            agg = players.setdefault(name, {"name": name, "team": None, "team_title": None, "points": 0, "wins": 0, "kills": 0, "assists": 0, "games": 0})
+            agg = players.setdefault(name, {"name": name, "team": None, "team_title": None, "points": 0, "wins": 0, "kills": 0,
+                                            "assists": 0, "games": 0, "damage": 0.0, "alive_seconds": 0, "best_place": None})
             agg["points"] += int(p["points"]) if p.get("points") is not None else _points(place, kills)
             agg["kills"] += kills
             agg["assists"] += int(p.get("assists") or 0)
             agg["games"] += 1
             agg["wins"] += 1 if place == 1 else 0
+            agg["damage"] += float(p.get("damage_dealt") or 0)
+            agg["alive_seconds"] += int(p.get("alive_seconds") or 0)
+            if place > 0:
+                agg["best_place"] = place if agg["best_place"] is None else min(agg["best_place"], place)
             agg["team"], agg["team_title"] = p.get("team"), p.get("team_title")
     order = lambda r: (-r["points"], -r["wins"], -r["kills"])  # noqa: E731
     return {
@@ -389,6 +540,20 @@ def day_standings(
 ) -> dict:
     d = _day(day)
     return {"date": d.isoformat(), **_standings(_day_matches(session, server, d))}
+
+
+@admin_router.get("/standings/all")
+def all_standings(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    """Every finished game of this server, added up — the «Игроки» tab."""
+    rows = (session.query(RoyaleMatch)
+            .filter(RoyaleMatch.server_slug == server.slug, RoyaleMatch.aborted.is_(False))
+            .order_by(RoyaleMatch.started_at.asc()).all())
+    out = _standings(rows)
+    out.pop("matches", None)
+    return out
 
 
 @admin_router.get("/standings/day.csv")
