@@ -6,7 +6,8 @@ The plugin also posts the live state every couple of seconds; it lives in Redis 
 while and the public /royale/live feeds the projector page on the site.
 
 Game settings set in the admin panel (the team size) go back to the plugin in the answer to
-that live post, so a change reaches the server within ~2 s with no restart. They are kept in
+that live post, so a change reaches the server within ~2 s with no restart (the team size, and
+the no-fight time — changed in a running game at once). They are kept in
 ``game_servers.integration_settings["royale"]`` (the Royale server is temporary: no column).
 """
 from __future__ import annotations
@@ -28,7 +29,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.core import server_ops
 from apps.api.app.core.audit import record_audit
 from apps.api.app.db import get_db_session
-from apps.api.app.dependencies.admin import get_current_staff_user, require_permission
+from apps.api.app.dependencies.admin import get_current_staff_user, require_any_permission, require_permission
 from apps.api.app.dependencies.server_auth import require_game_server
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
@@ -122,6 +123,8 @@ def _settings(server: GameServer) -> dict:
     out = {}
     if isinstance(raw.get("team_size"), int) and 1 <= raw["team_size"] <= 20:
         out["team_size"] = raw["team_size"]
+    if isinstance(raw.get("grace"), int) and 0 <= raw["grace"] <= 1800:
+        out["grace"] = raw["grace"]
     return out
 
 
@@ -181,9 +184,14 @@ def royale_settings(server: Annotated[GameServer, Depends(resolve_server)]) -> d
     live_state = RedisCacheService().get_json(_live_key(server)) or {}
     current = live_state.get("team_size")
     maps, current_map = _maps(server) if live_state else ([], None)
+    saved = _settings(server)
+    running = live_state.get("state") in ("freeze", "running")
     return {
-        "team_size": _settings(server).get("team_size"),
+        "team_size": saved.get("team_size"),
         "current": current if isinstance(current, int) else None,
+        "grace": saved.get("grace"),
+        "current_grace": live_state.get("grace") if isinstance(live_state.get("grace"), int) else None,
+        "grace_left": live_state.get("grace_left") if running else None,
         "online": bool(live_state),
         "in_game": live_state.get("state") not in (None, "lobby", "countdown"),
         "maps": maps,
@@ -204,23 +212,34 @@ def _maps(server: GameServer) -> tuple[list[str], str | None]:
 
 
 class RoyaleSettingsIn(BaseModel):
-    team_size: int = Field(ge=1, le=20)
+    team_size: int | None = Field(default=None, ge=1, le=20)
+    grace: int | None = Field(default=None, ge=0, le=1800)  # no-fight seconds at a game's start
 
 
-@admin_router.put("/settings", dependencies=[Depends(require_permission("royale.manage"))])
+@admin_router.put("/settings", dependencies=[Depends(require_any_permission("royale.control", "royale.manage"))])
 def put_settings(
     body: RoyaleSettingsIn,
     session: Annotated[Session, Depends(get_db_session)],
     server: Annotated[GameServer, Depends(resolve_server)],
     actor: Annotated[User, Depends(get_current_staff_user)],
 ) -> dict:
-    before = _settings(server).get("team_size")
+    before = _settings(server)
+    royale = dict((server.integration_settings or {}).get("royale") or {})
+    meta: dict[str, Any] = {}
+    if body.team_size is not None:
+        royale["team_size"] = body.team_size
+        meta["team_size"] = [before.get("team_size"), body.team_size]
+    if body.grace is not None:
+        royale["grace"] = body.grace
+        meta["grace"] = [before.get("grace"), body.grace]
+    if not meta:
+        raise HTTPException(status_code=400, detail="Нечего менять")
     integration = dict(server.integration_settings or {})
-    integration["royale"] = {**(integration.get("royale") or {}), "team_size": body.team_size}
+    integration["royale"] = royale
     server.integration_settings = integration
     record_audit(session, category="royale", action="royale.settings", actor=actor,
                  target_type="server", target_id=server.slug, target_label=server.name,
-                 server_id=server.id, commit=False, meta={"team_size": [before, body.team_size]})
+                 server_id=server.id, commit=False, meta=meta)
     session.commit()
     return royale_settings(server)
 
