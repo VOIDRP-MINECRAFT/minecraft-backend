@@ -268,7 +268,8 @@ _ACTION_LABELS = {
     "start": "старт игры", "start_force": "старт без проверок", "again": "игра заново", "stop": "остановка игры",
     "pause": "пауза", "resume": "продолжение", "phase": "следующая фаза", "drop": "припасы сейчас",
     "clearresults": "итоги в архив", "whitelist_on": "вайтлист включён", "whitelist_off": "вайтлист выключен",
-    "team": "перевод в команду", "mute": "мут", "unmute": "снят мут", "kick": "кик", "map": "карта следующей игры",
+    "team": "перевод в команду", "join": "добавил в игру", "announce": "объявление", "mute": "мут", "unmute": "снят мут",
+    "kick": "кик", "map": "карта следующей игры",
 }
 
 
@@ -311,6 +312,7 @@ class RoyaleCommandIn(BaseModel):
     team: str | None = Field(default=None, max_length=16)
     minutes: int | None = Field(default=None, ge=1, le=120)
     map: str | None = Field(default=None, max_length=32)
+    text: str | None = Field(default=None, max_length=160)
 
 
 def _command_line(body: RoyaleCommandIn) -> str:
@@ -320,15 +322,22 @@ def _command_line(body: RoyaleCommandIn) -> str:
         if not body.map or not _MAP_ID.match(body.map):
             raise HTTPException(status_code=400, detail="Unknown map")
         return f"br map use {body.map}"
-    if body.action not in ("team", "mute", "unmute", "kick"):
+    if body.action == "announce":
+        text = _clean_text(body.text)
+        if not text:
+            raise HTTPException(status_code=400, detail="Пустое объявление")
+        return f"br say {text}"
+    if body.action not in ("team", "join", "mute", "unmute", "kick"):
         raise HTTPException(status_code=400, detail="Unknown action")
     if not body.player or not _NICK.match(body.player):
         raise HTTPException(status_code=400, detail="Player nickname is required")
-    if body.action == "team":
+    if body.action in ("team", "join"):
         team = (body.team or "").lower()
+        if body.action == "join" and team not in _COLORS:
+            raise HTTPException(status_code=400, detail="Для добавления в игру выберите команду")
         if team != "none" and team not in _COLORS:
             raise HTTPException(status_code=400, detail="Unknown team colour")
-        return f"br team {body.player} {team}"
+        return f"br {body.action} {body.player} {team}"
     if body.action == "mute":
         return f"br mute {body.player} {body.minutes or 5}"
     if body.action == "unmute":
@@ -353,6 +362,80 @@ def admin_command(
                  target_type="server", target_id=server.slug, target_label=_ACTION_LABELS.get(body.action, body.action),
                  server_id=server.id, meta={"command": line, "answer": out[:300]})
     return {"ok": True, "command": line, "answer": out or "Готово"}
+
+
+def _clean_text(text: str | None) -> str:
+    """A host's announcement: one line, no colour codes or MiniMessage tags, trimmed."""
+    out = (text or "").replace("\n", " ").replace("\r", " ")
+    out = out.replace("§", "").replace("<", "").replace(">", "")
+    return re.sub(r"\s+", " ", out).strip()[:120]
+
+
+@admin_router.get("/readiness")
+def readiness(server: Annotated[GameServer, Depends(resolve_server)],
+              session: Annotated[Session, Depends(get_db_session)]) -> dict:
+    """A pre-event checklist that checks itself: whitelist, test matches, a running game, the
+    load-test stand and bots. Each item: ok True/False/None (unknown) with a short hint."""
+    live_state = RedisCacheService().get_json(_live_key(server)) or {}
+    online = bool(live_state)
+    state = live_state.get("state")
+    checks = []
+
+    checks.append({"key": "online", "label": "Сервер на связи",
+                   "ok": online, "detail": None if online else "состояние не приходит",
+                   "hint": "Запустите сервер Royale." if not online else None})
+
+    wl = _whitelist_on(server)
+    checks.append({"key": "whitelist", "label": "Вайтлист выключен (дети зайдут)",
+                   "ok": (wl is False) if wl is not None else None,
+                   "detail": "включён — пустит только по списку" if wl else None,
+                   "hint": "Кнопка «Выключить вайтлист» на Пульте." if wl else None})
+
+    running = state in ("freeze", "running", "countdown")
+    checks.append({"key": "no_game", "label": "Игра не идёт",
+                   "ok": (not running) if online else None,
+                   "detail": "сейчас идёт игра" if running else None,
+                   "hint": "Дождитесь конца или остановите игру." if running else None})
+
+    aborted = session.query(RoyaleMatch).filter(RoyaleMatch.server_slug == server.slug, RoyaleMatch.aborted.is_(True)).count()
+    checks.append({"key": "test_matches", "label": "Тестовые матчи убраны",
+                   "ok": aborted == 0, "detail": f"остановленных матчей: {aborted}" if aborted else None,
+                   "hint": "Вкладка «Матчи» → «Удалить их»." if aborted else None})
+
+    stand = _stand_processes()
+    checks.append({"key": "stand", "label": "Стенд и боты выключены",
+                   "ok": not stand, "detail": (", ".join(stand) if stand else None),
+                   "hint": "Остановите тестовый клиент и ботов нагрузки." if stand else None})
+
+    ready = all(c["ok"] for c in checks if c["ok"] is not None) and not any(c["ok"] is None for c in checks[:1])
+    return {"ready": ready, "online": online, "players": live_state.get("online") if online else None, "checks": checks}
+
+
+# Interpreters only, so a shell or a grep that merely mentions these names is not mistaken
+# for the thing itself (the admin panel's own tooling runs in shells).
+_RUNTIMES = {"java", "node", "nodejs", "python", "python3", "xvfb"}
+
+
+def _stand_processes() -> list[str]:
+    """Load-test / headless-client processes still running on this box (temp Royale server)."""
+    import psutil
+
+    found: set[str] = set()
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            name = (proc.info["name"] or "").lower()
+            cmd = " ".join(proc.info["cmdline"] or [])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if name not in _RUNTIMES:
+            continue
+        if name == "xvfb" and ":99" in cmd:
+            found.add("экран стенда (Xvfb)")
+        elif "loadtest.js" in cmd or "opener.js" in cmd:
+            found.add("боты нагрузки")
+        elif "portablemc" in cmd or "/mcclient/" in cmd:
+            found.add("тестовый клиент")
+    return sorted(found)
 
 
 @admin_router.delete("/aborted", dependencies=[Depends(require_permission("royale.manage"))])
