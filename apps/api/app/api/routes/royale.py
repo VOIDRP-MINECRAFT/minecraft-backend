@@ -132,6 +132,40 @@ def _settings(server: GameServer) -> dict:
     return out
 
 
+@public_router.get("/leaderboard")
+def leaderboard(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    response: Response,
+    limit: int = Query(default=25, ge=1, le=100),
+) -> dict:
+    """All-time standings from every finished game: top players by points, wins, kills."""
+    response.headers["Cache-Control"] = "public, max-age=60"
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    cache = RedisCacheService()
+    key = f"royale_leaderboard:{server.id}:{limit}"
+    cached = cache.get_json(key)
+    if cached:
+        return cached
+    rows = (
+        session.query(RoyaleMatch)
+        .filter(RoyaleMatch.server_slug == server.slug, RoyaleMatch.aborted.is_(False))
+        .order_by(RoyaleMatch.started_at.desc().nullslast())
+        .limit(2000)
+        .all()
+    )
+    data = _standings(rows)
+    out = {
+        "games": data["games"],
+        "players": data["players"][:limit],
+        "place_points": PLACE_POINTS,
+        "kill_points": KILL_POINTS,
+        "server": server.slug,
+    }
+    cache.set_json(key, out, ttl_seconds=60)
+    return out
+
+
 @public_router.get("/live")
 def live(server: Annotated[GameServer, Depends(resolve_server)], response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
