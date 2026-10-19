@@ -125,6 +125,10 @@ def _settings(server: GameServer) -> dict:
         out["team_size"] = raw["team_size"]
     if isinstance(raw.get("grace"), int) and 0 <= raw["grace"] <= 1800:
         out["grace"] = raw["grace"]
+    # Event: the host starts each game. Public: games start on their own once enough gather.
+    out["mode"] = "public" if raw.get("mode") == "public" else "event"
+    if isinstance(raw.get("min_players"), int) and 2 <= raw["min_players"] <= 40:
+        out["min_players"] = raw["min_players"]
     return out
 
 
@@ -190,6 +194,9 @@ def royale_settings(server: Annotated[GameServer, Depends(resolve_server)]) -> d
         "team_size": saved.get("team_size"),
         "current": current if isinstance(current, int) else None,
         "grace": saved.get("grace"),
+        "mode": saved["mode"],
+        "current_mode": live_state.get("mode"),
+        "min_players": saved.get("min_players"),
         "current_grace": live_state.get("grace") if isinstance(live_state.get("grace"), int) else None,
         "grace_left": live_state.get("grace_left") if running else None,
         "online": bool(live_state),
@@ -214,6 +221,8 @@ def _maps(server: GameServer) -> tuple[list[str], str | None]:
 class RoyaleSettingsIn(BaseModel):
     team_size: int | None = Field(default=None, ge=1, le=20)
     grace: int | None = Field(default=None, ge=0, le=1800)  # no-fight seconds at a game's start
+    mode: str | None = Field(default=None, pattern="^(event|public)$")
+    min_players: int | None = Field(default=None, ge=2, le=40)  # auto-start threshold in public mode
 
 
 @admin_router.put("/settings", dependencies=[Depends(require_any_permission("royale.control", "royale.manage"))])
@@ -232,6 +241,12 @@ def put_settings(
     if body.grace is not None:
         royale["grace"] = body.grace
         meta["grace"] = [before.get("grace"), body.grace]
+    if body.mode is not None:
+        royale["mode"] = body.mode
+        meta["mode"] = [before.get("mode"), body.mode]
+    if body.min_players is not None:
+        royale["min_players"] = body.min_players
+        meta["min_players"] = [before.get("min_players"), body.min_players]
     if not meta:
         raise HTTPException(status_code=400, detail="Нечего менять")
     integration = dict(server.integration_settings or {})
