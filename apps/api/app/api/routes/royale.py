@@ -35,6 +35,7 @@ from apps.api.app.dependencies.admin import get_current_staff_user, require_any_
 from apps.api.app.dependencies.server_auth import require_game_server
 from apps.api.app.dependencies.server_context import resolve_server
 from apps.api.app.models.game_server import GameServer
+from apps.api.app.models.player_account import PlayerAccount
 from apps.api.app.models.royale import RoyaleMatch
 from apps.api.app.models.user import User
 from apps.api.app.services.redis_cache_service import RedisCacheService
@@ -695,6 +696,218 @@ def _get(session: Session, match_id: UUID) -> RoyaleMatch:
     if row is None:
         raise HTTPException(status_code=404, detail="Match not found")
     return row
+
+
+# ── Dashboard, analytics, players (the big admin tab) ───────────────────────────
+
+def _server_rows(session: Session, server: GameServer, limit: int = 5000) -> list[RoyaleMatch]:
+    return (
+        session.query(RoyaleMatch)
+        .filter(RoyaleMatch.server_slug == server.slug, RoyaleMatch.aborted.is_(False))
+        .order_by(RoyaleMatch.started_at.desc().nullslast())
+        .limit(limit)
+        .all()
+    )
+
+
+def _mday(row: RoyaleMatch) -> date | None:
+    return row.started_at.astimezone(MOSCOW).date() if row.started_at else None
+
+
+@admin_router.get("/overview")
+def royale_overview(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    """The dashboard: live state, headline numbers, recent games and the top players."""
+    live = RedisCacheService().get_json(_live_key(server)) or {}
+    rows = _server_rows(session, server)
+    std = _standings(rows)
+    for p in std["players"]:
+        p["level"] = _level(int(p.get("points") or 0))
+    today = datetime.now(tz=MOSCOW).date()
+    week = today - timedelta(days=7)
+    games_today = sum(1 for r in rows if _mday(r) == today)
+    games_week = sum(1 for r in rows if (_mday(r) or date.min) >= week)
+    durations = [r.duration_seconds for r in rows if r.duration_seconds]
+    kills = sum(int(p.get("kills") or 0) for p in std["players"])
+    saved = _settings(server)
+    state = live.get("state")
+    return {
+        "online": live.get("online") or 0,
+        "state": state,
+        "live_map": live.get("map"),
+        "countdown": live.get("countdown"),
+        "in_game": state not in (None, "lobby", "countdown"),
+        "server_online": bool(live),
+        "totals": {
+            "games": len(rows),
+            "players": len(std["players"]),
+            "kills": kills,
+            "games_today": games_today,
+            "games_week": games_week,
+            "avg_duration": round(sum(durations) / len(durations)) if durations else 0,
+        },
+        "recent": [_summary(r) for r in rows[:8]],
+        "top": std["players"][:6],
+        "settings": {
+            "mode": saved.get("mode"),
+            "team_size": saved.get("team_size"),
+            "min_players": saved.get("min_players"),
+            "grace": saved.get("grace"),
+            "rewards_on": bool((saved.get("rewards") or {}).get("enabled")),
+        },
+    }
+
+
+@admin_router.get("/analytics")
+def royale_analytics(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    days: int = Query(default=30, ge=7, le=120),
+) -> dict:
+    """Charts: games and players per day, map popularity, team-size split, duration, placements."""
+    rows = _server_rows(session, server)
+    today = datetime.now(tz=MOSCOW).date()
+    start = today - timedelta(days=days - 1)
+    per_day: dict[str, dict] = {}
+    for i in range(days):
+        d = (start + timedelta(days=i)).isoformat()
+        per_day[d] = {"date": d, "games": 0, "players": 0, "kills": 0}
+    maps: dict[str, int] = {}
+    team_sizes: dict[str, int] = {}
+    player_counts: dict[str, int] = {}
+    durations: list[int] = []
+    for r in rows:
+        d = _mday(r)
+        if d and d.isoformat() in per_day:
+            cell = per_day[d.isoformat()]
+            cell["games"] += 1
+            cell["players"] += int(r.players_count or 0)
+            cell["kills"] += sum(int(p.get("kills") or 0) for p in (r.payload or {}).get("players") or [])
+        title = r.map_title or r.map or "—"
+        maps[title] = maps.get(title, 0) + 1
+        pc = int(r.players_count or 0)
+        if pc:
+            player_counts[str(pc)] = player_counts.get(str(pc), 0) + 1
+        teams = (r.payload or {}).get("teams") or []
+        if teams:
+            avg_team = round((r.players_count or 0) / max(1, len(teams)))
+            team_sizes[str(avg_team)] = team_sizes.get(str(avg_team), 0) + 1
+        if r.duration_seconds:
+            durations.append(r.duration_seconds)
+    return {
+        "days": list(per_day.values()),
+        "maps": sorted(({"name": k, "count": v} for k, v in maps.items()), key=lambda x: -x["count"]),
+        "team_sizes": sorted(({"size": k, "count": v} for k, v in team_sizes.items()), key=lambda x: int(x["size"])),
+        "player_counts": sorted(({"players": k, "count": v} for k, v in player_counts.items()), key=lambda x: int(x["players"])),
+        "duration_avg": round(sum(durations) / len(durations)) if durations else 0,
+        "duration_max": max(durations) if durations else 0,
+        "games": len(rows),
+    }
+
+
+@admin_router.get("/players")
+def royale_players(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    q: str | None = Query(default=None),
+    sort: str = Query(default="points"),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    """All players with their aggregate stats — searchable, sortable (the players tab)."""
+    rows = _server_rows(session, server)
+    players = _standings(rows)["players"]
+    for i, p in enumerate(players):
+        p["rank"] = i + 1
+        p["level"] = _level(int(p.get("points") or 0))
+    if q:
+        ql = q.strip().lower()
+        players = [p for p in players if ql in str(p["name"]).lower()]
+    keys = {"points": lambda p: -p["points"], "kills": lambda p: -p["kills"], "wins": lambda p: -p["wins"],
+            "games": lambda p: -p["games"], "name": lambda p: str(p["name"]).lower()}
+    players = sorted(players, key=keys.get(sort, keys["points"]))
+    return {"players": players[:limit], "total": len(players)}
+
+
+@admin_router.get("/player/{nick}")
+def royale_player(
+    nick: str,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+) -> dict:
+    """One player: full profile, their match history, and their Void Coin balance."""
+    _, normalized = normalize_minecraft_nickname(nick)
+    rows = _server_rows(session, server)
+    prof = _player_profile(rows, nick)
+    ranked = _standings(rows)["players"]
+    prof["rank"] = next((i + 1 for i, p in enumerate(ranked)
+                        if normalize_minecraft_nickname(str(p["name"]))[1] == normalized), None)
+    prof["total_players"] = len(ranked)
+    history = []
+    for r in rows:
+        line = next((p for p in (r.payload or {}).get("players") or []
+                    if normalize_minecraft_nickname(str(p.get("name") or ""))[1] == normalized), None)
+        if line:
+            history.append({**_summary(r), "placement": line.get("placement"), "kills": line.get("kills"),
+                            "team_title": line.get("team_title")})
+        if len(history) >= 25:
+            break
+    account = session.execute(
+        select(PlayerAccount).where(PlayerAccount.minecraft_nickname_normalized == normalized)
+    ).scalar_one_or_none()
+    prof["void_coins"] = int(account.void_coins or 0) if account else None
+    prof["has_account"] = account is not None
+    prof["history"] = history
+    return prof
+
+
+class RoyalePlayerAction(BaseModel):
+    action: str = Field(pattern="^(kick|ban|unban|grant_coins)$")
+    amount: int | None = Field(default=None, ge=-1_000_000, le=1_000_000)
+    reason: str | None = Field(default=None, max_length=200)
+
+
+@admin_router.post("/player/{nick}/action", dependencies=[Depends(require_permission("royale.manage"))])
+def royale_player_action(
+    nick: str,
+    body: RoyalePlayerAction,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    actor: Annotated[User, Depends(get_current_staff_user)],
+) -> dict:
+    """Moderate a Royale player: kick, ban/unban on the Royale server, or grant Void Coins."""
+    safe = re.sub(r"[^A-Za-z0-9_]", "", nick)[:16]
+    if not safe:
+        raise HTTPException(status_code=400, detail="Плохой ник")
+    answer = ""
+    if body.action == "grant_coins":
+        amount = int(body.amount or 0)
+        _, normalized = normalize_minecraft_nickname(nick)
+        account = session.execute(
+            select(PlayerAccount).where(PlayerAccount.minecraft_nickname_normalized == normalized)
+        ).scalar_one_or_none()
+        if account is None:
+            raise HTTPException(status_code=404, detail="Нет аккаунта у игрока")
+        account.void_coins = max(0, int(account.void_coins or 0) + amount)
+        session.flush()
+        answer = f"Баланс: {account.void_coins} Void Coins"
+    else:
+        reason = (body.reason or "Нарушение правил").replace('"', "'")[:120]
+        cmd = {
+            "kick": f"minecraft:kick {safe} {reason}",
+            "ban": f"minecraft:ban {safe} {reason}",
+            "unban": f"minecraft:pardon {safe}",
+        }[body.action]
+        try:
+            answer = server_ops.strip_color_codes(server_ops.rcon_command(server, cmd, timeout=5.0))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Сервер не ответил: {exc}") from exc
+    record_audit(session, category="royale", action=f"royale.player.{body.action}", actor=actor,
+                 target_type="player", target_id=safe, target_label=safe,
+                 server_id=server.id, commit=False, meta={"amount": body.amount, "reason": body.reason})
+    session.commit()
+    return {"ok": True, "answer": answer or "Готово"}
 
 
 @admin_router.get("/{match_id}")
