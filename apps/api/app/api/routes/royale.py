@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.core import server_ops
@@ -821,6 +822,9 @@ def royale_players(
     for i, p in enumerate(players):
         p["rank"] = i + 1
         p["level"] = _level(int(p.get("points") or 0))
+        d = int(p.get("deaths") or 0)
+        p["kd"] = round(int(p.get("kills") or 0) / d, 2) if d else float(p.get("kills") or 0)
+        p["win_rate"] = round(p["wins"] / p["games"], 3) if p.get("games") else 0.0
     if q:
         ql = q.strip().lower()
         players = [p for p in players if ql in str(p["name"]).lower()]
@@ -1115,9 +1119,10 @@ def _standings(rows: list[RoyaleMatch]) -> dict:
                 continue
             place, kills = int(p.get("placement") or 0), int(p.get("kills") or 0)
             agg = players.setdefault(name, {"name": name, "team": None, "team_title": None, "points": 0, "wins": 0, "kills": 0,
-                                            "assists": 0, "games": 0, "damage": 0.0, "alive_seconds": 0, "best_place": None})
+                                            "deaths": 0, "assists": 0, "games": 0, "damage": 0.0, "alive_seconds": 0, "best_place": None})
             agg["points"] += int(p["points"]) if p.get("points") is not None else _points(place, kills)
             agg["kills"] += kills
+            agg["deaths"] += int(p.get("deaths") or 0)
             agg["assists"] += int(p.get("assists") or 0)
             agg["games"] += 1
             agg["wins"] += 1 if place == 1 else 0
