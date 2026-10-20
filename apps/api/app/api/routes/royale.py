@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -37,6 +38,7 @@ from apps.api.app.models.game_server import GameServer
 from apps.api.app.models.royale import RoyaleMatch
 from apps.api.app.models.user import User
 from apps.api.app.services.redis_cache_service import RedisCacheService
+from apps.api.app.utils.normalization import normalize_minecraft_nickname
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
@@ -270,6 +272,53 @@ def leaderboard(
     }
     cache.set_json(key, out, ttl_seconds=60)
     return out
+
+
+def _profile_payload(session: Session, server: GameServer, nick: str) -> dict:
+    cache = RedisCacheService()
+    _, normalized = normalize_minecraft_nickname(nick)
+    key = f"royale_profile:{server.id}:{normalized}"
+    cached = cache.get_json(key)
+    if cached:
+        return cached
+    rows = (
+        session.query(RoyaleMatch)
+        .filter(RoyaleMatch.server_slug == server.slug, RoyaleMatch.aborted.is_(False))
+        .order_by(RoyaleMatch.started_at.desc().nullslast())
+        .limit(5000)
+        .all()
+    )
+    prof = _player_profile(rows, nick)
+    ranked = _standings(rows)["players"]
+    prof["rank"] = next((i + 1 for i, p in enumerate(ranked)
+                         if normalize_minecraft_nickname(str(p["name"]))[1] == normalized), None)
+    prof["total_players"] = len(ranked)
+    prof["server"] = server.slug
+    cache.set_json(key, prof, ttl_seconds=60)
+    return prof
+
+
+@public_router.get("/profile/{nick}")
+def public_profile(
+    nick: str,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(resolve_server)],
+    response: Response,
+) -> dict:
+    """One player's all-time Royale profile — level, wins, kills, rank — for the site and game."""
+    response.headers["Cache-Control"] = "public, max-age=60"
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return _profile_payload(session, server, nick)
+
+
+@plugin_router.get("/profile/{nick}")
+def plugin_profile(
+    nick: str,
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> dict:
+    """The player's Royale profile for the in-game /stats card."""
+    return _profile_payload(session, server, nick)
 
 
 @public_router.get("/live")
@@ -720,6 +769,61 @@ KILL_POINTS = 1
 def _points(place: int, kills: int) -> int:
     base = PLACE_POINTS[place - 1] if 1 <= place <= len(PLACE_POINTS) else 0
     return base + kills * KILL_POINTS
+
+
+def _level(xp: int) -> int:
+    """A gentle progression curve: level grows with the square root of total points."""
+    return int(math.sqrt(max(0, xp) / 25.0)) + 1
+
+
+def _player_profile(rows: list[RoyaleMatch], nick: str) -> dict:
+    """Aggregate one player's all-time Royale stats across their finished games."""
+    _, normalized = normalize_minecraft_nickname(nick)
+    name = nick
+    games = wins = top3 = kills = deaths = assists = chests = alive = points = 0
+    damage = 0.0
+    best: int | None = None
+    for row in rows:
+        for p in (row.payload or {}).get("players") or []:
+            pn = str(p.get("name") or "")
+            if not pn or normalize_minecraft_nickname(pn)[1] != normalized:
+                continue
+            name = pn
+            place, k = int(p.get("placement") or 0), int(p.get("kills") or 0)
+            games += 1
+            kills += k
+            deaths += int(p.get("deaths") or 0)
+            assists += int(p.get("assists") or 0)
+            chests += int(p.get("chests_opened") or 0)
+            alive += int(p.get("alive_seconds") or 0)
+            damage += float(p.get("damage_dealt") or 0)
+            points += int(p["points"]) if p.get("points") is not None else _points(place, k)
+            if place == 1:
+                wins += 1
+            if 1 <= place <= 3:
+                top3 += 1
+            if place > 0:
+                best = place if best is None else min(best, place)
+    return {
+        "name": name,
+        "exists": games > 0,
+        "games": games,
+        "wins": wins,
+        "top3": top3,
+        "kills": kills,
+        "deaths": deaths,
+        "assists": assists,
+        "kd": round(kills / deaths, 2) if deaths else float(kills),
+        "damage": round(damage, 1),
+        "chests": chests,
+        "points": points,
+        "best_place": best,
+        "win_rate": round(wins / games, 3) if games else 0.0,
+        "playtime_seconds": alive,
+        "level": _level(points),
+        "xp": points,
+        "next_level_xp": int((_level(points) ** 2) * 25),
+    }
 
 
 def _day(text: str | None) -> date:
