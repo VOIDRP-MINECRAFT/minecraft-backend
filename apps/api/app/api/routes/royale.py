@@ -17,6 +17,7 @@ import io
 import json
 import os
 import re
+import secrets
 from datetime import date, datetime, time, timedelta
 from typing import Annotated, Any
 from uuid import UUID
@@ -146,6 +147,80 @@ def plugin_leaderboard(
     }
     cache.set_json(key, out, ttl_seconds=60)
     return out
+
+
+# ── Portal (Origins → Royale, seamless, no re-login) ────────────────────────────
+#
+# A player standing in the portal on Origins is already authorised there. The Origins plugin
+# mints a one-time ticket here (with Origins' secret), stores it in a cookie on the client and
+# calls player.transfer() to the Royale host. The client reconnects to Royale carrying the
+# cookie; the Royale plugin reads it and redeems the ticket here (with Royale's secret) to let
+# the player in already authorised. The ticket is a random, single-use value kept in Redis for
+# ~30 s — it cannot be forged or reused, and no cross-server signing is needed. Minting is
+# limited to our own servers (not partner/external ones). Direct connections (no cookie) fall
+# back to the normal login on the Royale side; nothing here touches the Origins auth.
+
+_PORTAL_TTL = 30  # seconds a minted ticket is valid
+
+
+def _portal_key(token: str) -> str:
+    return f"royale_portal:{token}"
+
+
+class PortalTicketIn(BaseModel):
+    uuid: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=1, max_length=32)
+
+
+@plugin_router.post("/portal-ticket")
+def portal_ticket(
+    body: PortalTicketIn,
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> dict:
+    """Origins mints a one-time portal ticket for a player it already authorised."""
+    if server.is_external:
+        # Only our own servers may vouch for a player's identity to Royale.
+        raise HTTPException(status_code=403, detail="This server may not mint portal tickets")
+    token = secrets.token_urlsafe(32)
+    RedisCacheService().set_json(
+        _portal_key(token),
+        {
+            "uuid": str(body.uuid),
+            "name": body.name,
+            "from_slug": server.slug,
+            "from_id": str(server.id),
+            "created": datetime.now(tz=MOSCOW).isoformat(),
+        },
+        ttl_seconds=_PORTAL_TTL,
+    )
+    return {"ok": True, "token": token, "ttl": _PORTAL_TTL}
+
+
+class PortalRedeemIn(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+    uuid: str | None = Field(default=None, max_length=40)
+
+
+@plugin_router.post("/portal-redeem")
+def portal_redeem(
+    body: PortalRedeemIn,
+    server: Annotated[GameServer, Depends(require_game_server)],
+) -> dict:
+    """Royale redeems the ticket the client carried in its cookie. Single use."""
+    cache = RedisCacheService()
+    key = _portal_key(body.token)
+    data = cache.get_json(key)
+    if not data:
+        return {"ok": False, "reason": "expired"}
+    cache.delete(key)  # one-time: gone the instant it is read
+    if body.uuid and str(body.uuid) != str(data.get("uuid")):
+        return {"ok": False, "reason": "mismatch"}
+    return {
+        "ok": True,
+        "uuid": data.get("uuid"),
+        "name": data.get("name"),
+        "from": data.get("from_slug"),
+    }
 
 
 def _settings(server: GameServer) -> dict:
