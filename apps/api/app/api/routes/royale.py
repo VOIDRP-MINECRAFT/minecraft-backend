@@ -237,6 +237,15 @@ def _settings(server: GameServer) -> dict:
     out["mode"] = "public" if raw.get("mode") == "public" else "event"
     if isinstance(raw.get("min_players"), int) and 2 <= raw["min_players"] <= 40:
         out["min_players"] = raw["min_players"]
+    r = raw.get("rewards")
+    if isinstance(r, dict):
+        out["rewards"] = {
+            "enabled": bool(r.get("enabled")),
+            "coins_win": int(r.get("coins_win") or 0),
+            "coins_kill": int(r.get("coins_kill") or 0),
+            "coins_placement": {str(k): int(v) for k, v in (r.get("coins_placement") or {}).items()
+                                if str(k).isdigit() and 1 <= int(k) <= 8},
+        }
     return out
 
 
@@ -392,6 +401,7 @@ def royale_settings(server: Annotated[GameServer, Depends(resolve_server)]) -> d
         "in_game": live_state.get("state") not in (None, "lobby", "countdown"),
         "maps": maps,
         "map": current_map or live_state.get("map"),
+        "rewards": saved.get("rewards") or {"enabled": False, "coins_win": 0, "coins_kill": 0, "coins_placement": {}},
     }
 
 
@@ -407,11 +417,19 @@ def _maps(server: GameServer) -> tuple[list[str], str | None]:
     return [x.strip() for x in m.group(1).split(",") if x.strip()], m.group(2).strip()
 
 
+class RoyaleRewardsIn(BaseModel):
+    enabled: bool | None = None
+    coins_win: int | None = Field(default=None, ge=0, le=100000)
+    coins_kill: int | None = Field(default=None, ge=0, le=100000)
+    coins_placement: dict[str, int] | None = None
+
+
 class RoyaleSettingsIn(BaseModel):
     team_size: int | None = Field(default=None, ge=1, le=20)
     grace: int | None = Field(default=None, ge=0, le=1800)  # no-fight seconds at a game's start
     mode: str | None = Field(default=None, pattern="^(event|public)$")
     min_players: int | None = Field(default=None, ge=2, le=40)  # auto-start threshold in public mode
+    rewards: RoyaleRewardsIn | None = None  # Void Coin payouts, set from the admin
 
 
 @admin_router.put("/settings", dependencies=[Depends(require_any_permission("royale.control", "royale.manage"))])
@@ -436,6 +454,19 @@ def put_settings(
     if body.min_players is not None:
         royale["min_players"] = body.min_players
         meta["min_players"] = [before.get("min_players"), body.min_players]
+    if body.rewards is not None:
+        r = dict(royale.get("rewards") or {})
+        if body.rewards.enabled is not None:
+            r["enabled"] = body.rewards.enabled
+        if body.rewards.coins_win is not None:
+            r["coins_win"] = body.rewards.coins_win
+        if body.rewards.coins_kill is not None:
+            r["coins_kill"] = body.rewards.coins_kill
+        if body.rewards.coins_placement is not None:
+            r["coins_placement"] = {str(k): int(v) for k, v in body.rewards.coins_placement.items()
+                                    if str(k).isdigit() and 1 <= int(k) <= 8 and 0 <= int(v) <= 100000}
+        royale["rewards"] = r
+        meta["rewards"] = [before.get("rewards"), r]
     if not meta:
         raise HTTPException(status_code=400, detail="Нечего менять")
     integration = dict(server.integration_settings or {})
