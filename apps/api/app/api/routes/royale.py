@@ -117,6 +117,37 @@ async def receive_live(
     return {"ok": True, "settings": wanted} if wanted else {"ok": True}
 
 
+@plugin_router.get("/leaderboard")
+def plugin_leaderboard(
+    session: Annotated[Session, Depends(get_db_session)],
+    server: Annotated[GameServer, Depends(require_game_server)],
+    limit: int = Query(default=10, ge=1, le=30),
+) -> dict:
+    """All-time top players, for the hall-of-fame board the plugin shows in the lobby."""
+    cache = RedisCacheService()
+    key = f"royale_lb_plugin:{server.id}:{limit}"
+    cached = cache.get_json(key)
+    if cached:
+        return cached
+    rows = (
+        session.query(RoyaleMatch)
+        .filter(RoyaleMatch.server_slug == server.slug, RoyaleMatch.aborted.is_(False))
+        .order_by(RoyaleMatch.started_at.desc().nullslast())
+        .limit(2000)
+        .all()
+    )
+    data = _standings(rows)
+    out = {
+        "games": data["games"],
+        "players": [
+            {"name": p["name"], "points": p["points"], "wins": p["wins"], "kills": p["kills"], "games": p["games"]}
+            for p in data["players"][:limit]
+        ],
+    }
+    cache.set_json(key, out, ttl_seconds=60)
+    return out
+
+
 def _settings(server: GameServer) -> dict:
     """What the admin panel set for this server's game ({} = the plugin's config.yml rules)."""
     raw = (server.integration_settings or {}).get("royale") or {}
