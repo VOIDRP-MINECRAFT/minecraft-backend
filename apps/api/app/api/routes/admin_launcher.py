@@ -20,7 +20,7 @@ from apps.api.app.dependencies.admin import (
     get_current_staff_user,
     require_permission,
 )
-from apps.api.app.models.launcher_crash_report import LauncherCrashReport
+from apps.api.app.models.launcher_crash_report import LauncherBootReport, LauncherCrashReport
 from apps.api.app.models.user import User
 
 router = APIRouter(prefix="/admin/launcher", tags=["admin", "launcher"])
@@ -155,3 +155,26 @@ def crash_stats(session: Annotated[Session, Depends(get_db_session)]) -> dict:
     versions.sort(key=lambda v: v["crashes"], reverse=True)
     total = sum(v["crashes"] for v in versions)
     return {"windowDays": 30, "total": total, "versions": versions}
+
+
+@router.get("/boot-reports", dependencies=[Depends(require_permission("launcher.view"))])
+def boot_reports(session: Annotated[Session, Depends(get_db_session)], limit: int = 50) -> dict:
+    """Launchers that could not start (POST /launcher/boot-report), newest first."""
+    rows = session.scalars(
+        select(LauncherBootReport).order_by(LauncherBootReport.created_at.desc()).limit(max(1, min(limit, 200)))
+    ).all()
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+                "createdAt": r.created_at.isoformat() if r.created_at else None,
+                "launcherVersion": r.launcher_version,
+                "osName": r.os_name,
+                "error": r.error,
+                "hint": r.hint,
+                "report": r.report,
+                "mainLogTail": r.main_log_tail,
+            }
+            for r in rows
+        ]
+    }
